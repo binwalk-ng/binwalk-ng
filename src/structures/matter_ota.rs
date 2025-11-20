@@ -130,7 +130,7 @@ fn parse_tlv_element(data: &[u8]) -> Result<(Element, usize), StructureError> {
         )),
         0b0_0100..=0b0_0111 => {
             // Unsigned integer
-            let structure = &vec![("field", field_width_type)];
+            let structure = &[("field", field_width_type)];
             let result = common::parse(field_data, structure, "little")?;
             Ok((
                 Element {
@@ -142,7 +142,7 @@ fn parse_tlv_element(data: &[u8]) -> Result<(Element, usize), StructureError> {
         }
         0b0_1100..=0b0_1111 => {
             // UTF-8 String
-            let structure = &vec![("string_length", field_width_type)];
+            let structure = &[("string_length", field_width_type)];
             let result = common::parse(field_data, structure, "little")?;
             let string_length = result["string_length"] as usize;
             let string_data = field_data
@@ -163,7 +163,7 @@ fn parse_tlv_element(data: &[u8]) -> Result<(Element, usize), StructureError> {
         }
         0b1_0000..=0b1_0011 => {
             // Octet string
-            let structure = &vec![("octet_string_length", field_width_type)];
+            let structure = &[("octet_string_length", field_width_type)];
             let result = common::parse(field_data, structure, "little")?;
             let octet_string_length = result["octet_string_length"] as usize;
             let octet_string_data = field_data
