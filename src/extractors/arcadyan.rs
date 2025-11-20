@@ -76,40 +76,27 @@ fn arcadyan_deobfuscator(obfuscated_data: &[u8]) -> Vec<u8> {
 
     const P3_START: usize = BLOCK2_END;
 
-    let mut deobfuscated_data: Vec<u8> = vec![];
+    let mut deobfuscated_data: Vec<u8> = Vec::with_capacity(obfuscated_data.len());
 
     // Get the "parts" and "blocks" of the obfuscated header
-    let p1 = obfuscated_data[P1_START..P1_END].to_vec();
-    let b1 = obfuscated_data[BLOCK1_START..BLOCK1_END].to_vec();
-    let p2 = obfuscated_data[P2_START..P2_END].to_vec();
-    let b2 = obfuscated_data[BLOCK2_START..BLOCK2_END].to_vec();
-    let p3 = obfuscated_data[P3_START..].to_vec();
+    let p1 = &obfuscated_data[P1_START..P1_END];
+    let b1 = &obfuscated_data[BLOCK1_START..BLOCK1_END];
+    let p2 = &obfuscated_data[P2_START..P2_END];
+    let b2 = &obfuscated_data[BLOCK2_START..BLOCK2_END];
+    let p3 = &obfuscated_data[P3_START..];
 
     // Swap "block1" and "block2"
-    deobfuscated_data.extend(p1);
-    deobfuscated_data.extend(b2);
-    deobfuscated_data.extend(p2);
-    deobfuscated_data.extend(b1);
-    deobfuscated_data.extend(p3);
+    deobfuscated_data.extend_from_slice(p1);
+    deobfuscated_data.extend_from_slice(b2);
+    deobfuscated_data.extend_from_slice(p2);
+    deobfuscated_data.extend_from_slice(b1);
+    deobfuscated_data.extend_from_slice(p3);
 
-    // Nibble swap each byte in what is now "block1"
-    for swapped_byte in deobfuscated_data
-        .iter_mut()
-        .take(BLOCK1_END)
-        .skip(BLOCK1_START)
-    {
-        *swapped_byte = ((*swapped_byte & 0x0F) << 4) + ((*swapped_byte & 0xF0) >> 4);
-    }
-
-    let mut i: usize = BLOCK1_START;
-
-    // Byte swap each byte in what is now "block1"
-    while i < BLOCK1_END {
-        let b1 = deobfuscated_data[i];
-        let b2 = deobfuscated_data[i + 1];
-        deobfuscated_data[i] = b2;
-        deobfuscated_data[i + 1] = b1;
-        i += 2;
+    // Swap nibbles and pairs of bytes in what is now block 1
+    for chunk in deobfuscated_data[BLOCK1_START..BLOCK1_END].chunks_exact_mut(2) {
+        let orig_0 = chunk[0];
+        chunk[0] = chunk[1].rotate_left(4);
+        chunk[1] = orig_0.rotate_left(4);
     }
 
     deobfuscated_data
