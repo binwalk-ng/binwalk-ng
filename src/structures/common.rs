@@ -1,5 +1,9 @@
+use core::fmt;
 use log::error;
 use std::collections::HashMap;
+use std::marker::PhantomData;
+use zerocopy::byteorder::{BE, LE};
+use zerocopy::{FromBytes, Immutable, KnownLayout, Unaligned};
 
 /*
  * Note that all values returned by the parse() function are of type usize; this is a concious decision.
@@ -12,6 +16,59 @@ compile_error!("compilation is only allowed for 64-bit targets");
 /// Error return value of structure parsers
 #[derive(Debug, Clone)]
 pub struct StructureError;
+
+/// Generic 24-bit unsigned integer (3 bytes) with configurable endianness
+///
+/// Use `U24<LE>` for little-endian or `U24<BE>` for big-endian.
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct U24<O>([u8; 3], PhantomData<O>);
+
+impl U24<LE> {
+    /// Create a new U24 from a u32 value, returning None if the value is too large for a u24
+    pub const fn new(val: u32) -> Option<Self> {
+        // little endian, the last byte is the most significant and should be zero for a u24
+        let [b1, b2, b3, 0] = val.to_le_bytes() else {
+            return None;
+        };
+        Some(Self([b1, b2, b3], PhantomData))
+    }
+
+    /// Get the value as a u32 (little-endian)
+    pub const fn get(self) -> u32 {
+        // little endian, the last byte is the most significant and should be zero for a u24
+        u32::from_le_bytes([self.0[0], self.0[1], self.0[2], 0])
+    }
+}
+
+impl U24<BE> {
+    /// Create a new U24 from a u32 value, returning None if the value is too large for a u24
+    pub const fn new(val: u32) -> Option<Self> {
+        // big endian, the first byte is the most significant and should be zero for a u24
+        let [0, b1, b2, b3] = val.to_le_bytes() else {
+            return None;
+        };
+        Some(Self([b1, b2, b3], PhantomData))
+    }
+
+    /// Get the value as a u32 (big-endian)
+    pub const fn get(self) -> u32 {
+        // big endian, the first byte is the most significant and should be zero for a u24
+        u32::from_be_bytes([0, self.0[0], self.0[1], self.0[2]])
+    }
+}
+
+impl fmt::Debug for U24<LE> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Debug::fmt(&self.get(), f)
+    }
+}
+
+impl fmt::Debug for U24<BE> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Debug::fmt(&self.get(), f)
+    }
+}
 
 /// Function to parse basic C-style data structures.
 ///
