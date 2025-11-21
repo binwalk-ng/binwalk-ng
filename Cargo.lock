@@ -214,6 +214,7 @@ dependencies = [
  "uuid",
  "walkdir",
  "xxhash-rust",
+ "zerocopy",
 ]
 
 [[package]]
