@@ -38,7 +38,7 @@ pub fn extract_dtb(
     offset: usize,
     output_directory: Option<&str>,
 ) -> ExtractionResult {
-    let mut heirerarchy: Vec<String> = Vec::new();
+    let mut hierarchy: Vec<String> = Vec::new();
 
     let mut result = ExtractionResult {
         ..Default::default()
@@ -58,15 +58,15 @@ pub fn extract_dtb(
                 // Parse the next DTB node entry
                 let node = parse_dtb_node(&dtb_header, dtb_data, entry_offset);
 
-                // Beginning of a node, add it to the heirerarchy list
+                // Beginning of a node, add it to the hierarchy list
                 if node.begin {
                     if !node.name.is_empty() {
-                        heirerarchy.push(node.name.clone());
+                        hierarchy.push(node.name.clone());
                     }
-                // End of a node, remove it from the heirerarchy list
+                // End of a node, remove it from the hierarchy list
                 } else if node.end {
-                    if !heirerarchy.is_empty() {
-                        heirerarchy.pop();
+                    if !hierarchy.is_empty() {
+                        hierarchy.pop();
                     }
                 // End of the DTB structure, return success only if the whole DTB structure was parsed successfully up to the EOF marker
                 } else if node.eof {
@@ -77,7 +77,7 @@ pub fn extract_dtb(
                 } else if node.property {
                     if output_directory.is_some() {
                         let chroot = Chroot::new(output_directory);
-                        let dir_path = heirerarchy.join(std::path::MAIN_SEPARATOR_STR);
+                        let dir_path = hierarchy.join(std::path::MAIN_SEPARATOR_STR);
                         let file_path = chroot.safe_path_join(&dir_path, &node.name);
 
                         if !chroot.create_directory(dir_path) {
