@@ -1,4 +1,4 @@
-use binwalk::{AnalysisResults, Binwalk};
+use binwalk_ng::{AnalysisResults, Binwalk};
 
 /// Convenience function for running an integration test against the specified file, with the provided signature filter.
 /// Assumes that there will be one signature result and one extraction result at file offset 0.
