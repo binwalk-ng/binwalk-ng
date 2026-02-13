@@ -87,7 +87,6 @@ RUN apt-get update -y \
     tar \
     sleuthkit \
     cabextract \
-    git \
     lz4 \
     lzop \
     unrar \
