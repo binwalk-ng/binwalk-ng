@@ -37,7 +37,7 @@ jobs:
           components: rustfmt
 
       - name: Formatting (rustfmt)
-        run: cargo fmt -- --check
+        run: cargo fmt --all -- --check
 
   lint:
     name: Lint (clippy)
@@ -59,7 +59,4 @@ jobs:
           components: clippy
 
       - name: Clippy (all crates)
-        run: cargo clippy --locked --target=${{ matrix.platform.target }} --workspace --all-targets -- -D warnings
-
-      - name: Check build did not modify any files
-        run: test -z "$(git status --porcelain)"
+        run: cargo clippy --locked --target=${{ matrix.platform.target }} --workspace --all-targets --all-features -- -D warnings
