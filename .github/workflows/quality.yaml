@@ -10,10 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Code checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Link Checker
-        uses: lycheeverse/lychee-action@v1.8.0
+        uses: lycheeverse/lychee-action@v2.7.0
         with:
           fail: true
 
@@ -28,7 +28,7 @@ jobs:
 
     steps:
       - name: Code checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain (stable)
         uses: dtolnay/rust-toolchain@stable
@@ -50,7 +50,7 @@ jobs:
 
     steps:
       - name: Code checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain (stable)
         uses: dtolnay/rust-toolchain@stable

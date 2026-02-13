@@ -37,7 +37,7 @@ jobs:
     runs-on: ${{ matrix.platform.runs-on }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       
       - name: Update CHANGELOG
         if: startsWith(github.ref, 'refs/tags/')
@@ -78,7 +78,7 @@ jobs:
       
       - name: Commit CHANGELOG.md
         if: startsWith(github.ref, 'refs/tags/') && matrix.platform.os-name == 'Linux-x86_64'
-        uses: stefanzweifel/git-auto-commit-action@v4
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           branch: master
           commit_message: 'docs: update CHANGELOG.md for ${{ github.ref_name }} [skip ci]'
