@@ -1,8 +1,13 @@
 name: Quality Checks
 on:
   pull_request:
-    branches:
-      - "*"
+    branches: [ master ]
+  push:
+    branches: [ master ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lychee-link-check:
