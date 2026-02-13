@@ -1,5 +1,5 @@
 ## Scratch build stage
-FROM ubuntu:25.04 AS build
+FROM ubuntu:25.10 AS build
 
 ARG BUILD_DIR="/tmp"
 ARG BINWALK_BUILD_DIR="${BUILD_DIR}/binwalk"
@@ -50,7 +50,7 @@ RUN apt-get update -y \
 
 
 ## Prod image build stage
-FROM ubuntu:25.04
+FROM ubuntu:25.10
 
 ARG BUILD_DIR="/tmp"
 ARG BINWALK_BUILD_DIR="${BUILD_DIR}/binwalk"
@@ -70,7 +70,7 @@ COPY --from=build ${BINWALK_BUILD_DIR}/${SASQUATCH_FILENAME} ${BUILD_DIR}/${SASQ
 COPY --from=build /usr/local/bin/lzfse ${BUILD_DIR}/dumpifs/dumpifs ${BUILD_DIR}/dmg2img/dmg2img ${BUILD_DIR}/dmg2img/vfdecrypt ${BINWALK_BUILD_DIR}/target/release/binwalk /usr/local/bin/
 
 # Install dependencies, create default working directory, and remove clang & friends.
-# clang is needed to build python-lzo and vmlinux-to-elf, but it's not needed
+# clang is needed to build minilzo, but it's not needed
 # afterward, so it's safe to remove and reduces the image size by ~400MB.
 # Those two packages could be built in the scratch stage and copied over from it,
 # but that would require that I untangle the Eldritch Horror that is the
@@ -85,11 +85,8 @@ RUN apt-get update -y \
     zstd \
     srecord \
     tar \
-    unzip \
     sleuthkit \
     cabextract \
-    curl \
-    wget \
     git \
     lz4 \
     lzop \
@@ -113,7 +110,7 @@ RUN apt-get update -y \
     clang \
     && dpkg -i ${BUILD_DIR}/${SASQUATCH_FILENAME} \
     && rm ${BUILD_DIR}/${SASQUATCH_FILENAME} \
-    && CC=clang uv pip install uefi_firmware jefferson ubi-reader git+https://github.com/marin-m/vmlinux-to-elf \
+    && CC=clang uv pip install uefi_firmware jefferson ubi-reader vmlinux-to-elf \
     && uv cache clean \
     && apt-get purge clang -y \
     && apt autoremove -y \
