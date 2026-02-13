@@ -34,8 +34,8 @@ impl JsonLogger {
             ..Default::default()
         };
 
-        if log_file.is_some() {
-            new_instance.json_file = Some(log_file.unwrap().clone());
+        if let Some(log_file) = log_file {
+            new_instance.json_file = Some(log_file.clone());
         }
 
         new_instance

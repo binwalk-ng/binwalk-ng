@@ -40,10 +40,12 @@ pub fn xz_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Sig
                 let dry_run = lzma_decompress(file_data, next_offset, None);
 
                 // If dry run was a success, update the offset and size fields
-                if dry_run.success && dry_run.size.is_some() {
+                if dry_run.success
+                    && let Some(size) = dry_run.size
+                {
                     previous_offset = Some(next_offset);
-                    next_offset += dry_run.size.unwrap();
-                    result.size += dry_run.size.unwrap();
+                    next_offset += size;
+                    result.size += size;
                 // Else, report that the data is malformed and stop processing XZ streams
                 } else {
                     // 7z may be able to at least partially extract malformed data streams
