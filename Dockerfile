@@ -4,7 +4,7 @@ FROM ubuntu:25.10 AS build
 ARG BUILD_DIR="/tmp"
 ARG BINWALK_BUILD_DIR="${BUILD_DIR}/binwalk"
 ARG SASQUATCH_FILENAME="sasquatch_1.0.deb"
-ARG SASQUATCH_BASE_FILE_URL="https://github.com/onekey-sec/sasquatch/releases/download/sasquatch-v4.5.1-5/"
+ARG SASQUATCH_BASE_FILE_URL="https://github.com/onekey-sec/sasquatch/releases/download/sasquatch-v4.5.1-6/"
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
