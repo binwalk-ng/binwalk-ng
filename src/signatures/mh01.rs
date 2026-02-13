@@ -24,17 +24,18 @@ pub fn mh01_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
     if let Ok(mh01_header) = parse_mh01_header(&file_data[offset..]) {
         // The encrypted data is expected to be in OpenSSL file format, so parse that too
         if let Some(crypt_data) = file_data.get(offset + mh01_header.encrypted_data_offset..)
-            && let Ok(openssl_signature) = openssl_crypt_parser(crypt_data, 0) {
-                result.size = mh01_header.total_size;
-                result.description = format!(
-                    "{}, signed, encrypted with {}, IV: {}, total size: {} bytes",
-                    result.description,
-                    openssl_signature.description,
-                    mh01_header.iv,
-                    mh01_header.total_size,
-                );
-                return Ok(result);
-            }
+            && let Ok(openssl_signature) = openssl_crypt_parser(crypt_data, 0)
+        {
+            result.size = mh01_header.total_size;
+            result.description = format!(
+                "{}, signed, encrypted with {}, IV: {}, total size: {} bytes",
+                result.description,
+                openssl_signature.description,
+                mh01_header.iv,
+                mh01_header.total_size,
+            );
+            return Ok(result);
+        }
     }
 
     Err(SignatureError)

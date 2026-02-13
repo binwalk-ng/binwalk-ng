@@ -148,9 +148,10 @@ pub fn parse_gif_extension(extension_data: &[u8]) -> Result<usize, StructureErro
 
         // Parse all sub-block data to determine the total size of this extension block
         if let Some(sub_block_data) = extension_data.get(sub_blocks_offset..)
-            && let Ok(sub_blocks_size) = parse_gif_sub_blocks(sub_block_data) {
-                return Ok(sub_blocks_offset + sub_blocks_size);
-            }
+            && let Ok(sub_blocks_size) = parse_gif_sub_blocks(sub_block_data)
+        {
+            return Ok(sub_blocks_offset + sub_blocks_size);
+        }
     }
 
     Err(StructureError)

@@ -43,40 +43,41 @@ pub fn wince_dump(
 
     // Parse the file header
     if let Some(wince_data) = file_data.get(offset..)
-        && let Ok(wince_header) = parse_wince_header(wince_data) {
-            // Get the block data, immediately following the file header
-            if let Some(wince_block_data) = wince_data.get(wince_header.header_size..) {
-                // Process all blocks in the block data
-                if let Some(data_blocks) = process_wince_blocks(wince_block_data) {
-                    // The first block entry's address should equal the WinCE header's base address
-                    if data_blocks.entries[0].address == wince_header.base_address {
-                        // Block processing was successful
-                        result.success = true;
-                        result.size = Some(wince_header.header_size + data_blocks.total_size);
+        && let Ok(wince_header) = parse_wince_header(wince_data)
+    {
+        // Get the block data, immediately following the file header
+        if let Some(wince_block_data) = wince_data.get(wince_header.header_size..) {
+            // Process all blocks in the block data
+            if let Some(data_blocks) = process_wince_blocks(wince_block_data) {
+                // The first block entry's address should equal the WinCE header's base address
+                if data_blocks.entries[0].address == wince_header.base_address {
+                    // Block processing was successful
+                    result.success = true;
+                    result.size = Some(wince_header.header_size + data_blocks.total_size);
 
-                        // If extraction was requested, extract each block to a file on disk
-                        if output_directory.is_some() {
-                            let chroot = Chroot::new(output_directory);
+                    // If extraction was requested, extract each block to a file on disk
+                    if output_directory.is_some() {
+                        let chroot = Chroot::new(output_directory);
 
-                            for block in data_blocks.entries {
-                                let block_file_name = format!("{:X}.bin", block.address);
+                        for block in data_blocks.entries {
+                            let block_file_name = format!("{:X}.bin", block.address);
 
-                                // If file carving fails, report a failure to extract
-                                if !chroot.carve_file(
-                                    block_file_name,
-                                    wince_block_data,
-                                    block.offset,
-                                    block.size,
-                                ) {
-                                    result.success = false;
-                                    break;
-                                }
+                            // If file carving fails, report a failure to extract
+                            if !chroot.carve_file(
+                                block_file_name,
+                                wince_block_data,
+                                block.offset,
+                                block.size,
+                            ) {
+                                result.success = false;
+                                break;
                             }
                         }
                     }
                 }
             }
         }
+    }
 
     result
 }

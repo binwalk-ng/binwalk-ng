@@ -24,17 +24,17 @@ pub fn lzop_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
 
     // Parse the LZOP file header
     if let Ok(lzop_header) = parse_lzop_file_header(&file_data[offset..])
-        && let Some(lzop_data) = file_data.get(offset + lzop_header.header_size..) {
-            // Get the size of the compressed LZO data
-            if let Ok(data_size) = get_lzo_data_size(lzop_data, lzop_header.block_checksum_present)
-            {
-                // Update the total size to include the LZO data
-                result.size = lzop_header.header_size + data_size;
-                result.description =
-                    format!("{}, total size: {} bytes", result.description, result.size);
-                return Ok(result);
-            }
+        && let Some(lzop_data) = file_data.get(offset + lzop_header.header_size..)
+    {
+        // Get the size of the compressed LZO data
+        if let Ok(data_size) = get_lzo_data_size(lzop_data, lzop_header.block_checksum_present) {
+            // Update the total size to include the LZO data
+            result.size = lzop_header.header_size + data_size;
+            result.description =
+                format!("{}, total size: {} bytes", result.description, result.size);
+            return Ok(result);
         }
+    }
 
     Err(SignatureError)
 }
@@ -75,10 +75,11 @@ fn get_lzo_data_size(
     if block_count >= MIN_BLOCK_COUNT {
         // Process the EOF marker that should come at the end of the data blocks
         if let Some(eof_marker_data) = lzo_data.get(data_size..)
-            && let Ok(eof_marker_size) = parse_lzop_eof_marker(eof_marker_data) {
-                data_size += eof_marker_size;
-                return Ok(data_size);
-            }
+            && let Ok(eof_marker_size) = parse_lzop_eof_marker(eof_marker_data)
+        {
+            data_size += eof_marker_size;
+            return Ok(data_size);
+        }
     }
 
     Err(SignatureError)

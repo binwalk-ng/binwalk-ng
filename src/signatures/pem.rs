@@ -87,18 +87,19 @@ pub fn pem_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
         // Do an extraction dry-run to validate that this PEM file looks sane
         let dry_run = pem::pem_carver(file_data, offset, None, None);
         if dry_run.success
-            && let Some(pem_size) = dry_run.size {
-                // Make sure the PEM data can be base64 decoded
-                if decode_pem_data(&file_data[offset..offset + pem_size]).is_ok() {
-                    // If the file starts and end with this PEM data, no sense in carving it out to another file on disk
-                    if offset == 0 && pem_size == file_data.len() {
-                        result.extraction_declined = true;
-                    }
-
-                    result.size = pem_size;
-                    return Ok(result);
+            && let Some(pem_size) = dry_run.size
+        {
+            // Make sure the PEM data can be base64 decoded
+            if decode_pem_data(&file_data[offset..offset + pem_size]).is_ok() {
+                // If the file starts and end with this PEM data, no sense in carving it out to another file on disk
+                if offset == 0 && pem_size == file_data.len() {
+                    result.extraction_declined = true;
                 }
+
+                result.size = pem_size;
+                return Ok(result);
             }
+        }
     }
 
     Err(SignatureError)

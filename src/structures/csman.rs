@@ -52,9 +52,10 @@ pub fn parse_csman_header(csman_data: &[u8]) -> Result<CSManHeader, StructureErr
             if result.compressed
                 && let Some(compressed_magic) =
                     csman_data.get(result.header_size..result.header_size + COMPRESSED_MAGIC.len())
-                    && compressed_magic != COMPRESSED_MAGIC {
-                        return Err(StructureError);
-                    }
+                && compressed_magic != COMPRESSED_MAGIC
+            {
+                return Err(StructureError);
+            }
 
             return Ok(result);
         }
@@ -105,11 +106,12 @@ pub fn parse_csman_entry(
         }
     } else if let Ok(entry_header) =
         common::parse(entry_data, &csman_last_entry_structure, endianness)
-        && entry_header["eof"] == EOF_TAG {
-            entry.eof = true;
-            entry.size = common::size(&csman_last_entry_structure);
-            return Ok(entry);
-        }
+        && entry_header["eof"] == EOF_TAG
+    {
+        entry.eof = true;
+        entry.size = common::size(&csman_last_entry_structure);
+        return Ok(entry);
+    }
 
     Err(StructureError)
 }

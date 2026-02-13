@@ -31,29 +31,30 @@ pub fn parse_bin_header(bin_hdr_data: &[u8]) -> Result<BINHeader, StructureError
 
     // Parse the header
     if let Some(structure_data) = bin_hdr_data.get(STRUCTURE_OFFSET..)
-        && let Ok(header) = common::parse(structure_data, &bin_hdr_structure, "little") {
-            // Make sure the reserved fields are NULL
-            if header["reserved1"] == 0 && header["reserved2"] == 0 && header["reserved3"] == 0 {
-                // Make sure the reported hardware ID is valid
-                if known_hardware_ids.contains_key(&header["hardware_id"]) {
-                    // Get the board ID string, which immediately preceeds the data structure
-                    if let Some(board_id_bytes) = bin_hdr_data.get(0..STRUCTURE_OFFSET) {
-                        let board_id = get_cstring(board_id_bytes);
+        && let Ok(header) = common::parse(structure_data, &bin_hdr_structure, "little")
+    {
+        // Make sure the reserved fields are NULL
+        if header["reserved1"] == 0 && header["reserved2"] == 0 && header["reserved3"] == 0 {
+            // Make sure the reported hardware ID is valid
+            if known_hardware_ids.contains_key(&header["hardware_id"]) {
+                // Get the board ID string, which immediately preceeds the data structure
+                if let Some(board_id_bytes) = bin_hdr_data.get(0..STRUCTURE_OFFSET) {
+                    let board_id = get_cstring(board_id_bytes);
 
-                        // The board ID string should be 4 bytes in length
-                        if board_id.len() == STRUCTURE_OFFSET {
-                            return Ok(BINHeader {
-                                board_id,
-                                hardware_revision: known_hardware_ids[&header["hardware_id"]]
-                                    .to_string(),
-                                firmware_version_major: header["firmware_version_major"],
-                                firmware_version_minor: header["firmware_version_minor"],
-                            });
-                        }
+                    // The board ID string should be 4 bytes in length
+                    if board_id.len() == STRUCTURE_OFFSET {
+                        return Ok(BINHeader {
+                            board_id,
+                            hardware_revision: known_hardware_ids[&header["hardware_id"]]
+                                .to_string(),
+                            firmware_version_major: header["firmware_version_major"],
+                            firmware_version_minor: header["firmware_version_minor"],
+                        });
                     }
                 }
             }
         }
+    }
 
     Err(StructureError)
 }

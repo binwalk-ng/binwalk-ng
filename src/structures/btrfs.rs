@@ -48,20 +48,20 @@ pub fn parse_btrfs_header(btrfs_data: &[u8]) -> Result<BTRFSHeader, StructureErr
 
     // Parse the header
     if let Some(btrfs_header_data) = btrfs_data.get(SUPERBLOCK_OFFSET..SUPERBLOCK_END)
-        && let Ok(btrfs_header) = common::parse(btrfs_header_data, &btrfs_structure, "little") {
-            // Validate the superblock CRC
-            if btrfs_header["header_checksum"] == (crc32c(&btrfs_header_data[CRC_START..]) as usize)
-            {
-                return Ok(BTRFSHeader {
-                    sector_size: btrfs_header["sector_size"],
-                    node_size: btrfs_header["node_size"],
-                    leaf_size: btrfs_header["leaf_size"],
-                    stripe_size: btrfs_header["stripe_size"],
-                    bytes_used: btrfs_header["bytes_used"],
-                    total_size: btrfs_header["total_bytes"],
-                });
-            }
+        && let Ok(btrfs_header) = common::parse(btrfs_header_data, &btrfs_structure, "little")
+    {
+        // Validate the superblock CRC
+        if btrfs_header["header_checksum"] == (crc32c(&btrfs_header_data[CRC_START..]) as usize) {
+            return Ok(BTRFSHeader {
+                sector_size: btrfs_header["sector_size"],
+                node_size: btrfs_header["node_size"],
+                leaf_size: btrfs_header["leaf_size"],
+                stripe_size: btrfs_header["stripe_size"],
+                bytes_used: btrfs_header["bytes_used"],
+                total_size: btrfs_header["total_bytes"],
+            });
         }
+    }
 
     Err(StructureError)
 }

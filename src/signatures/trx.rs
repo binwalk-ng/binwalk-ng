@@ -24,21 +24,22 @@ pub fn trx_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
     let dry_run = extract_trx_partitions(file_data, offset, None);
 
     if dry_run.success
-        && let Some(trx_total_size) = dry_run.size {
-            // Dry run successful, parse the TRX header and return a useful description
-            if let Ok(trx_header) = parse_trx_header(&file_data[offset..]) {
-                result.size = trx_total_size;
-                result.description = format!(
-                    "{}, version {}, partition count: {}, header size: {} bytes, total size: {} bytes",
-                    result.description,
-                    trx_header.version,
-                    trx_header.partitions.len(),
-                    trx_header.header_size,
-                    result.size
-                );
-                return Ok(result);
-            }
+        && let Some(trx_total_size) = dry_run.size
+    {
+        // Dry run successful, parse the TRX header and return a useful description
+        if let Ok(trx_header) = parse_trx_header(&file_data[offset..]) {
+            result.size = trx_total_size;
+            result.description = format!(
+                "{}, version {}, partition count: {}, header size: {} bytes, total size: {} bytes",
+                result.description,
+                trx_header.version,
+                trx_header.partitions.len(),
+                trx_header.header_size,
+                result.size
+            );
+            return Ok(result);
         }
+    }
 
     Err(SignatureError)
 }

@@ -46,18 +46,19 @@ pub fn extract_png_image(
 
     // Parse all the PNG chunks to determine the size of PNG data; first chunk starts immediately after the 8-byte PNG header
     if let Some(png_data) = file_data.get(offset + PNG_HEADER_LEN..)
-        && let Some(png_data_size) = get_png_data_size(png_data) {
-            // Total size is the size of the header plus the size of the data
-            result.size = Some(png_data_size + PNG_HEADER_LEN);
-            result.success = true;
+        && let Some(png_data_size) = get_png_data_size(png_data)
+    {
+        // Total size is the size of the header plus the size of the data
+        result.size = Some(png_data_size + PNG_HEADER_LEN);
+        result.success = true;
 
-            // If extraction was requested, extract the PNG
-            if output_directory.is_some() {
-                let chroot = Chroot::new(output_directory);
-                result.success =
-                    chroot.carve_file(OUTFILE_NAME, file_data, offset, result.size.unwrap());
-            }
+        // If extraction was requested, extract the PNG
+        if output_directory.is_some() {
+            let chroot = Chroot::new(output_directory);
+            result.success =
+                chroot.carve_file(OUTFILE_NAME, file_data, offset, result.size.unwrap());
         }
+    }
 
     result
 }

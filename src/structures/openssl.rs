@@ -10,11 +10,12 @@ pub fn parse_openssl_crypt_header(ssl_data: &[u8]) -> Result<OpenSSLCryptHeader,
     let ssl_structure = vec![("magic", "u64"), ("salt", "u64")];
 
     if let Ok(ssl_header) = common::parse(ssl_data, &ssl_structure, "big")
-        && ssl_header["salt"] != 0 {
-            return Ok(OpenSSLCryptHeader {
-                salt: ssl_header["salt"],
-            });
-        }
+        && ssl_header["salt"] != 0
+    {
+        return Ok(OpenSSLCryptHeader {
+            salt: ssl_header["salt"],
+        });
+    }
 
     Err(StructureError)
 }

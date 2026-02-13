@@ -27,24 +27,25 @@ pub fn android_sparse_parser(
     let dry_run = extract_android_sparse(file_data, offset, None);
 
     if dry_run.success
-        && let Some(total_size) = dry_run.size {
-            // Dry-run went OK, parse the header to get some useful info to report
-            if let Ok(header) = parse_android_sparse_header(&file_data[offset..]) {
-                // Update reported size and description
-                result.size = total_size;
-                result.description = format!(
-                    "{}, version {}.{}, header size: {}, block size: {}, chunk count: {}, total size: {} bytes",
-                    result.description,
-                    header.major_version,
-                    header.minor_version,
-                    header.header_size,
-                    header.block_size,
-                    header.chunk_count,
-                    total_size
-                );
-                return Ok(result);
-            }
+        && let Some(total_size) = dry_run.size
+    {
+        // Dry-run went OK, parse the header to get some useful info to report
+        if let Ok(header) = parse_android_sparse_header(&file_data[offset..]) {
+            // Update reported size and description
+            result.size = total_size;
+            result.description = format!(
+                "{}, version {}.{}, header size: {}, block size: {}, chunk count: {}, total size: {} bytes",
+                result.description,
+                header.major_version,
+                header.minor_version,
+                header.header_size,
+                header.block_size,
+                header.chunk_count,
+                total_size
+            );
+            return Ok(result);
         }
+    }
 
     Err(SignatureError)
 }

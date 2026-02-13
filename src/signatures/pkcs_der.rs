@@ -52,11 +52,12 @@ pub fn der_hash_parser(file_data: &[u8], offset: usize) -> Result<SignatureResul
         let hash_end = hash_start + magic.len();
 
         if let Some(hash_bytes) = file_data.get(hash_start..hash_end)
-            && hash_bytes == magic {
-                result.size = magic.len();
-                result.description = format!("{}, {}", result.description, name);
-                return Ok(result);
-            }
+            && hash_bytes == magic
+        {
+            result.size = magic.len();
+            result.description = format!("{}, {}", result.description, name);
+            return Ok(result);
+        }
     }
 
     Err(SignatureError)

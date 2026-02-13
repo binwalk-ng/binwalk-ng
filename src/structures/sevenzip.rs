@@ -33,16 +33,17 @@ pub fn parse_7z_header(sevenzip_data: &[u8]) -> Result<SevenZipHeader, Structure
     if let Ok(sevenzip_header) = common::parse(sevenzip_data, &sevenzip_structure, "little") {
         // Validate header CRC, which is calculated over the 'next_header_offset', 'next_header_size', and 'next_header_crc' values
         if let Some(crc_data) = sevenzip_data.get(SEVENZIP_CRC_START..SEVENZIP_HEADER_SIZE)
-            && crc32(crc_data) == (sevenzip_header["header_crc"] as u32) {
-                return Ok(SevenZipHeader {
-                    header_size: SEVENZIP_HEADER_SIZE,
-                    major_version: sevenzip_header["major_version"],
-                    minor_version: sevenzip_header["minor_version"],
-                    next_header_crc: sevenzip_header["next_header_crc"],
-                    next_header_size: sevenzip_header["next_header_size"],
-                    next_header_offset: sevenzip_header["next_header_offset"],
-                });
-            }
+            && crc32(crc_data) == (sevenzip_header["header_crc"] as u32)
+        {
+            return Ok(SevenZipHeader {
+                header_size: SEVENZIP_HEADER_SIZE,
+                major_version: sevenzip_header["major_version"],
+                minor_version: sevenzip_header["minor_version"],
+                next_header_crc: sevenzip_header["next_header_crc"],
+                next_header_size: sevenzip_header["next_header_size"],
+                next_header_offset: sevenzip_header["next_header_offset"],
+            });
+        }
     }
 
     Err(StructureError)

@@ -55,32 +55,33 @@ pub fn parse_apfs_header(apfs_data: &[u8]) -> Result<APFSHeader, StructureError>
 
     // Parse the header
     if let Some(apfs_structure_data) = apfs_data.get(apfs_struct_start..apfs_struct_end)
-        && let Ok(apfs_header) = common::parse(apfs_structure_data, &apfs_structure, "little") {
-            // Simple sanity check on the reported block data
-            if apfs_header["block_size"] != 0 && apfs_header["block_count"] != 0 {
-                // Sanity check the feature flags
-                if allowed_feature_flags.contains(&apfs_header["nx_features"])
-                    && allowed_ro_compat_flags.contains(&apfs_header["nx_ro_compat_features"])
-                    && allowed_incompat_flags.contains(&apfs_header["nx_incompat_features"])
-                {
-                    // The test_type field *must* be NULL
-                    if apfs_header["nx_xp_test_type"] == 0 {
-                        // Calculate the file system count; this is max_file_systems divided by 512, rounded up to nearest whole
-                        let fs_count = ((apfs_header["nx_xp_max_file_systems"] as f32)
-                            / (FS_COUNT_BLOCK_SIZE as f32))
-                            .ceil() as usize;
+        && let Ok(apfs_header) = common::parse(apfs_structure_data, &apfs_structure, "little")
+    {
+        // Simple sanity check on the reported block data
+        if apfs_header["block_size"] != 0 && apfs_header["block_count"] != 0 {
+            // Sanity check the feature flags
+            if allowed_feature_flags.contains(&apfs_header["nx_features"])
+                && allowed_ro_compat_flags.contains(&apfs_header["nx_ro_compat_features"])
+                && allowed_incompat_flags.contains(&apfs_header["nx_incompat_features"])
+            {
+                // The test_type field *must* be NULL
+                if apfs_header["nx_xp_test_type"] == 0 {
+                    // Calculate the file system count; this is max_file_systems divided by 512, rounded up to nearest whole
+                    let fs_count = ((apfs_header["nx_xp_max_file_systems"] as f32)
+                        / (FS_COUNT_BLOCK_SIZE as f32))
+                        .ceil() as usize;
 
-                        // Sanity check the file system count
-                        if fs_count > 0 && fs_count <= MAX_FS_COUNT {
-                            return Ok(APFSHeader {
-                                block_size: apfs_header["block_size"],
-                                block_count: apfs_header["block_count"],
-                            });
-                        }
+                    // Sanity check the file system count
+                    if fs_count > 0 && fs_count <= MAX_FS_COUNT {
+                        return Ok(APFSHeader {
+                            block_size: apfs_header["block_size"],
+                            block_count: apfs_header["block_count"],
+                        });
                     }
                 }
             }
         }
+    }
 
     Err(StructureError)
 }

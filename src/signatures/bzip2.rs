@@ -32,12 +32,12 @@ pub fn bzip2_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
     let dry_run = bzip2_decompressor(file_data, offset, None);
 
     if dry_run.success
-        && let Some(bzip2_size) = dry_run.size {
-            result.size = bzip2_size;
-            result.description =
-                format!("{}, total size: {} bytes", result.description, result.size);
-            return Ok(result);
-        }
+        && let Some(bzip2_size) = dry_run.size
+    {
+        result.size = bzip2_size;
+        result.description = format!("{}, total size: {} bytes", result.description, result.size);
+        return Ok(result);
+    }
 
     Err(SignatureError)
 }

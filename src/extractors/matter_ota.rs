@@ -58,11 +58,11 @@ pub fn extract_matter_ota(
 
         // Sanity check reported payload size and get the payload data
         if let Some(payload_data) = file_data.get(payload_start..payload_end)
-            && output_directory.is_some() {
-                let chroot = Chroot::new(output_directory);
-                result.success =
-                    chroot.carve_file(OUTFILE_NAME, payload_data, 0, payload_data.len());
-            }
+            && output_directory.is_some()
+        {
+            let chroot = Chroot::new(output_directory);
+            result.success = chroot.carve_file(OUTFILE_NAME, payload_data, 0, payload_data.len());
+        }
     }
 
     result

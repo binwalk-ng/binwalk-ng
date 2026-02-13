@@ -50,13 +50,14 @@ pub fn linux_arm_zimage_parser(
         result.offset = offset - MAGIC_OFFSET;
 
         if let Some(zimage_data) = file_data.get(result.offset..)
-            && let Ok(zimage_header) = parse_linux_arm_zimage_header(zimage_data) {
-                result.description = format!(
-                    "{}, {} endian",
-                    result.description, zimage_header.endianness
-                );
-                return Ok(result);
-            }
+            && let Ok(zimage_header) = parse_linux_arm_zimage_header(zimage_data)
+        {
+            result.description = format!(
+                "{}, {} endian",
+                result.description, zimage_header.endianness
+            );
+            return Ok(result);
+        }
     }
 
     Err(SignatureError)

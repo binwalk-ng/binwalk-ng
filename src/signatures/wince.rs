@@ -24,21 +24,19 @@ pub fn wince_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
     let dry_run = wince_dump(file_data, offset, None);
 
     if dry_run.success
-        && let Some(total_size) = dry_run.size {
-            result.size = total_size;
+        && let Some(total_size) = dry_run.size
+    {
+        result.size = total_size;
 
-            // Parse the WinCE header to get some useful info to display
-            if let Ok(wince_header) = parse_wince_header(&file_data[offset..]) {
-                result.description = format!(
-                    "{}, base address: {:#X}, image size: {} bytes, file size: {} bytes",
-                    result.description,
-                    wince_header.base_address,
-                    wince_header.image_size,
-                    result.size
-                );
-                return Ok(result);
-            }
+        // Parse the WinCE header to get some useful info to display
+        if let Ok(wince_header) = parse_wince_header(&file_data[offset..]) {
+            result.description = format!(
+                "{}, base address: {:#X}, image size: {} bytes, file size: {} bytes",
+                result.description, wince_header.base_address, wince_header.image_size, result.size
+            );
+            return Ok(result);
         }
+    }
 
     Err(SignatureError)
 }

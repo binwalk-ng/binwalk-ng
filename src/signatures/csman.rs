@@ -23,12 +23,12 @@ pub fn csman_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
     let dry_run = extract_csman_dat(file_data, offset, None);
 
     if dry_run.success
-        && let Some(total_size) = dry_run.size {
-            result.size = total_size;
-            result.description =
-                format!("{}, total size: {} bytes", result.description, result.size);
-            return Ok(result);
-        }
+        && let Some(total_size) = dry_run.size
+    {
+        result.size = total_size;
+        result.description = format!("{}, total size: {} bytes", result.description, result.size);
+        return Ok(result);
+    }
 
     Err(SignatureError)
 }

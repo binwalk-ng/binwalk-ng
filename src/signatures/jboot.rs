@@ -50,21 +50,22 @@ pub fn jboot_arm_parser(
     let header_start = offset - MAGIC_OFFSET;
 
     if let Some(jboot_data) = file_data.get(header_start..)
-        && let Ok(arm_header) = parse_jboot_arm_header(jboot_data) {
-            result.size = arm_header.header_size;
-            result.offset = header_start;
-            result.description = format!(
-                "{}, header size: {} bytes, ROM ID: {}, erase offset: {:#X}, erase size: {:#X}, data flash offset: {:#X}, data size: {:#X}",
-                result.description,
-                arm_header.header_size,
-                arm_header.rom_id,
-                arm_header.erase_offset,
-                arm_header.erase_size,
-                arm_header.data_offset,
-                arm_header.data_size,
-            );
-            return Ok(result);
-        }
+        && let Ok(arm_header) = parse_jboot_arm_header(jboot_data)
+    {
+        result.size = arm_header.header_size;
+        result.offset = header_start;
+        result.description = format!(
+            "{}, header size: {} bytes, ROM ID: {}, erase offset: {:#X}, erase size: {:#X}, data flash offset: {:#X}, data size: {:#X}",
+            result.description,
+            arm_header.header_size,
+            arm_header.rom_id,
+            arm_header.erase_offset,
+            arm_header.erase_size,
+            arm_header.data_offset,
+            arm_header.data_size,
+        );
+        return Ok(result);
+    }
 
     Err(SignatureError)
 }
@@ -124,18 +125,19 @@ pub fn jboot_sch2_parser(
 
     if dry_run.success
         && let Some(total_size) = dry_run.size
-            && let Ok(sch2_header) = parse_jboot_sch2_header(&file_data[offset..]) {
-                result.size = total_size;
-                result.description = format!(
-                    "{}, header size: {} bytes, kernel size: {} bytes, kernel compression: {}, kernel entry point: {:#X}",
-                    result.description,
-                    sch2_header.header_size,
-                    sch2_header.kernel_size,
-                    sch2_header.compression,
-                    sch2_header.kernel_entry_point,
-                );
-                return Ok(result);
-            }
+        && let Ok(sch2_header) = parse_jboot_sch2_header(&file_data[offset..])
+    {
+        result.size = total_size;
+        result.description = format!(
+            "{}, header size: {} bytes, kernel size: {} bytes, kernel compression: {}, kernel entry point: {:#X}",
+            result.description,
+            sch2_header.header_size,
+            sch2_header.kernel_size,
+            sch2_header.compression,
+            sch2_header.kernel_entry_point,
+        );
+        return Ok(result);
+    }
 
     Err(SignatureError)
 }

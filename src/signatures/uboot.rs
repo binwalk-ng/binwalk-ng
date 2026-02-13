@@ -22,16 +22,16 @@ pub fn uboot_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
     };
 
     if let Some(expected_number_byte) = file_data.get(offset + NUMBER_OFFSET)
-        && is_ascii_number(*expected_number_byte) {
-            let uboot_version_string = get_cstring(&file_data[offset + NUMBER_OFFSET..]);
+        && is_ascii_number(*expected_number_byte)
+    {
+        let uboot_version_string = get_cstring(&file_data[offset + NUMBER_OFFSET..]);
 
-            if !uboot_version_string.is_empty() {
-                result.size = uboot_version_string.len();
-                result.description =
-                    format!("{}: {:.100}", result.description, uboot_version_string);
-                return Ok(result);
-            }
+        if !uboot_version_string.is_empty() {
+            result.size = uboot_version_string.len();
+            result.description = format!("{}: {:.100}", result.description, uboot_version_string);
+            return Ok(result);
         }
+    }
 
     Err(SignatureError)
 }

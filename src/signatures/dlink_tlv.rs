@@ -50,10 +50,11 @@ pub fn dlink_tlv_parser(
 
                 // Check if the firmware data is OpenSSL encrypted
                 if let Some(crypt_data) = file_data.get(offset + tlv_header.header_size..)
-                    && let Ok(openssl_signature) = openssl_crypt_parser(crypt_data, 0) {
-                        result.description =
-                            format!("{}, {}", result.description, openssl_signature.description);
-                    }
+                    && let Ok(openssl_signature) = openssl_crypt_parser(crypt_data, 0)
+                {
+                    result.description =
+                        format!("{}, {}", result.description, openssl_signature.description);
+                }
 
                 return Ok(result);
             }

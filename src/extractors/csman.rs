@@ -60,16 +60,17 @@ pub fn extract_csman_dat(
 
             // If the entries are compressed, decompress it (zlib compression)
             if csman_header.compressed
-                && let Some(compressed_data) = raw_entry_data.get(COMPRESSED_HEADER_SIZE..) {
-                    match inflate::decompress_to_vec(compressed_data) {
-                        Err(_) => {
-                            return result;
-                        }
-                        Ok(decompressed_data) => {
-                            entry_data = decompressed_data.clone();
-                        }
+                && let Some(compressed_data) = raw_entry_data.get(COMPRESSED_HEADER_SIZE..)
+            {
+                match inflate::decompress_to_vec(compressed_data) {
+                    Err(_) => {
+                        return result;
+                    }
+                    Ok(decompressed_data) => {
+                        entry_data = decompressed_data.clone();
                     }
                 }
+            }
 
             // Offsets for processing CSMAN entries in entry_data
             let mut next_offset: usize = 0;

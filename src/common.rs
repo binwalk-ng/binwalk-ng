@@ -214,9 +214,10 @@ pub fn is_offset_safe(
 ) -> bool {
     // If a previous file offset was specified, ensure that it is less than the next file offset
     if let Some(previous_offset) = last_offset
-        && previous_offset >= next_offset {
-            return false;
-        }
+        && previous_offset >= next_offset
+    {
+        return false;
+    }
 
     // Ensure that the next file offset is within the bounds of available file data
     if next_offset >= available_data {

@@ -47,19 +47,20 @@ pub fn encfw_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
     };
 
     if let Some(magic_bytes) = file_data.get(offset..offset + MAGIC_LEN)
-        && encfw_known_firmware().contains_key(magic_bytes) {
-            if result.offset != 0 {
-                result.confidence = CONFIDENCE_LOW;
-            }
-
-            result.description = format!(
-                "{}, {}",
-                result.description,
-                encfw_known_firmware()[magic_bytes]
-            );
-
-            return Ok(result);
+        && encfw_known_firmware().contains_key(magic_bytes)
+    {
+        if result.offset != 0 {
+            result.confidence = CONFIDENCE_LOW;
         }
+
+        result.description = format!(
+            "{}, {}",
+            result.description,
+            encfw_known_firmware()[magic_bytes]
+        );
+
+        return Ok(result);
+    }
 
     Err(SignatureError)
 }

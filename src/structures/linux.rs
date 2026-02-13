@@ -34,25 +34,25 @@ pub fn parse_linux_arm_zimage_header(
 
     if let Ok(zimage_nops) = common::parse(zimage_data, &zimage_structure, "little")
         && zimage_nops["nop1"] == zimage_nops["nop2"]
-            && zimage_nops["nop1"] == zimage_nops["nop3"]
-            && zimage_nops["nop1"] == zimage_nops["nop4"]
-            && zimage_nops["nop1"] == zimage_nops["nop5"]
-            && zimage_nops["nop1"] == zimage_nops["nop6"]
-            && zimage_nops["nop1"] == zimage_nops["nop7"]
-            && zimage_nops["nop1"] == zimage_nops["nop8"]
-        {
-            if zimage_nops["nop1"] == NOP_LE {
-                return Ok(LinuxARMzImageHeader {
-                    endianness: "little".to_string(),
-                });
-            }
-
-            if zimage_nops["nop1"] == NOP_BE {
-                return Ok(LinuxARMzImageHeader {
-                    endianness: "big".to_string(),
-                });
-            }
+        && zimage_nops["nop1"] == zimage_nops["nop3"]
+        && zimage_nops["nop1"] == zimage_nops["nop4"]
+        && zimage_nops["nop1"] == zimage_nops["nop5"]
+        && zimage_nops["nop1"] == zimage_nops["nop6"]
+        && zimage_nops["nop1"] == zimage_nops["nop7"]
+        && zimage_nops["nop1"] == zimage_nops["nop8"]
+    {
+        if zimage_nops["nop1"] == NOP_LE {
+            return Ok(LinuxARMzImageHeader {
+                endianness: "little".to_string(),
+            });
         }
+
+        if zimage_nops["nop1"] == NOP_BE {
+            return Ok(LinuxARMzImageHeader {
+                endianness: "big".to_string(),
+            });
+        }
+    }
 
     Err(StructureError)
 }

@@ -22,12 +22,13 @@ pub fn logfs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
         result.offset = offset - LOGFS_MAGIC_OFFSET;
 
         if let Some(logfs_sb_data) = file_data.get(result.offset..)
-            && let Ok(logfs_super_block) = parse_logfs_super_block(logfs_sb_data) {
-                result.size = logfs_super_block.total_size;
-                result.description =
-                    format!("{}, total size: {} bytes", result.description, result.size);
-                return Ok(result);
-            }
+            && let Ok(logfs_super_block) = parse_logfs_super_block(logfs_sb_data)
+        {
+            result.size = logfs_super_block.total_size;
+            result.description =
+                format!("{}, total size: {} bytes", result.description, result.size);
+            return Ok(result);
+        }
     }
 
     Err(SignatureError)

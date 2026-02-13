@@ -49,22 +49,23 @@ pub fn parse_tplink_header(tplink_data: &[u8]) -> Result<TPLinkFirmwareHeader, S
 
     // Sanity check available data
     if tplink_data.len() >= HEADER_SIZE
-        && let Some(structure_data) = tplink_data.get(STRUCTURE_OFFSET..) {
-            // Parse the header
-            if let Ok(tplink_header) = common::parse(structure_data, &tplink_structure, "little") {
-                // Make sure the reserved fields are NULL
-                if tplink_header["reserved1"] == 0
-                    && tplink_header["reserved2"] == 0
-                    && tplink_header["reserved3"] == 0
-                    && tplink_header["reserved4"] == 0
-                {
-                    // Unfortunately, most header fields aren't reliably used; these seem to be, so report them
-                    result.kernel_entry_point = tplink_header["kernel_entry_point"];
-                    result.kernel_load_address = tplink_header["kernel_load_address"];
-                    return Ok(result);
-                }
+        && let Some(structure_data) = tplink_data.get(STRUCTURE_OFFSET..)
+    {
+        // Parse the header
+        if let Ok(tplink_header) = common::parse(structure_data, &tplink_structure, "little") {
+            // Make sure the reserved fields are NULL
+            if tplink_header["reserved1"] == 0
+                && tplink_header["reserved2"] == 0
+                && tplink_header["reserved3"] == 0
+                && tplink_header["reserved4"] == 0
+            {
+                // Unfortunately, most header fields aren't reliably used; these seem to be, so report them
+                result.kernel_entry_point = tplink_header["kernel_entry_point"];
+                result.kernel_load_address = tplink_header["kernel_load_address"];
+                return Ok(result);
             }
         }
+    }
 
     Err(StructureError)
 }
@@ -99,15 +100,16 @@ pub fn parse_tplink_rtos_header(
     ];
 
     if let Ok(header) = common::parse(tplink_data, &tplink_rtos_structure, "big")
-        && header["magic2"] == MAGIC2_VALUE {
-            return Ok(TPLinkRTOSFirmwareHeader {
-                header_size: HEADER_SIZE,
-                total_size: header["data_size"] + TOTAL_SIZE_OFFSET,
-                model_number: header["model_number"],
-                hardware_rev_major: header["hardware_revision_major"],
-                hardware_rev_minor: header["hardware_revision_minor"],
-            });
-        }
+        && header["magic2"] == MAGIC2_VALUE
+    {
+        return Ok(TPLinkRTOSFirmwareHeader {
+            header_size: HEADER_SIZE,
+            total_size: header["data_size"] + TOTAL_SIZE_OFFSET,
+            model_number: header["model_number"],
+            hardware_rev_major: header["hardware_revision_major"],
+            hardware_rev_minor: header["hardware_revision_minor"],
+        });
+    }
 
     Err(StructureError)
 }

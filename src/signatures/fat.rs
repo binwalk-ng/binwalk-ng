@@ -28,22 +28,23 @@ pub fn fat_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
 
         // Parse and validate the FAT header
         if let Some(fat_data) = file_data.get(result.offset..)
-            && let Ok(fat_header) = parse_fat_header(fat_data) {
-                // Report the total size of the FAT image
-                result.size = fat_header.total_size;
+            && let Ok(fat_header) = parse_fat_header(fat_data)
+        {
+            // Report the total size of the FAT image
+            result.size = fat_header.total_size;
 
-                // Include FAT type in the description
-                let mut fat_type_desc: &str = "FAT12/16";
-                if fat_header.is_fat32 {
-                    fat_type_desc = "FAT32";
-                }
-
-                result.description = format!(
-                    "{}, type: {}, total size: {} bytes",
-                    result.description, fat_type_desc, result.size
-                );
-                return Ok(result);
+            // Include FAT type in the description
+            let mut fat_type_desc: &str = "FAT12/16";
+            if fat_header.is_fat32 {
+                fat_type_desc = "FAT32";
             }
+
+            result.description = format!(
+                "{}, type: {}, total size: {} bytes",
+                result.description, fat_type_desc, result.size
+            );
+            return Ok(result);
+        }
     }
 
     Err(SignatureError)

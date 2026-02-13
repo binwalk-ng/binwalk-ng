@@ -25,18 +25,19 @@ pub fn romfs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
 
     // If the dry run was a success, everything should be good to go
     if dry_run.success
-        && let Some(romfs_size) = dry_run.size {
-            // Parse the RomFS header to get the volume name
-            if let Ok(romfs_header) = parse_romfs_header(&file_data[offset..]) {
-                // Report the result
-                result.size = romfs_size;
-                result.description = format!(
-                    "{}, volume name: \"{}\", total size: {} bytes",
-                    result.description, romfs_header.volume_name, result.size
-                );
-                return Ok(result);
-            }
+        && let Some(romfs_size) = dry_run.size
+    {
+        // Parse the RomFS header to get the volume name
+        if let Ok(romfs_header) = parse_romfs_header(&file_data[offset..]) {
+            // Report the result
+            result.size = romfs_size;
+            result.description = format!(
+                "{}, volume name: \"{}\", total size: {} bytes",
+                result.description, romfs_header.volume_name, result.size
+            );
+            return Ok(result);
         }
+    }
 
     Err(SignatureError)
 }

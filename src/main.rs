@@ -230,13 +230,15 @@ fn main() -> ExitCode {
     json_logger.close();
 
     // If BINWALK_RM_SYMLINK env var was set, delete the base_target_file symlink
-    if (cliargs.carve || cliargs.extract) && std::env::var(BINWALK_RM_SYMLINK).is_ok()
-        && let Err(e) = std::fs::remove_file(&binwalker.base_target_file) {
-            error!(
-                "Request to remove extraction symlink file {} failed: {}",
-                binwalker.base_target_file, e
-            );
-        }
+    if (cliargs.carve || cliargs.extract)
+        && std::env::var(BINWALK_RM_SYMLINK).is_ok()
+        && let Err(e) = std::fs::remove_file(&binwalker.base_target_file)
+    {
+        error!(
+            "Request to remove extraction symlink file {} failed: {}",
+            binwalker.base_target_file, e
+        );
+    }
 
     // All done, show some basic statistics
     display::print_stats(

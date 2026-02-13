@@ -24,18 +24,18 @@ pub fn pcapng_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult,
 
     // If dry-run was successful, this is almost certianly a valid pcap-ng file
     if dry_run.success
-        && let Some(pcap_size) = dry_run.size {
-            // If this file is just a pcap file, no need to carve it out to yet another file on disk
-            if offset == 0 && pcap_size == file_data.len() {
-                result.extraction_declined = true;
-            }
-
-            // Return parser results
-            result.size = pcap_size;
-            result.description =
-                format!("{}, total size: {} bytes", result.description, result.size);
-            return Ok(result);
+        && let Some(pcap_size) = dry_run.size
+    {
+        // If this file is just a pcap file, no need to carve it out to yet another file on disk
+        if offset == 0 && pcap_size == file_data.len() {
+            result.extraction_declined = true;
         }
+
+        // Return parser results
+        result.size = pcap_size;
+        result.description = format!("{}, total size: {} bytes", result.description, result.size);
+        return Ok(result);
+    }
 
     Err(SignatureError)
 }

@@ -16,9 +16,10 @@ pub fn parse_xz_header(xz_data: &[u8]) -> Result<usize, StructureError> {
 
     if let Ok(xz_header) = common::parse(xz_data, &xz_structure, "little")
         && let Some(crc_data) = xz_data.get(XZ_CRC_START..XZ_CRC_END)
-            && crc32(crc_data) == (xz_header["header_crc"] as u32) {
-                return Ok(XZ_HEADER_SIZE);
-            }
+        && crc32(crc_data) == (xz_header["header_crc"] as u32)
+    {
+        return Ok(XZ_HEADER_SIZE);
+    }
 
     Err(StructureError)
 }

@@ -50,17 +50,17 @@ pub fn parse_cpio_entry_header(cpio_data: &[u8]) -> Result<CPIOEntryHeader, Stru
                         // Get the file name
                         if let Some(file_name_raw_bytes) =
                             cpio_data.get(file_name_start..file_name_end)
-                            && let Ok(file_name) = String::from_utf8(file_name_raw_bytes.to_vec()) {
-                                let header_total_size = CPIO_HEADER_SIZE + file_name_size;
+                            && let Ok(file_name) = String::from_utf8(file_name_raw_bytes.to_vec())
+                        {
+                            let header_total_size = CPIO_HEADER_SIZE + file_name_size;
 
-                                return Ok(CPIOEntryHeader {
-                                    magic: header_magic.clone(),
-                                    file_name: file_name.clone(),
-                                    data_size: file_data_size + byte_padding(file_data_size),
-                                    header_size: header_total_size
-                                        + byte_padding(header_total_size),
-                                });
-                            }
+                            return Ok(CPIOEntryHeader {
+                                magic: header_magic.clone(),
+                                file_name: file_name.clone(),
+                                data_size: file_data_size + byte_padding(file_data_size),
+                                header_size: header_total_size + byte_padding(header_total_size),
+                            });
+                        }
                     }
                 }
             }

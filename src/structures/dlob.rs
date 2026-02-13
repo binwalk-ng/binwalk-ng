@@ -34,23 +34,23 @@ pub fn parse_dlob_header(dlob_data: &[u8]) -> Result<DlobHeader, StructureError>
             // Parse the second part of the header
             if let Some(header_p2_data) = dlob_data.get(dlob_header_p2_offset..)
                 && let Ok(dlob_header_p2) = common::parse(header_p2_data, &dlob_structure_p2, "big")
-                {
-                    // Both parts should have the same magic bytes
-                    if dlob_header_p1["magic"] == dlob_header_p2["magic"] {
-                        // Calculate total header size
-                        let header_total_size: usize = dlob_header_p2_offset
-                            + common::size(&dlob_structure_p2)
-                            + dlob_header_p2["metadata_size"];
+            {
+                // Both parts should have the same magic bytes
+                if dlob_header_p1["magic"] == dlob_header_p2["magic"] {
+                    // Calculate total header size
+                    let header_total_size: usize = dlob_header_p2_offset
+                        + common::size(&dlob_structure_p2)
+                        + dlob_header_p2["metadata_size"];
 
-                        // Basic sanity check on the reported data size vs header size
-                        if header_total_size < dlob_header_p2["data_size"] {
-                            return Ok(DlobHeader {
-                                header_size: header_total_size,
-                                data_size: dlob_header_p2["data_size"],
-                            });
-                        }
+                    // Basic sanity check on the reported data size vs header size
+                    if header_total_size < dlob_header_p2["data_size"] {
+                        return Ok(DlobHeader {
+                            header_size: header_total_size,
+                            data_size: dlob_header_p2["data_size"],
+                        });
                     }
                 }
+            }
         }
     }
 

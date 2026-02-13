@@ -42,9 +42,10 @@ pub fn parse_pcapng_block(
             if let Some(block_footer_data) = block_data.get(block_footer_start..block_footer_end)
                 && let Ok(block_footer) =
                     common::parse(block_footer_data, &block_footer_structure, endianness)
-                    && block_footer["block_size"] == result.block_size {
-                        return Ok(result);
-                    }
+                && block_footer["block_size"] == result.block_size
+            {
+                return Ok(result);
+            }
         }
     }
 
