@@ -1,4 +1,6 @@
-# Binwalk v3
+# binwalk-ng
+
+This repository is a fork of the [ReFirmLabs/binwalk](https://github.com/ReFirmLabs/binwalk) project.
 
 This is an updated version of the Binwalk firmware analysis tool, re-written in Rust for speed and accuracy.
 
