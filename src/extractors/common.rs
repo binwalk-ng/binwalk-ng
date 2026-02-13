@@ -839,7 +839,7 @@ impl Chroot {
     fn sanitize_path(&self, file_path: &str, preserve_root_path_sep: bool) -> String {
         const DIR_TRAVERSAL: &str = "..";
 
-        let mut exclude_indicies: Vec<usize> = vec![];
+        let mut exclude_indices: Vec<usize> = vec![];
         let mut sanitized_path: String = "".to_string();
 
         if preserve_root_path_sep && file_path.starts_with(path::MAIN_SEPARATOR) {
@@ -853,24 +853,24 @@ impl Chroot {
         for (i, path_part) in path_parts.iter().enumerate() {
             // If this part of the path is '..', don't include it in the final sanitized path
             if *path_part == DIR_TRAVERSAL {
-                exclude_indicies.push(i);
+                exclude_indices.push(i);
                 if i > 0 {
                     // Walk backwards through the path parts until a non-excluded part is found, then mark that part for exclusion as well
                     let mut j = i - 1;
-                    while j > 0 && exclude_indicies.contains(&j) {
+                    while j > 0 && exclude_indices.contains(&j) {
                         j -= 1;
                     }
-                    exclude_indicies.push(j);
+                    exclude_indices.push(j);
                 }
             // If this part of the path is an empty string, don't include that either (happens if the original file path has '//' in it)
             } else if path_part.is_empty() {
-                exclude_indicies.push(i);
+                exclude_indices.push(i);
             }
         }
 
         // Concatenate each non-excluded part of the file path, with each part separated by '/'
         for (i, path_part) in path_parts.iter().enumerate() {
-            if !exclude_indicies.contains(&i) {
+            if !exclude_indices.contains(&i) {
                 #[cfg(windows)]
                 {
                     // on Windows: in the first loop run, we cannot really prepend a '\' to drive letters like 'C:'
@@ -927,7 +927,7 @@ pub fn execute(
 
     // Create an output directory for the extraction
     if let Ok(output_directory) = create_output_directory(file_path, signature.offset) {
-        // Make sure a defalut extractor was actually defined (this function should not be called if signature.extractor is None)
+        // Make sure a default extractor was actually defined (this function should not be called if signature.extractor is None)
         match &extractor {
             None => {
                 error!(

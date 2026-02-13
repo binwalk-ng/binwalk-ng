@@ -21,7 +21,7 @@ pub fn gzip_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
     // Do a dry-run decompression
     let dry_run = gzip_decompress(file_data, offset, None);
 
-    // If dry-run was successful, this is almost certianly a valid gzip file
+    // If dry-run was successful, this is almost certainly a valid gzip file
     if dry_run.success {
         // Get the size of the deflate data stream
         if let Some(deflate_data_size) = dry_run.size {
