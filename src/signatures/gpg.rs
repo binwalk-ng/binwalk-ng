@@ -29,14 +29,13 @@ pub fn gpg_signed_parser(
     let decompression_dry_run = gpg_decompress(file_data, offset, None);
 
     // If the decompression dry run was a success, this signature is almost certianly valid
-    if decompression_dry_run.success {
-        if let Some(total_size) = decompression_dry_run.size {
+    if decompression_dry_run.success
+        && let Some(total_size) = decompression_dry_run.size {
             result.size = total_size;
             result.description =
                 format!("{}, total size: {} bytes", result.description, result.size);
             return Ok(result);
         }
-    }
 
     Err(SignatureError)
 }

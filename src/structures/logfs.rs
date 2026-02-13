@@ -36,15 +36,13 @@ pub fn parse_logfs_super_block(logfs_data: &[u8]) -> Result<LogFSSuperBlock, Str
         ("speed_reserve", "u64"),
     ];
 
-    if let Some(sb_struct_data) = logfs_data.get(LOGFS_MAGIC_OFFSET..) {
-        if let Ok(super_block) = common::parse(sb_struct_data, &logfs_sb_structure, "big") {
-            if super_block["pad0"] == 0 && super_block["pad1"] == 0 {
+    if let Some(sb_struct_data) = logfs_data.get(LOGFS_MAGIC_OFFSET..)
+        && let Ok(super_block) = common::parse(sb_struct_data, &logfs_sb_structure, "big")
+            && super_block["pad0"] == 0 && super_block["pad1"] == 0 {
                 return Ok(LogFSSuperBlock {
                     total_size: super_block["filesystem_size"],
                 });
             }
-        }
-    }
 
     Err(StructureError)
 }

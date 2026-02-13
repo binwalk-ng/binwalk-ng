@@ -97,8 +97,8 @@ pub fn parse_dtb_node(dtb_header: &DTBHeader, dtb_data: &[u8], node_offset: usiz
         ..Default::default()
     };
 
-    if let Some(node_data) = dtb_data.get(node_offset..) {
-        if let Ok(token) = common::parse(node_data, &node_token, "big") {
+    if let Some(node_data) = dtb_data.get(node_offset..)
+        && let Ok(token) = common::parse(node_data, &node_token, "big") {
             // Set total node size to the size of the token entry
             node.total_size = common::size(&node_token);
 
@@ -144,7 +144,6 @@ pub fn parse_dtb_node(dtb_header: &DTBHeader, dtb_data: &[u8], node_offset: usiz
                 }
             }
         }
-    }
 
     node
 }

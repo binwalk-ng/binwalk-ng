@@ -71,13 +71,11 @@ fn find_xml_property_list(file_data: &[u8]) -> Option<usize> {
         let xml_start = xml_match.start();
         let xml_end = xml_start + MIN_XML_LENGTH;
 
-        if let Some(xml_data) = file_data.get(xml_start..xml_end) {
-            if let Ok(xml_string) = String::from_utf8(xml_data.to_vec()) {
-                if xml_string.contains(BLKX_KEY) {
+        if let Some(xml_data) = file_data.get(xml_start..xml_end)
+            && let Ok(xml_string) = String::from_utf8(xml_data.to_vec())
+                && xml_string.contains(BLKX_KEY) {
                     return Some(xml_start);
                 }
-            }
-        }
     }
 
     None

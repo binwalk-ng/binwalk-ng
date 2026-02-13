@@ -45,8 +45,8 @@ pub fn extract_uimage(
     };
 
     // Get the uImage data and parse the header
-    if let Some(uimage_header_data) = file_data.get(offset..) {
-        if let Ok(uimage_header) = parse_uimage_header(uimage_header_data) {
+    if let Some(uimage_header_data) = file_data.get(offset..)
+        && let Ok(uimage_header) = parse_uimage_header(uimage_header_data) {
             let image_data_start = offset + uimage_header.header_size;
             let image_data_end = image_data_start + uimage_header.data_size;
 
@@ -80,7 +80,6 @@ pub fn extract_uimage(
                 }
             }
         }
-    }
 
     result
 }

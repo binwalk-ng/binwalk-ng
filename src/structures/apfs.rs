@@ -54,8 +54,8 @@ pub fn parse_apfs_header(apfs_data: &[u8]) -> Result<APFSHeader, StructureError>
     let apfs_struct_end = apfs_struct_start + common::size(&apfs_structure);
 
     // Parse the header
-    if let Some(apfs_structure_data) = apfs_data.get(apfs_struct_start..apfs_struct_end) {
-        if let Ok(apfs_header) = common::parse(apfs_structure_data, &apfs_structure, "little") {
+    if let Some(apfs_structure_data) = apfs_data.get(apfs_struct_start..apfs_struct_end)
+        && let Ok(apfs_header) = common::parse(apfs_structure_data, &apfs_structure, "little") {
             // Simple sanity check on the reported block data
             if apfs_header["block_size"] != 0 && apfs_header["block_count"] != 0 {
                 // Sanity check the feature flags
@@ -81,7 +81,6 @@ pub fn parse_apfs_header(apfs_data: &[u8]) -> Result<APFSHeader, StructureError>
                 }
             }
         }
-    }
 
     Err(StructureError)
 }

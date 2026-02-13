@@ -20,13 +20,12 @@ pub fn parse_dms_header(dms_data: &[u8]) -> Result<DMSHeader, StructureError> {
     ];
 
     // Parse the first half of the header
-    if let Ok(dms_header) = common::parse(dms_data, &dms_structure, "big") {
-        if dms_header["magic_p1"] == MAGIC_P1 && dms_header["magic_p2"] == MAGIC_P2 {
+    if let Ok(dms_header) = common::parse(dms_data, &dms_structure, "big")
+        && dms_header["magic_p1"] == MAGIC_P1 && dms_header["magic_p2"] == MAGIC_P2 {
             return Ok(DMSHeader {
                 image_size: dms_header["image_size"],
             });
         }
-    }
 
     Err(StructureError)
 }

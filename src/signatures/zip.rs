@@ -96,14 +96,13 @@ pub fn find_zip_eof(file_data: &[u8], offset: usize) -> Result<ZipEOCDInfo, Sign
         let eocd_start: usize = eocd_match.start() + offset;
 
         // Parse the end-of-central-directory header
-        if let Some(eocd_data) = file_data.get(eocd_start..) {
-            if let Ok(eocd_header) = parse_eocd_header(eocd_data) {
+        if let Some(eocd_data) = file_data.get(eocd_start..)
+            && let Ok(eocd_header) = parse_eocd_header(eocd_data) {
                 return Ok(ZipEOCDInfo {
                     eof: eocd_start + eocd_header.size,
                     file_count: eocd_header.file_count,
                 });
             }
-        }
     }
 
     // No valid EOCD record found :(

@@ -82,16 +82,14 @@ fn parse_svg_tag(tag_data: &[u8]) -> Result<SVGTag, StructureError> {
 
     // Tags are expected to start with '<svg' or </svg>', and end with '>'
     for i in 0..tag_data.len() {
-        if tag_data[i] == END_TAG {
-            if let Some(tag_bytes) = tag_data.get(0..i + 1) {
-                if let Ok(tag_string) = String::from_utf8(tag_bytes.to_vec()) {
+        if tag_data[i] == END_TAG
+            && let Some(tag_bytes) = tag_data.get(0..i + 1)
+                && let Ok(tag_string) = String::from_utf8(tag_bytes.to_vec()) {
                     result.is_open = tag_string.starts_with(&svg_open_tag);
                     result.is_close = tag_string.starts_with(&svg_close_tag);
                     result.is_head = tag_string.contains(&svg_head_string);
                     return Ok(result);
                 }
-            }
-        }
     }
 
     Err(StructureError)

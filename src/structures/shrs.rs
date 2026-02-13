@@ -22,15 +22,14 @@ pub fn parse_shrs_header(shrs_data: &[u8]) -> Result<SHRSHeader, StructureError>
     ];
 
     // Parse the header
-    if let Ok(shrs_header) = common::parse(shrs_data, &shrs_structure, "big") {
-        if let Some(iv_bytes) = shrs_data.get(IV_START..IV_END) {
+    if let Ok(shrs_header) = common::parse(shrs_data, &shrs_structure, "big")
+        && let Some(iv_bytes) = shrs_data.get(IV_START..IV_END) {
             return Ok(SHRSHeader {
                 iv: iv_bytes.to_vec(),
                 data_size: shrs_header["encrypted_data_size"],
                 header_size: HEADER_SIZE,
             });
         }
-    }
 
     Err(StructureError)
 }

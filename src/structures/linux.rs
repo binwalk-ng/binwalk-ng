@@ -32,8 +32,8 @@ pub fn parse_linux_arm_zimage_header(
         ("nop8", "u32"),
     ];
 
-    if let Ok(zimage_nops) = common::parse(zimage_data, &zimage_structure, "little") {
-        if zimage_nops["nop1"] == zimage_nops["nop2"]
+    if let Ok(zimage_nops) = common::parse(zimage_data, &zimage_structure, "little")
+        && zimage_nops["nop1"] == zimage_nops["nop2"]
             && zimage_nops["nop1"] == zimage_nops["nop3"]
             && zimage_nops["nop1"] == zimage_nops["nop4"]
             && zimage_nops["nop1"] == zimage_nops["nop5"]
@@ -53,7 +53,6 @@ pub fn parse_linux_arm_zimage_header(
                 });
             }
         }
-    }
 
     Err(StructureError)
 }

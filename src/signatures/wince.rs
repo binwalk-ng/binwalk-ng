@@ -23,8 +23,8 @@ pub fn wince_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
     // Do an extraction dry-run
     let dry_run = wince_dump(file_data, offset, None);
 
-    if dry_run.success {
-        if let Some(total_size) = dry_run.size {
+    if dry_run.success
+        && let Some(total_size) = dry_run.size {
             result.size = total_size;
 
             // Parse the WinCE header to get some useful info to display
@@ -39,7 +39,6 @@ pub fn wince_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
                 return Ok(result);
             }
         }
-    }
 
     Err(SignatureError)
 }

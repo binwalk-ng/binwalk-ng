@@ -42,8 +42,8 @@ pub fn wince_dump(
     };
 
     // Parse the file header
-    if let Some(wince_data) = file_data.get(offset..) {
-        if let Ok(wince_header) = parse_wince_header(wince_data) {
+    if let Some(wince_data) = file_data.get(offset..)
+        && let Ok(wince_header) = parse_wince_header(wince_data) {
             // Get the block data, immediately following the file header
             if let Some(wince_block_data) = wince_data.get(wince_header.header_size..) {
                 // Process all blocks in the block data
@@ -77,7 +77,6 @@ pub fn wince_dump(
                 }
             }
         }
-    }
 
     result
 }

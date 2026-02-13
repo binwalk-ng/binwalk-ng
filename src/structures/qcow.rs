@@ -78,21 +78,18 @@ pub fn parse_qcow_header(qcow_data: &[u8]) -> Result<QcowHeader, StructureError>
             .ok_or(StructureError)?;
 
         // sanity check: existing offsets need to be aligned to cluster boundary
-        if let Some(offset) = qcow_header.get("level1_table_offset") {
-            if offset % (1 << cluster_block_bits) != 0 {
+        if let Some(offset) = qcow_header.get("level1_table_offset")
+            && offset % (1 << cluster_block_bits) != 0 {
                 return Err(StructureError);
             }
-        }
-        if let Some(offset) = qcow_header.get("refcount_table_offset") {
-            if offset % (1 << cluster_block_bits) != 0 {
+        if let Some(offset) = qcow_header.get("refcount_table_offset")
+            && offset % (1 << cluster_block_bits) != 0 {
                 return Err(StructureError);
             }
-        }
-        if let Some(offset) = qcow_header.get("snapshot_offset") {
-            if offset % (1 << cluster_block_bits) != 0 {
+        if let Some(offset) = qcow_header.get("snapshot_offset")
+            && offset % (1 << cluster_block_bits) != 0 {
                 return Err(StructureError);
             }
-        }
 
         return Ok(QcowHeader {
             version: qcow_version as u8,

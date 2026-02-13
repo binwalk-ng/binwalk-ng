@@ -35,8 +35,8 @@ pub fn ext_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
         ..Default::default()
     };
 
-    if let Some(ext_data) = file_data.get(result.offset..) {
-        if let Ok(ext_header) = parse_ext_header(ext_data) {
+    if let Some(ext_data) = file_data.get(result.offset..)
+        && let Ok(ext_header) = parse_ext_header(ext_data) {
             result.size = ext_header.image_size;
             result.description = format!(
                 "{} for {}, inodes: {}, block size: {}, block count: {}, free blocks: {}, reserved blocks: {}, total size: {} bytes",
@@ -51,7 +51,6 @@ pub fn ext_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
             );
             return Ok(result);
         }
-    }
 
     Err(SignatureError)
 }

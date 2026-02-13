@@ -63,14 +63,13 @@ pub fn parse_ubi_superblock_header(ubi_data: &[u8]) -> Result<UbiSuperBlockHeade
                 // Make sure the group type is valid
                 if sb_header["group_type"] <= MAX_GROUP_TYPE {
                     // Validate the header CRC, which is calculated over the entire header except for the magic bytes and CRC field
-                    if let Some(crc_data) = ubi_data.get(CRC_START_OFFSET..sb_struct_size) {
-                        if ubi_crc(crc_data) == sb_header["header_crc"] {
+                    if let Some(crc_data) = ubi_data.get(CRC_START_OFFSET..sb_struct_size)
+                        && ubi_crc(crc_data) == sb_header["header_crc"] {
                             return Ok(UbiSuperBlockHeader {
                                 leb_size: sb_header["leb_size"],
                                 leb_count: sb_header["leb_count"],
                             });
                         }
-                    }
                 }
             }
         }
@@ -114,15 +113,14 @@ pub fn parse_ubi_ec_header(ubi_data: &[u8]) -> Result<UbiECHeader, StructureErro
             && ubi_ec_header["volume_id_header_offset"] >= ec_header_size
         {
             // Validate the header CRC
-            if let Some(crc_data) = ubi_data.get(0..crc_data_size) {
-                if ubi_crc(crc_data) == ubi_ec_header["header_crc"] {
+            if let Some(crc_data) = ubi_data.get(0..crc_data_size)
+                && ubi_crc(crc_data) == ubi_ec_header["header_crc"] {
                     return Ok(UbiECHeader {
                         version: ubi_ec_header["version"],
                         data_offset: ubi_ec_header["data_offset"],
                         volume_id_offset: ubi_ec_header["volume_id_header_offset"],
                     });
                 }
-            }
         }
     }
 
@@ -167,11 +165,10 @@ pub fn parse_ubi_volume_header(ubi_data: &[u8]) -> Result<UbiVolumeHeader, Struc
             && ubi_vol_header["padding4"] == 0
         {
             // Validate the header CRC
-            if let Some(crc_data) = ubi_data.get(0..crc_data_size) {
-                if ubi_crc(crc_data) == ubi_vol_header["header_crc"] {
+            if let Some(crc_data) = ubi_data.get(0..crc_data_size)
+                && ubi_crc(crc_data) == ubi_vol_header["header_crc"] {
                     return Ok(UbiVolumeHeader);
                 }
-            }
         }
     }
 

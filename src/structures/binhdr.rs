@@ -30,8 +30,8 @@ pub fn parse_bin_header(bin_hdr_data: &[u8]) -> Result<BINHeader, StructureError
         HashMap::from([(0, "4702"), (1, "4712"), (2, "4712L"), (3, "4704")]);
 
     // Parse the header
-    if let Some(structure_data) = bin_hdr_data.get(STRUCTURE_OFFSET..) {
-        if let Ok(header) = common::parse(structure_data, &bin_hdr_structure, "little") {
+    if let Some(structure_data) = bin_hdr_data.get(STRUCTURE_OFFSET..)
+        && let Ok(header) = common::parse(structure_data, &bin_hdr_structure, "little") {
             // Make sure the reserved fields are NULL
             if header["reserved1"] == 0 && header["reserved2"] == 0 && header["reserved3"] == 0 {
                 // Make sure the reported hardware ID is valid
@@ -54,7 +54,6 @@ pub fn parse_bin_header(bin_hdr_data: &[u8]) -> Result<BINHeader, StructureError
                 }
             }
         }
-    }
 
     Err(StructureError)
 }

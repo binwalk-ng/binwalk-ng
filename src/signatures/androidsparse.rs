@@ -26,8 +26,8 @@ pub fn android_sparse_parser(
     // Do a dry-run extraction
     let dry_run = extract_android_sparse(file_data, offset, None);
 
-    if dry_run.success {
-        if let Some(total_size) = dry_run.size {
+    if dry_run.success
+        && let Some(total_size) = dry_run.size {
             // Dry-run went OK, parse the header to get some useful info to report
             if let Ok(header) = parse_android_sparse_header(&file_data[offset..]) {
                 // Update reported size and description
@@ -45,7 +45,6 @@ pub fn android_sparse_parser(
                 return Ok(result);
             }
         }
-    }
 
     Err(SignatureError)
 }

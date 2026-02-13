@@ -160,8 +160,8 @@ pub fn rsa_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
         let magic_end: usize = magic_start + key_definition.magic.len();
 
         // Check if these magic bytes belong to this key type
-        if let Some(rsa_magic) = file_data.get(magic_start..magic_end) {
-            if rsa_magic == key_definition.magic {
+        if let Some(rsa_magic) = file_data.get(magic_start..magic_end)
+            && rsa_magic == key_definition.magic {
                 // Parse and validate the key data
                 match rsa_key_parser(&file_data[magic_start..], &key_definition) {
                     Err(_) => {
@@ -181,7 +181,6 @@ pub fn rsa_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
                     }
                 }
             }
-        }
     }
 
     Err(SignatureError)

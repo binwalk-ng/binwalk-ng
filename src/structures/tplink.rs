@@ -48,8 +48,8 @@ pub fn parse_tplink_header(tplink_data: &[u8]) -> Result<TPLinkFirmwareHeader, S
     };
 
     // Sanity check available data
-    if tplink_data.len() >= HEADER_SIZE {
-        if let Some(structure_data) = tplink_data.get(STRUCTURE_OFFSET..) {
+    if tplink_data.len() >= HEADER_SIZE
+        && let Some(structure_data) = tplink_data.get(STRUCTURE_OFFSET..) {
             // Parse the header
             if let Ok(tplink_header) = common::parse(structure_data, &tplink_structure, "little") {
                 // Make sure the reserved fields are NULL
@@ -65,7 +65,6 @@ pub fn parse_tplink_header(tplink_data: &[u8]) -> Result<TPLinkFirmwareHeader, S
                 }
             }
         }
-    }
 
     Err(StructureError)
 }
@@ -99,8 +98,8 @@ pub fn parse_tplink_rtos_header(
         ("hardware_revision_minor", "u8"),
     ];
 
-    if let Ok(header) = common::parse(tplink_data, &tplink_rtos_structure, "big") {
-        if header["magic2"] == MAGIC2_VALUE {
+    if let Ok(header) = common::parse(tplink_data, &tplink_rtos_structure, "big")
+        && header["magic2"] == MAGIC2_VALUE {
             return Ok(TPLinkRTOSFirmwareHeader {
                 header_size: HEADER_SIZE,
                 total_size: header["data_size"] + TOTAL_SIZE_OFFSET,
@@ -109,7 +108,6 @@ pub fn parse_tplink_rtos_header(
                 hardware_rev_minor: header["hardware_revision_minor"],
             });
         }
-    }
 
     Err(StructureError)
 }

@@ -24,8 +24,8 @@ pub fn romfs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
     let dry_run = extract_romfs(file_data, offset, None);
 
     // If the dry run was a success, everything should be good to go
-    if dry_run.success {
-        if let Some(romfs_size) = dry_run.size {
+    if dry_run.success
+        && let Some(romfs_size) = dry_run.size {
             // Parse the RomFS header to get the volume name
             if let Ok(romfs_header) = parse_romfs_header(&file_data[offset..]) {
                 // Report the result
@@ -37,7 +37,6 @@ pub fn romfs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
                 return Ok(result);
             }
         }
-    }
 
     Err(SignatureError)
 }

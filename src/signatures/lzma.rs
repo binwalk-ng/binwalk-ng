@@ -64,8 +64,8 @@ pub fn lzma_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
         let dry_run = lzma::lzma_decompress(file_data, offset, None);
 
         // Return success if dry run succeeded
-        if dry_run.success {
-            if let Some(lzma_stream_size) = dry_run.size {
+        if dry_run.success
+            && let Some(lzma_stream_size) = dry_run.size {
                 result.size = lzma_stream_size;
                 result.description = format!(
                     "{}, properties: {:#04X}, dictionary size: {} bytes, compressed size: {} bytes, uncompressed size: {} bytes",
@@ -77,7 +77,6 @@ pub fn lzma_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
                 );
                 return Ok(result);
             }
-        }
     }
 
     Err(SignatureError)

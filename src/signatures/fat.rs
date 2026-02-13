@@ -27,8 +27,8 @@ pub fn fat_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
         result.offset = offset - MAGIC_OFFSET;
 
         // Parse and validate the FAT header
-        if let Some(fat_data) = file_data.get(result.offset..) {
-            if let Ok(fat_header) = parse_fat_header(fat_data) {
+        if let Some(fat_data) = file_data.get(result.offset..)
+            && let Ok(fat_header) = parse_fat_header(fat_data) {
                 // Report the total size of the FAT image
                 result.size = fat_header.total_size;
 
@@ -44,7 +44,6 @@ pub fn fat_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
                 );
                 return Ok(result);
             }
-        }
     }
 
     Err(SignatureError)

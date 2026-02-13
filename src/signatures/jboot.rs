@@ -49,8 +49,8 @@ pub fn jboot_arm_parser(
     // Actual header starts MAGIC_OFFSET bytes before the magic bytes
     let header_start = offset - MAGIC_OFFSET;
 
-    if let Some(jboot_data) = file_data.get(header_start..) {
-        if let Ok(arm_header) = parse_jboot_arm_header(jboot_data) {
+    if let Some(jboot_data) = file_data.get(header_start..)
+        && let Ok(arm_header) = parse_jboot_arm_header(jboot_data) {
             result.size = arm_header.header_size;
             result.offset = header_start;
             result.description = format!(
@@ -65,7 +65,6 @@ pub fn jboot_arm_parser(
             );
             return Ok(result);
         }
-    }
 
     Err(SignatureError)
 }
@@ -123,9 +122,9 @@ pub fn jboot_sch2_parser(
 
     let dry_run = extract_jboot_sch2_kernel(file_data, offset, None);
 
-    if dry_run.success {
-        if let Some(total_size) = dry_run.size {
-            if let Ok(sch2_header) = parse_jboot_sch2_header(&file_data[offset..]) {
+    if dry_run.success
+        && let Some(total_size) = dry_run.size
+            && let Ok(sch2_header) = parse_jboot_sch2_header(&file_data[offset..]) {
                 result.size = total_size;
                 result.description = format!(
                     "{}, header size: {} bytes, kernel size: {} bytes, kernel compression: {}, kernel entry point: {:#X}",
@@ -137,8 +136,6 @@ pub fn jboot_sch2_parser(
                 );
                 return Ok(result);
             }
-        }
-    }
 
     Err(SignatureError)
 }

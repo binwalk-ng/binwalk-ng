@@ -46,8 +46,8 @@ pub fn encfw_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
         ..Default::default()
     };
 
-    if let Some(magic_bytes) = file_data.get(offset..offset + MAGIC_LEN) {
-        if encfw_known_firmware().contains_key(magic_bytes) {
+    if let Some(magic_bytes) = file_data.get(offset..offset + MAGIC_LEN)
+        && encfw_known_firmware().contains_key(magic_bytes) {
             if result.offset != 0 {
                 result.confidence = CONFIDENCE_LOW;
             }
@@ -60,7 +60,6 @@ pub fn encfw_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
 
             return Ok(result);
         }
-    }
 
     Err(SignatureError)
 }

@@ -24,8 +24,8 @@ pub fn gif_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
     // Do an extraction dry-run to validate the GIF image
     let dry_run = extract_gif_image(file_data, offset, None);
 
-    if dry_run.success {
-        if let Some(total_size) = dry_run.size {
+    if dry_run.success
+        && let Some(total_size) = dry_run.size {
             // Everything looks ok, parse the GIF header to report some info to the user
             if let Ok(gif_header) = parse_gif_header(&file_data[offset..]) {
                 // No sense in extracting a GIF from a file if the GIF data starts at offset 0
@@ -44,7 +44,6 @@ pub fn gif_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
                 return Ok(result);
             }
         }
-    }
 
     Err(SignatureError)
 }

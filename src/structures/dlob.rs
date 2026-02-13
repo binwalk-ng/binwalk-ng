@@ -32,8 +32,8 @@ pub fn parse_dlob_header(dlob_data: &[u8]) -> Result<DlobHeader, StructureError>
         // It is expected that the first header is metadata only
         if dlob_header_p1["data_size"] == 0 {
             // Parse the second part of the header
-            if let Some(header_p2_data) = dlob_data.get(dlob_header_p2_offset..) {
-                if let Ok(dlob_header_p2) = common::parse(header_p2_data, &dlob_structure_p2, "big")
+            if let Some(header_p2_data) = dlob_data.get(dlob_header_p2_offset..)
+                && let Ok(dlob_header_p2) = common::parse(header_p2_data, &dlob_structure_p2, "big")
                 {
                     // Both parts should have the same magic bytes
                     if dlob_header_p1["magic"] == dlob_header_p2["magic"] {
@@ -51,7 +51,6 @@ pub fn parse_dlob_header(dlob_data: &[u8]) -> Result<DlobHeader, StructureError>
                         }
                     }
                 }
-            }
         }
     }
 

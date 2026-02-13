@@ -45,8 +45,7 @@ pub fn parse_dkbs_header(dkbs_data: &[u8]) -> Result<DKBSHeader, StructureError>
         if !header.version.is_empty()
             && !header.board_id.is_empty()
             && !header.boot_device.is_empty()
-        {
-            if let Some(data_size_bytes) = dkbs_data.get(DATA_SIZE_START..DATA_SIZE_END) {
+            && let Some(data_size_bytes) = dkbs_data.get(DATA_SIZE_START..DATA_SIZE_END) {
                 // Parse the payload size field
                 if let Ok(data_size) = common::parse(data_size_bytes, &data_size_field, "big") {
                     if data_size["size"] & 0xFF000000 == 0 {
@@ -64,7 +63,6 @@ pub fn parse_dkbs_header(dkbs_data: &[u8]) -> Result<DKBSHeader, StructureError>
                     return Ok(header);
                 }
             }
-        }
     }
 
     Err(StructureError)

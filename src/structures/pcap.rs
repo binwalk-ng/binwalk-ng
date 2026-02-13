@@ -39,15 +39,12 @@ pub fn parse_pcapng_block(
             let block_footer_end = block_footer_start + footer_size;
 
             // Validate that the block size in the block footer matches the block size in the block header
-            if let Some(block_footer_data) = block_data.get(block_footer_start..block_footer_end) {
-                if let Ok(block_footer) =
+            if let Some(block_footer_data) = block_data.get(block_footer_start..block_footer_end)
+                && let Ok(block_footer) =
                     common::parse(block_footer_data, &block_footer_structure, endianness)
-                {
-                    if block_footer["block_size"] == result.block_size {
+                    && block_footer["block_size"] == result.block_size {
                         return Ok(result);
                     }
-                }
-            }
         }
     }
 

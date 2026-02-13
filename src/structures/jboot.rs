@@ -178,8 +178,8 @@ pub fn parse_jboot_sch2_header(jboot_data: &[u8]) -> Result<JBOOTSchHeader, Stru
             && compression_types.contains_key(&sch2_header["compression_type"])
         {
             // Validate the header checksum
-            if let Some(header_bytes) = jboot_data.get(0..sch2_header["header_size"]) {
-                if sch2_header_crc(header_bytes) == sch2_header["header_crc"] {
+            if let Some(header_bytes) = jboot_data.get(0..sch2_header["header_size"])
+                && sch2_header_crc(header_bytes) == sch2_header["header_crc"] {
                     result.compression =
                         compression_types[&sch2_header["compression_type"]].to_string();
                     result.kernel_checksum = sch2_header["kernel_image_crc"];
@@ -187,7 +187,6 @@ pub fn parse_jboot_sch2_header(jboot_data: &[u8]) -> Result<JBOOTSchHeader, Stru
                     result.kernel_entry_point = sch2_header["ram_entry_address"];
                     return Ok(result);
                 }
-            }
         }
     }
 

@@ -98,13 +98,12 @@ pub fn pem_carver(
         result.size = Some(pem_size);
         result.success = true;
 
-        if let Some(outfile) = fname {
-            if output_directory.is_some() {
+        if let Some(outfile) = fname
+            && output_directory.is_some() {
                 let chroot = Chroot::new(output_directory);
                 result.success =
                     chroot.carve_file(outfile, file_data, offset, result.size.unwrap());
             }
-        }
     }
 
     result

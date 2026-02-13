@@ -31,8 +31,8 @@ pub fn mbr_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
         let dry_run = extract_mbr_partitions(file_data, result.offset, None);
 
         // If dry run was a success, this is likely a valid MBR
-        if dry_run.success {
-            if let Some(mbr_total_size) = dry_run.size {
+        if dry_run.success
+            && let Some(mbr_total_size) = dry_run.size {
                 // Update reported MBR size
                 result.size = mbr_total_size;
 
@@ -58,7 +58,6 @@ pub fn mbr_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
                     return Ok(result);
                 }
             }
-        }
     }
 
     Err(SignatureError)
