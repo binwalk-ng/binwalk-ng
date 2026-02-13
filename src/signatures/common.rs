@@ -40,7 +40,7 @@ pub type SignatureParser = fn(&[u8], usize) -> Result<SignatureResult, Signature
 /// SignatureResult structs are sortable by `offset`.
 ///
 /// SignatureResult structs can be JSON serialized/deserialized with [serde](https://crates.io/crates/serde).
-#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct SignatureResult {
     /// File/data offset where this signature starts
     pub offset: usize,

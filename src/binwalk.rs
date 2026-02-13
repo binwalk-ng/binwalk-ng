@@ -420,7 +420,7 @@ impl Binwalk {
          * want to process/validate the signatures. Each signature's parser function will report the correct
          * starting offset for the signature, so sort the file_map by the SignatureResult.offset value.
          */
-        file_map.sort();
+        file_map.sort_by_key(|e| e.offset);
         next_valid_offset = 0;
 
         /*

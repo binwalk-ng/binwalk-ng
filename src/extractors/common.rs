@@ -27,7 +27,7 @@ pub struct ExtractionError;
 pub type InternalExtractor = fn(&[u8], usize, Option<&str>) -> ExtractionResult;
 
 /// Enum to define either an Internal or External extractor type
-#[derive(Debug, Default, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Default, Clone)]
 pub enum ExtractorType {
     External(String),
     Internal(InternalExtractor),
@@ -36,7 +36,7 @@ pub enum ExtractorType {
 }
 
 /// Describes extractors, both external and internal
-#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Default)]
 pub struct Extractor {
     /// External command or internal function to execute
     pub utility: ExtractorType,
