@@ -7,6 +7,6 @@ fn main() {
         // Initialize binwalk, no extraction
         let binwalker = Binwalk::new();
         // Scan the data provided by AFL
-        binwalker.scan(&data.to_vec());
+        binwalker.scan(data);
     });
 }
