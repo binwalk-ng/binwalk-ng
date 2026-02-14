@@ -157,36 +157,42 @@ pub fn parse_uimage_header(uimage_data: &[u8]) -> Result<UImageHeader, Structure
     ]);
 
     // Parse the first half of the header
-    if let Ok(uimage_header) = common::parse(uimage_data, &uimage_structure, "big") {
-        // Sanity check header fields
-        if valid_os_types.contains_key(&uimage_header["os_type"])
-            && valid_cpu_types.contains_key(&uimage_header["cpu_type"])
-            && valid_image_types.contains_key(&uimage_header["image_type"])
-            && valid_compression_types.contains_key(&uimage_header["compression_type"])
-        {
-            // Get the header bytes to validate the CRC
-            if let Some(crc_data) = uimage_data.get(0..UIMAGE_HEADER_SIZE) {
-                return Ok(UImageHeader {
-                    header_size: UIMAGE_HEADER_SIZE,
-                    name: get_cstring(&uimage_data[UIMAGE_NAME_OFFSET..]),
-                    data_size: uimage_header["data_size"],
-                    data_checksum: uimage_header["data_crc"],
-                    timestamp: uimage_header["creation_timestamp"],
-                    load_address: uimage_header["load_address"],
-                    entry_point_address: uimage_header["entry_point_address"],
-                    compression_type: valid_compression_types[&uimage_header["compression_type"]]
-                        .to_string(),
-                    cpu_type: valid_cpu_types[&uimage_header["cpu_type"]].to_string(),
-                    os_type: valid_os_types[&uimage_header["os_type"]].to_string(),
-                    image_type: valid_image_types[&uimage_header["image_type"]].to_string(),
-                    header_crc_valid: calculate_uimage_header_checksum(crc_data)
-                        == uimage_header["header_crc"],
-                });
-            }
-        }
-    }
+    let uimage_header =
+        common::parse(uimage_data, &uimage_structure, "big").map_err(|_| StructureError)?;
 
-    Err(StructureError)
+    // Sanity check header fields (None becomes Err(StructureError) and returns)
+    let os_type = valid_os_types
+        .get(&uimage_header["os_type"])
+        .ok_or(StructureError)?;
+    let cpu_type = valid_cpu_types
+        .get(&uimage_header["cpu_type"])
+        .ok_or(StructureError)?;
+    let image_type = valid_image_types
+        .get(&uimage_header["image_type"])
+        .ok_or(StructureError)?;
+    let compression_type = valid_compression_types
+        .get(&uimage_header["compression_type"])
+        .ok_or(StructureError)?;
+
+    // Get the header bytes to validate the CRC
+    let crc_data = uimage_data
+        .get(0..UIMAGE_HEADER_SIZE)
+        .ok_or(StructureError)?;
+
+    Ok(UImageHeader {
+        header_size: UIMAGE_HEADER_SIZE,
+        name: get_cstring(&uimage_data[UIMAGE_NAME_OFFSET..]),
+        data_size: uimage_header["data_size"],
+        data_checksum: uimage_header["data_crc"],
+        timestamp: uimage_header["creation_timestamp"],
+        load_address: uimage_header["load_address"],
+        entry_point_address: uimage_header["entry_point_address"],
+        compression_type: compression_type.to_string(),
+        cpu_type: cpu_type.to_string(),
+        os_type: os_type.to_string(),
+        image_type: image_type.to_string(),
+        header_crc_valid: calculate_uimage_header_checksum(crc_data) == uimage_header["header_crc"],
+    })
 }
 
 /// uImage checksum calculator

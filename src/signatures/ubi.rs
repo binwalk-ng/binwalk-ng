@@ -100,12 +100,7 @@ fn get_ubi_image_size(ubi_data: &[u8]) -> Result<usize, SignatureError> {
                 let this_leb_size = this_volume_offset - previous_volume_offset;
 
                 // Keep track of the calculated leb size, and how many times each possible leb size was found
-                if possible_leb_sizes.contains_key(&this_leb_size) {
-                    possible_leb_sizes
-                        .insert(this_leb_size, possible_leb_sizes[&this_leb_size] + 1);
-                } else {
-                    possible_leb_sizes.insert(this_leb_size, 1);
-                }
+                *possible_leb_sizes.entry(this_leb_size).or_insert(0) += 1;
             }
 
             previous_volume_offset = this_volume_offset;

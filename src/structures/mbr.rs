@@ -84,12 +84,10 @@ pub fn parse_mbr_image(mbr_data: &[u8]) -> Result<MBRHeader, StructureError> {
                         // Validate the reported MBR status value
                         if allowed_status_values.contains(&partition_entry["status"]) {
                             // Default to unknown partition type
-                            let mut this_partition_name: &str = "Unknown";
-
-                            // If partition type is known, provide a descriptive name
-                            if known_os_types.contains_key(&partition_entry["os_type"]) {
-                                this_partition_name = known_os_types[&partition_entry["os_type"]];
-                            }
+                            let this_partition_name = known_os_types
+                                .get(&partition_entry["os_type"])
+                                .copied()
+                                .unwrap_or("Unknown");
 
                             // Create an MBRPartition structure for this entry
                             let this_partition = MBRPartition {

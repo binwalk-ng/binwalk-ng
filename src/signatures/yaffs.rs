@@ -67,7 +67,7 @@ pub fn yaffs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
 
 /// Returns the detected page size used by the YAFFS image
 fn get_page_size(file_data: &[u8]) -> Result<usize, SignatureError> {
-    // Spare area is expected to start with these bytes, depending on endianess and ECC settings (YAFFS2 only)
+    // Spare area is expected to start with these bytes, depending on endianness and ECC settings (YAFFS2 only)
     let spare_magics: Vec<Vec<u8>> = vec![
         b"\x00\x00\x10\x00".to_vec(),
         b"\x00\x10\x00\x00".to_vec(),

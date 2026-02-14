@@ -69,10 +69,10 @@ pub fn parse_gzip_header(header_data: &[u8]) -> Result<GzipHeader, StructureErro
         // Sanity check; compression type should be deflate, reserved flag bits should not be set, OS ID should be a known value
         if (gzip_header["flags"] & FLAG_RESERVED) == 0
             && gzip_header["compression_method"] == DEFLATE_COMPRESSION
-            && known_os_ids.contains_key(&gzip_header["osid"])
+            && let Some(os) = known_os_ids.get(&gzip_header["osid"])
         {
             // Set the operating system string
-            header_info.os = known_os_ids[&gzip_header["osid"]].to_string();
+            header_info.os = os.to_string();
 
             // Check if the optional "extra" data follows the standard Gzip header
             if (gzip_header["flags"] & FLAG_EXTRA) != 0 {

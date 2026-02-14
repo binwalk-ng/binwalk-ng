@@ -25,13 +25,7 @@ fn terminal_width() -> usize {
 }
 
 fn line_delimiter() -> String {
-    let mut delim: String = "".to_string();
-
-    for _i in 0..terminal_width() {
-        delim += DELIM_CHARACTER;
-    }
-
-    delim
+    DELIM_CHARACTER.repeat(terminal_width())
 }
 
 fn center_text(text: &str) -> String {
@@ -201,9 +195,9 @@ fn print_extractions(
         // Only print extraction results if an extraction was attempted or explicitly declined
         if signature.extraction_declined {
             printable_extraction = true
-        } else if extraction_results.contains_key(&signature.id) {
+        } else if let Some(extraction_res) = extraction_results.get(&signature.id) {
             printable_extraction = true;
-            extraction_result = Some(&extraction_results[&signature.id]);
+            extraction_result = Some(extraction_res);
         }
 
         if printable_extraction {

@@ -40,7 +40,7 @@ pub fn exception_handler_parser(
 
     let mut endianness: &str = "big";
 
-    // Detect endianess
+    // Detect endianness
     if file_data[offset] == 0 {
         endianness = "little";
     }

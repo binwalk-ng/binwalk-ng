@@ -36,7 +36,7 @@ pub fn parse_symtab_entry(
     // Parse the symbol table entry
     if let Ok(symbol_entry) = common::parse(symbol_data, &symtab_structure, endianness) {
         // Sanity check expected values in the symbol table entry
-        if allowed_symbol_types.contains_key(&symbol_entry["type"])
+        if let Some(symbol_type) = allowed_symbol_types.get(&symbol_entry["type"])
             && symbol_entry["name_ptr"] != 0
             && symbol_entry["value_ptr"] != 0
         {
@@ -44,7 +44,7 @@ pub fn parse_symtab_entry(
                 size: symtab_structure_size,
                 name: symbol_entry["name_ptr"],
                 value: symbol_entry["value_ptr"],
-                symtype: allowed_symbol_types[&symbol_entry["type"]].clone(),
+                symtype: symbol_type.clone(),
             });
         }
     }

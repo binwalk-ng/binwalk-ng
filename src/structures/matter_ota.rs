@@ -70,11 +70,7 @@ pub fn parse_matter_ota_header(ota_data: &[u8]) -> Result<MatterOTAHeader, Struc
                     result.image_digest_type = image_digest_type
                 }
                 ("ImageDigest", Value::OctetString(image_digest)) => {
-                    let mut digest_string = String::new();
-                    for b in image_digest {
-                        digest_string.push_str(&format!("{b:02x}"));
-                    }
-                    result.image_digest = digest_string;
+                    result.image_digest = image_digest.iter().map(|b| format!("{b:02x}")).collect();
                 }
                 // Ignore other fields
                 _ => {}

@@ -18,9 +18,9 @@ pub fn parse_rar_archive_header(rar_data: &[u8]) -> Result<RarArchiveHeader, Str
     // Parse the header
     if let Ok(archive_header) = common::parse(rar_data, &archive_header_structure, "little") {
         // Make sure the version number is one of the known versions
-        if version_map.contains_key(&archive_header["version"]) {
+        if let Some(header_version) = version_map.get(&archive_header["version"]).copied() {
             return Ok(RarArchiveHeader {
-                version: version_map[&archive_header["version"]],
+                version: header_version,
             });
         }
     }

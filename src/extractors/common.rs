@@ -15,7 +15,7 @@ use std::os::unix;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-/// This contstant in command line arguments will be replaced with the path to the input file
+/// This constants in command line arguments will be replaced with the path to the input file
 pub const SOURCE_FILE_PLACEHOLDER: &str = "%e";
 
 /// Return value of InternalExtractor upon error

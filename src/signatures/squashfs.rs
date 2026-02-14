@@ -86,11 +86,10 @@ pub fn squashfs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResul
                             let create_date = epoch_to_string(squashfs_header.timestamp as u32);
 
                             // Make sure the compression type is supported
-                            if squashfs_compression_types.contains_key(&squashfs_header.compression)
+                            if let Some(compression_type) =
+                                squashfs_compression_types.get(&squashfs_header.compression)
                             {
-                                let compression_type_str = squashfs_compression_types
-                                    [&squashfs_header.compression]
-                                    .to_string();
+                                let compression_type_str = compression_type.to_string();
 
                                 // Select the appropriate extractor to use
                                 if squashfs_header.endianness == "little" {

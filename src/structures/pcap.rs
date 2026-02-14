@@ -79,11 +79,11 @@ pub fn parse_pcapng_section_block(block_data: &[u8]) -> Result<PcapSectionBlock,
         ..Default::default()
     };
 
-    // Parse the section header structure; endianess doesn't matter (yet)
+    // Parse the section header structure; endianness doesn't matter (yet)
     if let Ok(section_header) = common::parse(block_data, &section_header_structure, "little") {
         // Determine the endianness based on the endian magic bytes
-        if endian_magics.contains_key(&section_header["endian_magic"]) {
-            result.endianness = endian_magics[&section_header["endian_magic"]].to_string();
+        if let Some(endianness) = endian_magics.get(&section_header["endian_magic"]) {
+            result.endianness = endianness.to_string();
 
             // Parse the section header block as a generic block to ensure it is valid
             if let Ok(block_header) = parse_pcapng_block(block_data, &result.endianness) {

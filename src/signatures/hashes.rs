@@ -8,7 +8,7 @@ pub const CRC32_DESCRIPTION: &str = "CRC32 polynomial table";
 pub const SHA256_DESCRIPTION: &str = "SHA256 hash constants";
 pub const MD5_DESCRIPTION: &str = "MD5 hash constants";
 
-/// CRC32 contstants
+/// CRC32 constants
 pub fn crc32_magic() -> Vec<Vec<u8>> {
     // Order matters! See hash_endianness().
     vec![
@@ -46,7 +46,7 @@ pub fn crc32_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
         description: format!(
             "{}, {} endian",
             CRC32_DESCRIPTION,
-            hash_endianess(file_data, offset, crc32_magic())
+            hash_endianness(file_data, offset, crc32_magic())
         ),
         offset,
         size: HASH_MAGIC_LEN,
@@ -62,7 +62,7 @@ pub fn sha256_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult,
         description: format!(
             "{}, {} endian",
             SHA256_DESCRIPTION,
-            hash_endianess(file_data, offset, sha256_magic())
+            hash_endianness(file_data, offset, sha256_magic())
         ),
         offset,
         size: HASH_MAGIC_LEN,
@@ -78,7 +78,7 @@ pub fn md5_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
         description: format!(
             "{}, {} endian",
             MD5_DESCRIPTION,
-            hash_endianess(file_data, offset, md5_magic())
+            hash_endianness(file_data, offset, md5_magic())
         ),
         offset,
         size: HASH_MAGIC_LEN,
@@ -88,14 +88,13 @@ pub fn md5_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
     Ok(result)
 }
 
-/// Detects hash contstant endianess
-fn hash_endianess(file_data: &[u8], offset: usize, magics: Vec<Vec<u8>>) -> String {
-    let mut endianness: String = "little".to_string();
+/// Detects hash constants endianness
+fn hash_endianness(file_data: &[u8], offset: usize, magics: Vec<Vec<u8>>) -> String {
     let this_magic = &file_data[offset..offset + HASH_MAGIC_LEN];
 
     if *this_magic == magics[0] {
-        endianness = "big".to_string();
+        "big".to_string()
+    } else {
+        "little".to_string()
     }
-
-    endianness
 }

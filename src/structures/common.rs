@@ -172,16 +172,16 @@ pub fn size(structure: &Vec<(&str, &str)>) -> usize {
     struct_size
 }
 
-/// Returns the size of a give type string
 fn type_to_size(ctype: &str) -> Option<usize> {
-    // This table must be updated when new data types are added
-    let size_lookup_table: HashMap<&str, usize> =
-        HashMap::from([("u8", 1), ("u16", 2), ("u24", 3), ("u32", 4), ("u64", 8)]);
-
-    if !size_lookup_table.contains_key(ctype) {
-        error!("Unknown size for structure type '{ctype}'!");
-        return None;
+    match ctype {
+        "u8" => Some(1),
+        "u16" => Some(2),
+        "u24" => Some(3),
+        "u32" => Some(4),
+        "u64" => Some(8),
+        _ => {
+            error!("Unknown size for structure type '{ctype}'!");
+            None
+        }
     }
-
-    Some(size_lookup_table[ctype])
 }

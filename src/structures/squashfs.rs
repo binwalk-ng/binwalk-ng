@@ -80,7 +80,7 @@ pub fn parse_squashfs_header(sqsh_data: &[u8]) -> Result<SquashFSHeader, Structu
     if sqsh_data.len() > MIN_SQUASHFS_HEADER_SIZE {
         /*
          * Regardless of the SquashFS version, the version number is always at the same location in the SquashFS suprblock header.
-         * This can then be reliably used to determine both the SquashFS superblock header version, as well as the endianess used.
+         * This can then be reliably used to determine both the SquashFS superblock header version, as well as the endianness used.
          * Interpret the squashfs major version, assuming little endian.
          */
         let mut squashfs_version: u16 = u16::from_le_bytes(
@@ -165,8 +165,8 @@ pub fn parse_squashfs_header(sqsh_data: &[u8]) -> Result<SquashFSHeader, Structu
                     sqsh_header.uid_table_start = squashfs_header["uid_start"];
 
                     // v3 headers don't have a compression ID
-                    if squashfs_header.contains_key("compression_id") {
-                        sqsh_header.compression = squashfs_header["compression_id"];
+                    if let Some(compression_id) = squashfs_header.get("compression_id").copied() {
+                        sqsh_header.compression = compression_id;
                     }
 
                     return Ok(sqsh_header);
