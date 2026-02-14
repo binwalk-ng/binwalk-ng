@@ -16,7 +16,6 @@ entropy-plot = ["dep:plotly", "dep:entropy"]
 [dependencies]
 log = "0.4.22"
 base64 = "0.22.1"
-chrono = "0.4.38"
 walkdir = "2.5.0"
 entropy = { version = "0.4.2", optional = true }
 colored = "3.0.0"
@@ -42,6 +41,7 @@ plotly = { version = "0.14", features = [
     "kaleido",
     "kaleido_download",
 ], optional = true }
+jiff = "0.2.20"
 
 [dependencies.uuid]
 version = "1.17.0"
