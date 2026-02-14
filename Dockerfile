@@ -64,8 +64,6 @@ ENV TZ=Etc/UTC
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
-ENV UV_SYSTEM_PYTHON=1 UV_BREAK_SYSTEM_PACKAGES=1
 
 WORKDIR ${BUILD_DIR}
 
@@ -79,7 +77,8 @@ COPY --from=build /usr/local/bin/lzfse ${BUILD_DIR}/dumpifs/dumpifs ${BUILD_DIR}
 # Those two packages could be built in the scratch stage and copied over from it,
 # but that would require that I untangle the Eldritch Horror that is the
 # pip build process, and that's not a particular monster that I'm up to slaying today.
-RUN apt-get update -y \
+RUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv,target=/bin/uv \
+    apt-get update -y \
     && apt-get upgrade -y \
     && apt-get -y install --no-install-recommends \
     ca-certificates \
@@ -113,11 +112,11 @@ RUN apt-get update -y \
     clang \
     && dpkg -i ${BUILD_DIR}/${SASQUATCH_FILENAME} \
     && rm ${BUILD_DIR}/${SASQUATCH_FILENAME} \
-    && CC=clang uv pip install uefi_firmware jefferson ubi-reader vmlinux-to-elf \
-    && uv cache clean \
+    && CC=clang uv pip install --system --break-system-packages uefi_firmware jefferson ubi-reader vmlinux-to-elf \
+    && uv cache clean --force \
     && apt-get purge clang -y \
     && apt autoremove -y \
-    && rm -rf /var/cache/apt/archives /var/lib/apt/lists/* /bin/uv /bin/uvx \
+    && rm -rf /var/cache/apt/archives /var/lib/apt/lists/* \
     && mkdir -p ${DEFAULT_WORKING_DIR} \
     && chmod 777 ${DEFAULT_WORKING_DIR}
 
