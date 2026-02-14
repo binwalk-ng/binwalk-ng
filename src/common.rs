@@ -152,23 +152,6 @@ pub fn get_cstring(raw_data: &[u8]) -> String {
     string
 }
 
-/// Returns true if the provided byte is an ASCII number
-///
-/// ## Example
-///
-/// ```
-/// use binwalk_ng::common::is_ascii_number;
-///
-/// assert!(is_ascii_number(0x31));
-/// assert!(!is_ascii_number(0xFE));
-/// ```
-pub fn is_ascii_number(b: u8) -> bool {
-    const ZERO: u8 = 48;
-    const NINE: u8 = 57;
-
-    (ZERO..=NINE).contains(&b)
-}
-
 /// Returns true if the provided byte is a printable ASCII character
 ///
 /// ## Example

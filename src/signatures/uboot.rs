@@ -1,4 +1,4 @@
-use crate::common::{get_cstring, is_ascii_number};
+use crate::common::get_cstring;
 use crate::signatures::common::{CONFIDENCE_MEDIUM, SignatureError, SignatureResult};
 
 /// Human readable description
@@ -22,7 +22,7 @@ pub fn uboot_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
     };
 
     if let Some(expected_number_byte) = file_data.get(offset + NUMBER_OFFSET)
-        && is_ascii_number(*expected_number_byte)
+        && expected_number_byte.is_ascii_digit()
     {
         let uboot_version_string = get_cstring(&file_data[offset + NUMBER_OFFSET..]);
 
