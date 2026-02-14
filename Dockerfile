@@ -46,7 +46,7 @@ RUN apt-get update -y \
     && make -C ${BUILD_DIR}/dumpifs dumpifs \
     && make -C ${BUILD_DIR}/lzfse install \
     && make -C ${BUILD_DIR}/dmg2img dmg2img vfdecrypt HAVE_LZFSE=1 \
-    && curl https://sh.rustup.rs -sSf | sh -s -- -y \
+    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
     && . /root/.cargo/env \
     && cargo build --release
 
@@ -68,7 +68,6 @@ ENV LC_ALL=C.UTF-8
 WORKDIR ${BUILD_DIR}
 
 # Copy the build artifacts from the scratch build stage
-COPY --from=build ${BINWALK_BUILD_DIR}/${SASQUATCH_FILENAME} ${BUILD_DIR}/${SASQUATCH_FILENAME}
 COPY --from=build /usr/local/bin/lzfse ${BUILD_DIR}/dumpifs/dumpifs ${BUILD_DIR}/dmg2img/dmg2img ${BUILD_DIR}/dmg2img/vfdecrypt ${BINWALK_BUILD_DIR}/target/release/binwalk /usr/local/bin/
 
 # Install dependencies, create default working directory, and remove clang & friends.
@@ -78,6 +77,7 @@ COPY --from=build /usr/local/bin/lzfse ${BUILD_DIR}/dumpifs/dumpifs ${BUILD_DIR}
 # but that would require that I untangle the Eldritch Horror that is the
 # pip build process, and that's not a particular monster that I'm up to slaying today.
 RUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv,target=/bin/uv \
+    --mount=from=build,source=${BINWALK_BUILD_DIR}/${SASQUATCH_FILENAME},target=/tmp/sasquatch.deb \
     apt-get update -y \
     && apt-get upgrade -y \
     && apt-get -y install --no-install-recommends \
@@ -110,8 +110,7 @@ RUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv,target=/bin/uv \
     cpio \
     device-tree-compiler \
     clang \
-    && dpkg -i ${BUILD_DIR}/${SASQUATCH_FILENAME} \
-    && rm ${BUILD_DIR}/${SASQUATCH_FILENAME} \
+    && dpkg -i /tmp/sasquatch.deb \
     && CC=clang uv pip install --system --break-system-packages uefi_firmware jefferson ubi-reader vmlinux-to-elf \
     && uv cache clean --force \
     && apt-get purge clang -y \
