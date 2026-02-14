@@ -33,14 +33,14 @@ impl BinwalkError {
     }
 }
 
-/// Analysis results returned by binwalk_ng::analyze
+/// Analysis results returned by Binwalk::analyze
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct AnalysisResults {
     /// Path to the file that was analyzed
     pub file_path: String,
-    /// File signature results, as returned by binwalk_ng::scan
+    /// File signature results, as returned by Binwalk::scan
     pub file_map: Vec<signatures::common::SignatureResult>,
-    /// File extraction results, as returned by binwalk_ng::extract.
+    /// File extraction results, as returned by Binwalk::extract.
     /// HashMap key is the corresponding SignatureResult.id value in `file_map`.
     pub extractions: HashMap<String, extractors::common::ExtractionResult>,
 }
@@ -85,7 +85,7 @@ pub struct Binwalk {
 
 impl Binwalk {
     /// Create a new Binwalk instance with all default values.
-    /// Equivalent to `binwalk::configure(None, None, None, None, None, false)`.
+    /// Equivalent to `Binwalk::configure(None, None, None, None, None, false)`.
     ///
     /// ## Example
     ///

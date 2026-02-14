@@ -59,10 +59,5 @@ pub fn run_binwalk(signature_filter: &str, file_name: &str) -> AnalysisResults {
     )
     .expect("Binwalk initialization failed");
 
-    // Run analysis
-    let results = binwalker.analyze(&binwalker.base_target_file, true);
-
-    // Clean up the output directory
-
-    results
+    binwalker.analyze(&binwalker.base_target_file, true)
 }

@@ -1,4 +1,4 @@
-use crate::binwalk_ng::AnalysisResults;
+use binwalk_ng::AnalysisResults;
 use log::{debug, error, info};
 use std::collections::VecDeque;
 use std::panic;
