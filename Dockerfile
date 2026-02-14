@@ -8,6 +8,8 @@ ARG SASQUATCH_BASE_FILE_URL="https://github.com/onekey-sec/sasquatch/releases/do
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 
 COPY . ${BINWALK_BUILD_DIR}
 WORKDIR ${BINWALK_BUILD_DIR}
@@ -59,6 +61,8 @@ ARG SASQUATCH_FILENAME="sasquatch_1.0.deb"
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 ENV UV_SYSTEM_PYTHON=1 UV_BREAK_SYSTEM_PACKAGES=1

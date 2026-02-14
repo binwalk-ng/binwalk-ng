@@ -1,4 +1,4 @@
-use crate::binwalk::AnalysisResults;
+use crate::binwalk_ng::AnalysisResults;
 use crate::extractors;
 use crate::signatures;
 use colored::ColoredString;

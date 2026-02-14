@@ -6,8 +6,8 @@ use crate::extractors::inflate;
 /// ```
 /// use std::io::ErrorKind;
 /// use std::process::Command;
-/// use binwalk::extractors::common::ExtractorType;
-/// use binwalk::extractors::gpg::gpg_extractor;
+/// use binwalk_ng::extractors::common::ExtractorType;
+/// use binwalk_ng::extractors::gpg::gpg_extractor;
 ///
 /// match gpg_extractor().utility {
 ///     ExtractorType::None => panic!("Invalid extractor type of None"),

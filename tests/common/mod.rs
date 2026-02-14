@@ -46,19 +46,12 @@ pub fn run_binwalk(signature_filter: &str, file_name: &str) -> AnalysisResults {
         .display()
         .to_string();
 
-    // Build the path to the output directory
-    let output_directory = std::path::Path::new("tests")
-        .join("binwalk_integration_test_extractions")
-        .display()
-        .to_string();
-
-    // Delete the output directory, if it exists
-    let _ = std::fs::remove_dir_all(&output_directory);
+    let output_directory = tempfile::tempdir().unwrap();
 
     // Configure binwalk
     let binwalker = Binwalk::configure(
         Some(file_path),
-        Some(output_directory.clone()),
+        Some(output_directory.path().display().to_string()),
         Some(vec![signature_filter.to_string()]),
         None,
         None,
@@ -70,7 +63,6 @@ pub fn run_binwalk(signature_filter: &str, file_name: &str) -> AnalysisResults {
     let results = binwalker.analyze(&binwalker.base_target_file, true);
 
     // Clean up the output directory
-    let _ = std::fs::remove_dir_all(output_directory);
 
     results
 }

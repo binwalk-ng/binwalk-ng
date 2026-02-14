@@ -14,9 +14,9 @@
 //! ### Example
 //!
 //! ```ignore
-//! use binwalk::extractors::foobar::foobar_extractor;
-//! use binwalk::signatures::common::Signature;
-//! use binwalk::signatures::foobar::foobar_parser;
+//! use binwalk_ng::extractors::foobar::foobar_extractor;
+//! use binwalk_ng::signatures::common::Signature;
+//! use binwalk_ng::signatures::foobar::foobar_parser;
 //!
 //! // FooBar file signature
 //! let foobar_signature = Signature {
@@ -55,8 +55,8 @@
 //! ### Example
 //!
 //! ```ignore
-//! use binwalk::extractors::foobar::extract_foobar_file;
-//! use binwalk::signatures::common::{SignatureResult, SignatureError, CONFIDENCE_HIGH};
+//! use binwalk_ng::extractors::foobar::extract_foobar_file;
+//! use binwalk_ng::signatures::common::{SignatureResult, SignatureError, CONFIDENCE_HIGH};
 //!
 //! /// This function is responsible for parsing and validating the FooBar file system data whenever the "magic bytes"
 //! /// are found inside a file. It is provided access to the entire file data, and an offset into the file data where

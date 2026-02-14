@@ -5,7 +5,7 @@ use std::io;
 use std::io::Seek;
 use std::io::Write;
 
-use crate::binwalk::AnalysisResults;
+use crate::binwalk_ng::AnalysisResults;
 use crate::display;
 #[cfg(feature = "entropy-plot")]
 use crate::entropy::FileEntropy;

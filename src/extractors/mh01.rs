@@ -6,8 +6,8 @@ use crate::structures::mh01::parse_mh01_header;
 /// ```
 /// use std::io::ErrorKind;
 /// use std::process::Command;
-/// use binwalk::extractors::common::ExtractorType;
-/// use binwalk::extractors::mh01::mh01_extractor;
+/// use binwalk_ng::extractors::common::ExtractorType;
+/// use binwalk_ng::extractors::mh01::mh01_extractor;
 ///
 /// match mh01_extractor().utility {
 ///     ExtractorType::None => panic!("Invalid extractor type of None"),

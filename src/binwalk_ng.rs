@@ -33,14 +33,14 @@ impl BinwalkError {
     }
 }
 
-/// Analysis results returned by Binwalk::analyze
+/// Analysis results returned by binwalk_ng::analyze
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct AnalysisResults {
     /// Path to the file that was analyzed
     pub file_path: String,
-    /// File signature results, as returned by Binwalk::scan
+    /// File signature results, as returned by binwalk_ng::scan
     pub file_map: Vec<signatures::common::SignatureResult>,
-    /// File extraction results, as returned by Binwalk::extract.
+    /// File extraction results, as returned by binwalk_ng::extract.
     /// HashMap key is the corresponding SignatureResult.id value in `file_map`.
     pub extractions: HashMap<String, extractors::common::ExtractionResult>,
 }
@@ -50,7 +50,7 @@ pub struct AnalysisResults {
 /// ## Example
 ///
 /// ```
-/// use binwalk::Binwalk;
+/// use binwalk_ng::Binwalk;
 ///
 /// let target_file = "/bin/ls";
 /// let data_to_scan = std::fs::read(target_file).expect("Unable to read file");
@@ -85,12 +85,12 @@ pub struct Binwalk {
 
 impl Binwalk {
     /// Create a new Binwalk instance with all default values.
-    /// Equivalent to `Binwalk::configure(None, None, None, None, None, false)`.
+    /// Equivalent to `binwalk::configure(None, None, None, None, None, false)`.
     ///
     /// ## Example
     ///
     /// ```
-    /// use binwalk::Binwalk;
+    /// use binwalk_ng::Binwalk;
     ///
     /// let binwalker = Binwalk::new();
     /// ```
@@ -113,8 +113,8 @@ impl Binwalk {
     /// ## Example
     ///
     /// ```
-    /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_binwalk_rs_102_0() -> Result<binwalk::Binwalk, binwalk::BinwalkError> {
-    /// use binwalk::Binwalk;
+    /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_binwalk_rs_102_0() -> Result<binwalk_ng::Binwalk, binwalk_ng::BinwalkError> {
+    /// use binwalk_ng::Binwalk;
     ///
     /// // Don't scan for these file signatures
     /// let exclude_filters: Vec<String> = vec!["jpeg".to_string(), "png".to_string()];
@@ -245,7 +245,7 @@ impl Binwalk {
     /// ## Example
     ///
     /// ```
-    /// use binwalk::Binwalk;
+    /// use binwalk_ng::Binwalk;
     ///
     /// let target_file = "/bin/ls";
     /// let data_to_scan = std::fs::read(target_file).expect("Unable to read file");
@@ -563,8 +563,8 @@ impl Binwalk {
     /// ## Example
     ///
     /// ```
-    /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_binwalk_rs_529_0() -> Result<binwalk::Binwalk, binwalk::BinwalkError> {
-    /// use binwalk::Binwalk;
+    /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_binwalk_rs_529_0() -> Result<binwalk_ng::Binwalk, binwalk_ng::BinwalkError> {
+    /// use binwalk_ng::Binwalk;
     ///
     /// let target_path = std::path::Path::new("tests")
     ///     .join("inputs")
@@ -572,12 +572,13 @@ impl Binwalk {
     ///     .display()
     ///     .to_string();
     ///
+    /// # let tempdir = tempfile::tempdir().unwrap();
     /// let extraction_directory = std::path::Path::new("tests")
     ///     .join("extractions")
+    ///     .join(tempdir)
     ///     .display()
     ///     .to_string();
     ///
-    /// # std::fs::remove_dir_all(&extraction_directory);
     /// let binwalker = Binwalk::configure(Some(target_path),
     ///                                    Some(extraction_directory.clone()),
     ///                                    None,
@@ -597,7 +598,6 @@ impl Binwalk {
     ///     .join("0")
     ///     .join("decompressed.bin")
     ///     .exists(), true);
-    /// # std::fs::remove_dir_all(&extraction_directory);
     /// # Ok(binwalker)
     /// # } _doctest_main_src_binwalk_rs_529_0(); }
     /// ```
@@ -678,8 +678,8 @@ impl Binwalk {
     /// ## Example
     ///
     /// ```
-    /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_binwalk_rs_672_0() -> Result<binwalk::Binwalk, binwalk::BinwalkError> {
-    /// use binwalk::{Binwalk, common};
+    /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_binwalk_rs_672_0() -> Result<binwalk_ng::Binwalk, binwalk_ng::BinwalkError> {
+    /// use binwalk_ng::{Binwalk, common};
     ///
     /// let target_path = std::path::Path::new("tests")
     ///     .join("inputs")
@@ -687,14 +687,15 @@ impl Binwalk {
     ///     .display()
     ///     .to_string();
     ///
+    /// # let tempdir = tempfile::tempdir().unwrap();
     /// let extraction_directory = std::path::Path::new("tests")
     ///     .join("extractions")
+    /// #   .join(tempdir)
     ///     .display()
     ///     .to_string();
     ///
     /// let file_data = common::read_file(&target_path).expect("Failed to read file data");
     ///
-    /// # std::fs::remove_dir_all(&extraction_directory);
     /// let binwalker = Binwalk::configure(Some(target_path),
     ///                                    Some(extraction_directory.clone()),
     ///                                    None,
@@ -711,7 +712,6 @@ impl Binwalk {
     ///     .join("0")
     ///     .join("decompressed.bin")
     ///     .exists(), true);
-    /// # std::fs::remove_dir_all(&extraction_directory);
     /// # Ok(binwalker)
     /// # } _doctest_main_src_binwalk_rs_672_0(); }
     /// ```
@@ -753,8 +753,8 @@ impl Binwalk {
     /// ## Example
     ///
     /// ```
-    /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_binwalk_rs_745_0() -> Result<binwalk::Binwalk, binwalk::BinwalkError> {
-    /// use binwalk::Binwalk;
+    /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_binwalk_rs_745_0() -> Result<binwalk_ng::Binwalk, binwalk_ng::BinwalkError> {
+    /// use binwalk_ng::Binwalk;
     ///
     /// let target_path = std::path::Path::new("tests")
     ///     .join("inputs")
@@ -762,12 +762,13 @@ impl Binwalk {
     ///     .display()
     ///     .to_string();
     ///
+    /// # let tempdir = tempfile::tempdir().unwrap();
     /// let extraction_directory = std::path::Path::new("tests")
     ///     .join("extractions")
+    /// #   .join(tempdir)
     ///     .display()
     ///     .to_string();
     ///
-    /// # std::fs::remove_dir_all(&extraction_directory);
     /// let binwalker = Binwalk::configure(Some(target_path),
     ///                                    Some(extraction_directory.clone()),
     ///                                    None,
@@ -784,7 +785,6 @@ impl Binwalk {
     ///     .join("0")
     ///     .join("decompressed.bin")
     ///     .exists(), true);
-    /// # std::fs::remove_dir_all(&extraction_directory);
     /// # Ok(binwalker)
     /// # } _doctest_main_src_binwalk_rs_745_0(); }
     /// ```

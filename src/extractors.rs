@@ -27,7 +27,7 @@
 //! To define this external utility as an extractor:
 //!
 //! ```no_run
-//! use binwalk::extractors::common::{Extractor, ExtractorType, SOURCE_FILE_PLACEHOLDER};
+//! use binwalk_ng::extractors::common::{Extractor, ExtractorType, SOURCE_FILE_PLACEHOLDER};
 //!
 //! /// This function returns an instance of extractors::common::Extractor, which describes how to run the unfoobar utility.
 //! pub fn foobar_extractor() -> Extractor {
@@ -81,9 +81,9 @@
 //! ### Example
 //!
 //! ```ignore
-//! use binwalk::common::crc32;
-//! use binwalk::extractors::common::{Chroot, Extractor, ExtractionResult, ExtractorType};
-//! use binwalk::structures::foobar::parse_foobar_header;
+//! use binwalk_ng::common::crc32;
+//! use binwalk_ng::extractors::common::{Chroot, Extractor, ExtractionResult, ExtractorType};
+//! use binwalk_ng::structures::foobar::parse_foobar_header;
 //!
 //! /// This function *defines* an internal extractor; it is not the actual extractor
 //! pub fn foobar_extractor() -> Extractor {

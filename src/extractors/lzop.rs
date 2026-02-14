@@ -5,8 +5,8 @@ use crate::extractors;
 /// ```
 /// use std::io::ErrorKind;
 /// use std::process::Command;
-/// use binwalk::extractors::common::ExtractorType;
-/// use binwalk::extractors::lzop::lzop_extractor;
+/// use binwalk_ng::extractors::common::ExtractorType;
+/// use binwalk_ng::extractors::lzop::lzop_extractor;
 ///
 /// match lzop_extractor().utility {
 ///     ExtractorType::None => panic!("Invalid extractor type of None"),

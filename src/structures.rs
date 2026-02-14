@@ -39,8 +39,8 @@
 //! To write a structure parser for a simple, fictional, `FooBar` file header:
 //!
 //! ```no_run
-//! use binwalk::common::{crc32, get_cstring};
-//! use binwalk::structures::common::{self, StructureError};
+//! use binwalk_ng::common::{crc32, get_cstring};
+//! use binwalk_ng::structures::common::{self, StructureError};
 //!
 //! #[derive(Debug, Default, Clone)]
 //! pub struct FooBarHeader {

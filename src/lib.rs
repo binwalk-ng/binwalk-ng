@@ -3,7 +3,7 @@
 //! ## Example
 //!
 //!```no_run
-//! use binwalk::Binwalk;
+//! use binwalk_ng::Binwalk;
 //!
 //! // Create a new Binwalk instance
 //! let binwalker = Binwalk::new();
@@ -16,10 +16,10 @@
 //!    println!("{:#?}", result);
 //! }
 //! ```
-mod binwalk;
+mod binwalk_ng;
 pub mod common;
 pub mod extractors;
 mod magic;
 pub mod signatures;
 pub mod structures;
-pub use binwalk::{AnalysisResults, Binwalk, BinwalkError};
+pub use binwalk_ng::{AnalysisResults, Binwalk, BinwalkError};

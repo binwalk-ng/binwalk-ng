@@ -5,8 +5,8 @@ use crate::extractors;
 /// ```
 /// use std::io::ErrorKind;
 /// use std::process::Command;
-/// use binwalk::extractors::common::ExtractorType;
-/// use binwalk::extractors::squashfs::squashfs_extractor;
+/// use binwalk_ng::extractors::common::ExtractorType;
+/// use binwalk_ng::extractors::squashfs::squashfs_extractor;
 ///
 /// match squashfs_extractor().utility {
 ///     ExtractorType::None => panic!("Invalid extractor type of None"),
@@ -38,8 +38,8 @@ pub fn squashfs_extractor() -> extractors::common::Extractor {
 /// ```
 /// use std::io::ErrorKind;
 /// use std::process::Command;
-/// use binwalk::extractors::common::ExtractorType;
-/// use binwalk::extractors::squashfs::squashfs_le_extractor;
+/// use binwalk_ng::extractors::common::ExtractorType;
+/// use binwalk_ng::extractors::squashfs::squashfs_le_extractor;
 ///
 /// match squashfs_le_extractor().utility {
 ///     ExtractorType::None => panic!("Invalid extractor type of None"),
@@ -74,8 +74,8 @@ pub fn squashfs_le_extractor() -> extractors::common::Extractor {
 /// ```
 /// use std::io::ErrorKind;
 /// use std::process::Command;
-/// use binwalk::extractors::common::ExtractorType;
-/// use binwalk::extractors::squashfs::squashfs_be_extractor;
+/// use binwalk_ng::extractors::common::ExtractorType;
+/// use binwalk_ng::extractors::squashfs::squashfs_be_extractor;
 ///
 /// match squashfs_be_extractor().utility {
 ///     ExtractorType::None => panic!("Invalid extractor type of None"),
@@ -110,8 +110,8 @@ pub fn squashfs_be_extractor() -> extractors::common::Extractor {
 /// ```
 /// use std::io::ErrorKind;
 /// use std::process::Command;
-/// use binwalk::extractors::common::ExtractorType;
-/// use binwalk::extractors::squashfs::squashfs_v4_be_extractor;
+/// use binwalk_ng::extractors::common::ExtractorType;
+/// use binwalk_ng::extractors::squashfs::squashfs_v4_be_extractor;
 ///
 /// match squashfs_v4_be_extractor().utility {
 ///     ExtractorType::None => panic!("Invalid extractor type of None"),

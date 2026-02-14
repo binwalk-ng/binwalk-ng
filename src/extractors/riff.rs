@@ -6,8 +6,8 @@ use crate::structures::riff::parse_riff_header;
 /// ```
 /// use std::io::ErrorKind;
 /// use std::process::Command;
-/// use binwalk::extractors::common::ExtractorType;
-/// use binwalk::extractors::riff::riff_extractor;
+/// use binwalk_ng::extractors::common::ExtractorType;
+/// use binwalk_ng::extractors::riff::riff_extractor;
 ///
 /// match riff_extractor().utility {
 ///     ExtractorType::None => panic!("Invalid extractor type of None"),

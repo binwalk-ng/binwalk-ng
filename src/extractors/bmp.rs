@@ -6,8 +6,8 @@ use crate::structures::bmp::{get_dib_header_size, parse_bmp_file_header};
 /// ```
 /// use std::io::ErrorKind;
 /// use std::process::Command;
-/// use binwalk::extractors::common::ExtractorType;
-/// use binwalk::extractors::bmp::bmp_extractor;
+/// use binwalk_ng::extractors::common::ExtractorType;
+/// use binwalk_ng::extractors::bmp::bmp_extractor;
 ///
 /// match bmp_extractor().utility {
 ///     ExtractorType::None => panic!("Invalid extractor type of None"),

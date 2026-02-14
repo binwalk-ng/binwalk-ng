@@ -6,8 +6,8 @@ use crate::signatures::zip::find_zip_eof;
 /// ```
 /// use std::io::ErrorKind;
 /// use std::process::Command;
-/// use binwalk::extractors::common::ExtractorType;
-/// use binwalk::extractors::dahua_zip::dahua_zip_extractor;
+/// use binwalk_ng::extractors::common::ExtractorType;
+/// use binwalk_ng::extractors::dahua_zip::dahua_zip_extractor;
 ///
 /// match dahua_zip_extractor().utility {
 ///     ExtractorType::None => panic!("Invalid extractor type of None"),

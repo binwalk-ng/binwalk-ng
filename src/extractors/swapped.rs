@@ -5,8 +5,8 @@ use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorTy
 /// ```
 /// use std::io::ErrorKind;
 /// use std::process::Command;
-/// use binwalk::extractors::common::ExtractorType;
-/// use binwalk::extractors::swapped::swapped_extractor_u16;
+/// use binwalk_ng::extractors::common::ExtractorType;
+/// use binwalk_ng::extractors::swapped::swapped_extractor_u16;
 ///
 /// match swapped_extractor_u16().utility {
 ///     ExtractorType::None => panic!("Invalid extractor type of None"),
@@ -76,7 +76,7 @@ fn extract_swapped(
 /// ## Example:
 ///
 /// ```
-/// use binwalk::extractors::swapped::byte_swap;
+/// use binwalk_ng::extractors::swapped::byte_swap;
 ///
 /// assert_eq!(byte_swap(b"ABCD", 2), b"CDAB");
 /// ```

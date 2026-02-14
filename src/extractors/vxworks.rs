@@ -11,8 +11,8 @@ use serde_json;
 /// ```
 /// use std::io::ErrorKind;
 /// use std::process::Command;
-/// use binwalk::extractors::common::ExtractorType;
-/// use binwalk::extractors::vxworks::vxworks_symtab_extractor;
+/// use binwalk_ng::extractors::common::ExtractorType;
+/// use binwalk_ng::extractors::vxworks::vxworks_symtab_extractor;
 ///
 /// match vxworks_symtab_extractor().utility {
 ///     ExtractorType::None => panic!("Invalid extractor type of None"),

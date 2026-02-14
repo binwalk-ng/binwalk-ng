@@ -6,8 +6,8 @@ use liblzma::stream::{Action, Status, Stream};
 /// ```
 /// use std::io::ErrorKind;
 /// use std::process::Command;
-/// use binwalk::extractors::common::ExtractorType;
-/// use binwalk::extractors::lzma::lzma_extractor;
+/// use binwalk_ng::extractors::common::ExtractorType;
+/// use binwalk_ng::extractors::lzma::lzma_extractor;
 ///
 /// match lzma_extractor().utility {
 ///     ExtractorType::None => panic!("Invalid extractor type of None"),

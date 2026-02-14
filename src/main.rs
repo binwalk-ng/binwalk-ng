@@ -1,4 +1,4 @@
-use binwalk::AnalysisResults;
+use crate::binwalk_ng::AnalysisResults;
 use log::{debug, error, info};
 use std::collections::VecDeque;
 use std::panic;
@@ -9,7 +9,7 @@ use std::thread;
 use std::time;
 use threadpool::ThreadPool;
 
-mod binwalk;
+mod binwalk_ng;
 mod cliparser;
 mod common;
 mod display;
@@ -104,7 +104,7 @@ fn main() -> ExitCode {
     }
 
     // Initialize binwalk
-    let binwalker = match binwalk::Binwalk::configure(
+    let binwalker = match binwalk_ng::Binwalk::configure(
         cliargs.file_name,
         output_directory,
         cliargs.include,
@@ -288,7 +288,7 @@ fn should_display(results: &AnalysisResults, file_count: usize, verbose: bool) -
 /// Spawn a worker thread to analyze a file
 fn spawn_worker(
     pool: &ThreadPool,
-    bw: binwalk::Binwalk,
+    bw: binwalk_ng::Binwalk,
     target_file: String,
     stdin: bool,
     do_extraction: bool,
@@ -327,7 +327,7 @@ fn spawn_worker(
 /// Returns the number of carved files created.
 /// Note that unknown blocks of file data are also carved to disk, so the number of files
 /// created may be larger than the number of results defined in results.file_map.
-fn carve_file_map(file_data: &[u8], results: &binwalk::AnalysisResults) -> usize {
+fn carve_file_map(file_data: &[u8], results: &binwalk_ng::AnalysisResults) -> usize {
     let mut carve_count: usize = 0;
     let mut last_known_offset: usize = 0;
     let mut unknown_bytes: Vec<(usize, usize)> = Vec::new();

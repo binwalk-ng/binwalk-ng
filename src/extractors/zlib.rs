@@ -9,8 +9,8 @@ pub const CHECKSUM_SIZE: usize = 4;
 /// ```
 /// use std::io::ErrorKind;
 /// use std::process::Command;
-/// use binwalk::extractors::common::ExtractorType;
-/// use binwalk::extractors::zlib::zlib_extractor;
+/// use binwalk_ng::extractors::common::ExtractorType;
+/// use binwalk_ng::extractors::zlib::zlib_extractor;
 ///
 /// match zlib_extractor().utility {
 ///     ExtractorType::None => panic!("Invalid extractor type of None"),

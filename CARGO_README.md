@@ -1,4 +1,4 @@
-# binwalk
+# binwalk-ng
 
 A Rust implementation of the Binwalk firmware analysis tool.
 
@@ -13,7 +13,7 @@ build-essential libfontconfig1-dev liblzma-dev
 ## Example
 
 ```
-use binwalk::Binwalk;
+use binwalk_ng::Binwalk;
 
 // Create a new Binwalk instance
 let binwalker = Binwalk::new();

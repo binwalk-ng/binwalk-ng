@@ -7,8 +7,8 @@ use crate::structures::androidsparse;
 /// ```
 /// use std::io::ErrorKind;
 /// use std::process::Command;
-/// use binwalk::extractors::common::ExtractorType;
-/// use binwalk::extractors::androidsparse::android_sparse_extractor;
+/// use binwalk_ng::extractors::common::ExtractorType;
+/// use binwalk_ng::extractors::androidsparse::android_sparse_extractor;
 ///
 /// match android_sparse_extractor().utility {
 ///     ExtractorType::None => panic!("Invalid extractor type of None"),

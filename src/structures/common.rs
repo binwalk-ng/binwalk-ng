@@ -33,8 +33,8 @@ pub struct StructureError;
 /// ## Example:
 ///
 /// ```
-/// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_structures_common_rs_34_0() -> Result<bool, binwalk::structures::common::StructureError> {
-/// use binwalk::structures;
+/// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_structures_common_rs_34_0() -> Result<bool, binwalk_ng::structures::common::StructureError> {
+/// use binwalk_ng::structures;
 ///
 /// let my_structure = vec![
 ///     ("magic", "u32"),
@@ -144,7 +144,7 @@ pub fn parse(
 /// ## Example:
 ///
 /// ```
-/// use binwalk::structures;
+/// use binwalk_ng::structures;
 ///
 /// let my_structure = vec![
 ///     ("magic", "u32"),

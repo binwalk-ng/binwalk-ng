@@ -10,7 +10,7 @@ use std::io::Read;
 ///
 /// ```
 /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_common_rs_11_0() -> Result<(), Box<dyn std::error::Error>> {
-/// use binwalk::common::read_input;
+/// use binwalk_ng::common::read_input;
 ///
 /// let file_data = read_input("/etc/passwd", false)?;
 /// assert!(file_data.len() > 0);
@@ -43,7 +43,7 @@ pub fn read_stdin() -> Result<Vec<u8>, std::io::Error> {
 ///
 /// ```
 /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_common_rs_48_0() -> Result<(), Box<dyn std::error::Error>> {
-/// use binwalk::common::read_file;
+/// use binwalk_ng::common::read_file;
 ///
 /// let file_data = read_file("/etc/passwd")?;
 /// assert!(file_data.len() > 0);
@@ -81,7 +81,7 @@ pub fn read_file(file: impl Into<String>) -> Result<Vec<u8>, std::io::Error> {
 /// ## Example
 ///
 /// ```
-/// use binwalk::common::crc32;
+/// use binwalk_ng::common::crc32;
 ///
 /// let my_data: &[u8] = b"ABCD";
 ///
@@ -98,7 +98,7 @@ pub fn crc32(data: &[u8]) -> u32 {
 /// ## Example
 ///
 /// ```
-/// use binwalk::common::epoch_to_string;
+/// use binwalk_ng::common::epoch_to_string;
 ///
 /// let timestamp = epoch_to_string(0);
 ///
@@ -133,7 +133,7 @@ fn get_cstring_bytes(raw_data: &[u8]) -> Vec<u8> {
 /// ## Example
 ///
 /// ```
-/// use binwalk::common::get_cstring;
+/// use binwalk_ng::common::get_cstring;
 ///
 /// let raw_data: &[u8] = b"this_is_a_c_string\x00";
 ///
@@ -157,7 +157,7 @@ pub fn get_cstring(raw_data: &[u8]) -> String {
 /// ## Example
 ///
 /// ```
-/// use binwalk::common::is_ascii_number;
+/// use binwalk_ng::common::is_ascii_number;
 ///
 /// assert!(is_ascii_number(0x31));
 /// assert!(!is_ascii_number(0xFE));
@@ -174,7 +174,7 @@ pub fn is_ascii_number(b: u8) -> bool {
 /// ## Example
 ///
 /// ```
-/// use binwalk::common::is_printable_ascii;
+/// use binwalk_ng::common::is_printable_ascii;
 ///
 /// assert!(is_printable_ascii(0x41));
 /// assert!(!is_printable_ascii(0xFE));
@@ -196,7 +196,7 @@ pub fn is_printable_ascii(b: u8) -> bool {
 /// ## Example
 ///
 /// ```
-/// use binwalk::common::is_offset_safe;
+/// use binwalk_ng::common::is_offset_safe;
 ///
 /// let my_data: &[u8] = b"ABCD";
 /// let available_data = my_data.len();

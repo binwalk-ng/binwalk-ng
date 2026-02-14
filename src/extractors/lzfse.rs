@@ -5,8 +5,8 @@ use crate::extractors::common::{Extractor, ExtractorType, SOURCE_FILE_PLACEHOLDE
 /// ```
 /// use std::io::ErrorKind;
 /// use std::process::Command;
-/// use binwalk::extractors::common::ExtractorType;
-/// use binwalk::extractors::lzfse::lzfse_extractor;
+/// use binwalk_ng::extractors::common::ExtractorType;
+/// use binwalk_ng::extractors::lzfse::lzfse_extractor;
 ///
 /// match lzfse_extractor().utility {
 ///     ExtractorType::None => panic!("Invalid extractor type of None"),

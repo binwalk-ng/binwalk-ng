@@ -6,8 +6,8 @@ use aho_corasick::AhoCorasick;
 /// ```
 /// use std::io::ErrorKind;
 /// use std::process::Command;
-/// use binwalk::extractors::common::ExtractorType;
-/// use binwalk::extractors::pem::pem_key_extractor;
+/// use binwalk_ng::extractors::common::ExtractorType;
+/// use binwalk_ng::extractors::pem::pem_key_extractor;
 ///
 /// match pem_key_extractor().utility {
 ///     ExtractorType::None => panic!("Invalid extractor type of None"),
@@ -36,8 +36,8 @@ pub fn pem_key_extractor() -> Extractor {
 /// ```
 /// use std::io::ErrorKind;
 /// use std::process::Command;
-/// use binwalk::extractors::common::ExtractorType;
-/// use binwalk::extractors::pem::pem_certificate_extractor;
+/// use binwalk_ng::extractors::common::ExtractorType;
+/// use binwalk_ng::extractors::pem::pem_certificate_extractor;
 ///
 /// match pem_certificate_extractor().utility {
 ///     ExtractorType::None => panic!("Invalid extractor type of None"),

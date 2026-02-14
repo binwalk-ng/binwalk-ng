@@ -6,8 +6,8 @@ use crate::structures::svg::parse_svg_image;
 /// ```
 /// use std::io::ErrorKind;
 /// use std::process::Command;
-/// use binwalk::extractors::common::ExtractorType;
-/// use binwalk::extractors::svg::svg_extractor;
+/// use binwalk_ng::extractors::common::ExtractorType;
+/// use binwalk_ng::extractors::svg::svg_extractor;
 ///
 /// match svg_extractor().utility {
 ///     ExtractorType::None => panic!("Invalid extractor type of None"),

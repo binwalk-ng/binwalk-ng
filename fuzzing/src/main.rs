@@ -1,5 +1,5 @@
 use afl::fuzz;
-use binwalk::Binwalk;
+use binwalk_ng::Binwalk;
 
 fn main() {
     // AFL makes this real simple...
