@@ -14,7 +14,7 @@ pub struct CliArgs {
     #[arg(short = 'L', long)]
     pub list: bool,
 
-    /// Path to the file to analyze, or "-" for stdin
+    /// Path to the file to analyze
     /// (Required unless listing signatures)
     #[arg(
         value_name = "FILE",

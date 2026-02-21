@@ -289,7 +289,7 @@ fn spawn_worker(
 ) {
     pool.execute(move || {
         // Read in file data
-        let file_data = match common::read_input(&target_file) {
+        let file_data = match common::read_file(&target_file) {
             Err(_) => {
                 error!("Failed to read {target_file} data");
                 b"".to_vec()

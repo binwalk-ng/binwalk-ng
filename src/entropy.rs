@@ -1,4 +1,4 @@
-use crate::common::read_input;
+use crate::common::read_file;
 use entropy::shannon_entropy;
 use plotly::layout::{Axis, Layout};
 use plotly::{ImageFormat, Plot, Scatter};
@@ -70,7 +70,7 @@ pub fn plot(
     };
 
     // Read in the target file data
-    if let Ok(file_data) = read_input(target_file) {
+    if let Ok(file_data) = read_file(target_file) {
         // Calculate the entropy of each file block
         file_entropy.blocks = blocks(&file_data);
 

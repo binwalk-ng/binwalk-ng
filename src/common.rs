@@ -1,47 +1,8 @@
 //! Common Functions
 use log::{debug, error};
-use std::ffi::OsStr;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
-
-/// Read a data into memory, either from disk or from stdin, and return its contents.
-///
-/// ## Example
-///
-/// ```
-/// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_common_rs_11_0() -> Result<(), Box<dyn std::error::Error>> {
-/// use binwalk_ng::common::read_input;
-///
-/// let file_data = read_input("/etc/passwd")?;
-/// assert!(file_data.len() > 0);
-/// # Ok(())
-/// # } _doctest_main_src_common_rs_11_0(); }
-/// ```
-pub fn read_input(file: impl AsRef<Path>) -> Result<Vec<u8>, std::io::Error> {
-    let path = file.as_ref();
-    if path == OsStr::new("-") {
-        read_stdin()
-    } else {
-        read_file(path)
-    }
-}
-
-/// Read data from standard input and return its contents.
-pub fn read_stdin() -> Result<Vec<u8>, std::io::Error> {
-    let mut stdin_data = Vec::new();
-
-    match std::io::stdin().read_to_end(&mut stdin_data) {
-        Err(e) => {
-            error!("Failed to read data from stdin: {e}");
-            Err(e)
-        }
-        Ok(nbytes) => {
-            debug!("Loaded {nbytes} bytes from stdin");
-            Ok(stdin_data)
-        }
-    }
-}
 
 /// Read a file data into memory and return its contents.
 ///
