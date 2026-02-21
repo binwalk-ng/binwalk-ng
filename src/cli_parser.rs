@@ -53,11 +53,11 @@ pub struct CliArgs {
 
     /// Save entropy graph as a PNG file
     #[arg(short, long, value_name = "PATH", value_hint = clap::ValueHint::FilePath)]
-    pub png: Option<String>,
+    pub png: Option<PathBuf>,
 
     /// Log JSON results to a file ('-' for stdout)
     #[arg(short, long, value_name = "LOG_FILE", value_hint = clap::ValueHint::FilePath)]
-    pub log: Option<String>,
+    pub log: Option<PathBuf>,
 
     /// Manually specify the number of threads to use
     #[arg(short, long, value_name = "INT")]

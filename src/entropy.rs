@@ -3,6 +3,7 @@ use entropy::shannon_entropy;
 use plotly::layout::{Axis, Layout};
 use plotly::{ImageFormat, Plot, Scatter};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct EntropyError;
@@ -58,7 +59,7 @@ fn blocks(data: &[u8]) -> Vec<BlockEntropy> {
 
 pub fn plot(
     file_path: impl Into<String>,
-    out_file: Option<String>,
+    out_file: Option<PathBuf>,
 ) -> Result<FileEntropy, EntropyError> {
     let mut x: Vec<usize> = Vec::new();
     let mut y: Vec<f32> = Vec::new();

@@ -4,6 +4,7 @@ use std::fs;
 use std::io;
 use std::io::Seek;
 use std::io::Write;
+use std::path::PathBuf;
 
 use crate::binwalk_ng::AnalysisResults;
 use crate::display;
@@ -24,12 +25,12 @@ pub enum JSONType {
 
 #[derive(Debug, Default, Clone)]
 pub struct JsonLogger {
-    pub json_file: Option<String>,
+    pub json_file: Option<PathBuf>,
     pub json_file_initialized: bool,
 }
 
 impl JsonLogger {
-    pub fn new(log_file: Option<String>) -> JsonLogger {
+    pub fn new(log_file: Option<PathBuf>) -> JsonLogger {
         let mut new_instance = JsonLogger {
             ..Default::default()
         };
@@ -74,7 +75,7 @@ impl JsonLogger {
                     .open(log_file)
                 {
                     Err(e) => {
-                        error!("Failed to open JSON log file '{log_file}': {e}");
+                        error!("Failed to open JSON log file '{}': {e}", log_file.display());
                     }
                     Ok(mut fp) => {
                         // Seek to the end of the file and get the cursor position
