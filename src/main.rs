@@ -153,7 +153,7 @@ fn main() -> ExitCode {
     );
 
     // Queue the initial file path
-    target_files.insert(target_files.len(), binwalker.base_target_file.clone());
+    target_files.push_back(binwalker.base_target_file.clone());
 
     /*
      * Main loop.
@@ -222,7 +222,7 @@ fn main() -> ExitCode {
                             &extraction_result.output_directory,
                         ) {
                             debug!("Queuing {file_path} for analysis");
-                            target_files.insert(target_files.len(), file_path.clone());
+                            target_files.push_back(file_path.clone());
                         }
                     }
                 }
