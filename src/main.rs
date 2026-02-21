@@ -3,6 +3,7 @@ use clap::Parser;
 use log::{debug, error, info};
 use std::collections::VecDeque;
 use std::panic;
+use std::path::PathBuf;
 use std::process;
 use std::process::ExitCode;
 use std::sync::mpsc;
@@ -34,7 +35,7 @@ fn main() -> ExitCode {
     const BINWALK_RM_SYMLINK: &str = "BINWALK_RM_EXTRACTION_SYMLINK";
 
     // Output directory for extracted files
-    let mut output_directory: Option<String> = None;
+    let mut output_directory: Option<PathBuf> = None;
 
     /*
      * Maintain a queue of files waiting to be analyzed.

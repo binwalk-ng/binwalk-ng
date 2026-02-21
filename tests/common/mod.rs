@@ -51,7 +51,7 @@ pub fn run_binwalk(signature_filter: &str, file_name: &str) -> AnalysisResults {
     // Configure binwalk
     let binwalker = Binwalk::configure(
         Some(file_path),
-        Some(output_directory.path().display().to_string()),
+        Some(output_directory.path().to_path_buf()),
         vec![signature_filter.to_string()],
         vec![],
         None,

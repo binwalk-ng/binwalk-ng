@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::Parser;
 
 #[derive(Parser, Debug)]
@@ -84,5 +86,5 @@ pub struct CliArgs {
 
     /// Extract files/folders to a custom directory
     #[arg(short, long, default_value = "extractions", value_hint = clap::ValueHint::DirPath)]
-    pub directory: String,
+    pub directory: PathBuf,
 }

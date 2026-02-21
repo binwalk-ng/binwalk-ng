@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path;
+use std::path::PathBuf;
 use uuid::Uuid;
 
 #[cfg(windows)]
@@ -130,7 +131,7 @@ impl Binwalk {
     /// ```
     pub fn configure(
         target_file_name: Option<String>,
-        output_directory: Option<String>,
+        output_directory: Option<PathBuf>,
         include: Vec<String>,
         exclude: Vec<String>,
         signatures: Option<Vec<signatures::common::Signature>>,
@@ -160,11 +161,12 @@ impl Binwalk {
                 match path::absolute(&extraction_directory) {
                     Err(_) => {
                         return Err(BinwalkError::new(&format!(
-                            "Failed to get absolute path for '{extraction_directory}'"
+                            "Failed to get absolute path for '{}'",
+                            extraction_directory.display()
                         )));
                     }
-                    Ok(abspath) => {
-                        new_instance.base_output_directory = abspath.display().to_string();
+                    Ok(absolute_path) => {
+                        new_instance.base_output_directory = absolute_path.display().to_string();
                     }
                 }
 
