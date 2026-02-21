@@ -13,7 +13,7 @@ use std::path::Path;
 /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_common_rs_11_0() -> Result<(), Box<dyn std::error::Error>> {
 /// use binwalk_ng::common::read_input;
 ///
-/// let file_data = read_input("/etc/passwd", false)?;
+/// let file_data = read_input("/etc/passwd")?;
 /// assert!(file_data.len() > 0);
 /// # Ok(())
 /// # } _doctest_main_src_common_rs_11_0(); }
