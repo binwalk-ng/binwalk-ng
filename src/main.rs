@@ -41,7 +41,7 @@ fn main() -> ExitCode {
      * Maintain a queue of files waiting to be analyzed.
      * Note that ThreadPool has its own internal queue so this may seem redundant, however,
      * queuing a large number of jobs via the ThreadPool queue results in *massive* amounts
-     * of unecessary memory consumption, especially when recursively analyzing many files.
+     * of unnecessary memory consumption, especially when recursively analyzing many files.
      */
     let mut target_files = VecDeque::new();
 
