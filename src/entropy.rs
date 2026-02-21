@@ -58,7 +58,6 @@ fn blocks(data: &[u8]) -> Vec<BlockEntropy> {
 
 pub fn plot(
     file_path: impl Into<String>,
-    stdin: bool,
     out_file: Option<String>,
 ) -> Result<FileEntropy, EntropyError> {
     let mut x: Vec<usize> = Vec::new();
@@ -70,7 +69,7 @@ pub fn plot(
     };
 
     // Read in the target file data
-    if let Ok(file_data) = read_input(&target_file, stdin) {
+    if let Ok(file_data) = read_input(&target_file) {
         // Calculate the entropy of each file block
         file_entropy.blocks = blocks(&file_data);
 

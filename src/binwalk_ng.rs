@@ -96,7 +96,7 @@ impl Binwalk {
     /// ```
     #[allow(dead_code)]
     pub fn new() -> Binwalk {
-        Binwalk::configure(None, None, None, None, None, false).unwrap()
+        Binwalk::configure(None, None, vec![], vec![], None, false).unwrap()
     }
 
     /// Create a new Binwalk instance.
@@ -121,8 +121,8 @@ impl Binwalk {
     ///
     /// let binwalker = Binwalk::configure(None,
     ///                                    None,
-    ///                                    None,
-    ///                                    Some(exclude_filters),
+    ///                                    vec![],
+    ///                                    exclude_filters,
     ///                                    None,
     ///                                    false)?;
     /// # Ok(binwalker)
@@ -131,8 +131,8 @@ impl Binwalk {
     pub fn configure(
         target_file_name: Option<String>,
         output_directory: Option<String>,
-        include: Option<Vec<String>>,
-        exclude: Option<Vec<String>>,
+        include: Vec<String>,
+        exclude: Vec<String>,
         signatures: Option<Vec<signatures::common::Signature>>,
         full_search: bool,
     ) -> Result<Binwalk, BinwalkError> {
@@ -882,11 +882,11 @@ fn init_extraction_directory(
 /// Returns true if the signature should be included for file analysis, else returns false.
 fn include_signature(
     signature: &signatures::common::Signature,
-    include: &Option<Vec<String>>,
-    exclude: &Option<Vec<String>>,
+    include: &Vec<String>,
+    exclude: &Vec<String>,
 ) -> bool {
-    if let Some(include_signatures) = include {
-        for include_str in include_signatures {
+    if !include.is_empty() {
+        for include_str in include {
             if signature.name.to_lowercase() == include_str.to_lowercase() {
                 return true;
             }
@@ -895,8 +895,8 @@ fn include_signature(
         return false;
     }
 
-    if let Some(exclude_signatures) = exclude {
-        for exclude_str in exclude_signatures {
+    if !exclude.is_empty() {
+        for exclude_str in exclude {
             if signature.name.to_lowercase() == exclude_str.to_lowercase() {
                 return false;
             }

@@ -16,8 +16,9 @@ use std::io::Read;
 /// # Ok(())
 /// # } _doctest_main_src_common_rs_11_0(); }
 /// ```
-pub fn read_input(file: impl Into<String>, stdin: bool) -> Result<Vec<u8>, std::io::Error> {
-    if stdin { read_stdin() } else { read_file(file) }
+pub fn read_input(file: impl Into<String>) -> Result<Vec<u8>, std::io::Error> {
+    let f = file.into();
+    if f == "-" { read_stdin() } else { read_file(f) }
 }
 
 /// Read data from standard input and return its contents.
