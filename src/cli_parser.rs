@@ -21,7 +21,7 @@ pub struct CliArgs {
         value_hint = clap::ValueHint::FilePath,
         required_unless_present_any = ["list"],
     )]
-    pub file_name: Option<String>,
+    pub file_name: Option<PathBuf>,
 
     /// Suppress normal stdout output
     #[arg(short, long)]

@@ -62,7 +62,7 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    let mut json_logger = json::JsonLogger::new(cli_args.log);
+    let mut json_logger = json::JsonLogger::new(cli_args.log.as_deref());
 
     if cli_args.entropy {
         #[cfg(not(feature = "entropy-plot"))]
@@ -76,7 +76,9 @@ fn main() -> ExitCode {
             // generate the entropy graph and return
             display::print_plain(cli_args.quiet, "Calculating file entropy...");
 
-            if let Ok(entropy_results) = entropy::plot(cli_args.file_name.unwrap(), cli_args.png) {
+            if let Ok(entropy_results) =
+                entropy::plot(cli_args.file_name.unwrap(), cli_args.png.as_deref())
+            {
                 // Log entropy results to JSON file, if requested
                 json_logger.log(json::JSONType::Entropy(entropy_results.clone()));
                 json_logger.close();
@@ -97,8 +99,8 @@ fn main() -> ExitCode {
 
     // Initialize binwalk
     let binwalker = match binwalk_ng::Binwalk::configure(
-        cli_args.file_name,
-        output_directory,
+        cli_args.file_name.as_deref(),
+        output_directory.as_deref(),
         cli_args.include,
         cli_args.exclude,
         None,

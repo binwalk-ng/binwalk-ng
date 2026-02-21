@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path;
-use std::path::PathBuf;
+use std::path::Path;
 use uuid::Uuid;
 
 #[cfg(windows)]
@@ -130,8 +130,8 @@ impl Binwalk {
     /// # } _doctest_main_src_binwalk_rs_102_0(); }
     /// ```
     pub fn configure(
-        target_file_name: Option<String>,
-        output_directory: Option<PathBuf>,
+        target_file_name: Option<&Path>,
+        output_directory: Option<&Path>,
         include: Vec<String>,
         exclude: Vec<String>,
         signatures: Option<Vec<signatures::common::Signature>>,
@@ -144,10 +144,11 @@ impl Binwalk {
         // Target file is optional, especially if being called via the library
         if let Some(target_file) = target_file_name {
             // Set the target file path, make it an absolute path
-            match path::absolute(&target_file) {
+            match path::absolute(target_file) {
                 Err(_) => {
                     return Err(BinwalkError::new(&format!(
-                        "Failed to get absolute path for '{target_file}'"
+                        "Failed to get absolute path for '{}'",
+                        target_file.display()
                     )));
                 }
                 Ok(abspath) => {
@@ -158,7 +159,7 @@ impl Binwalk {
             // If an output extraction directory was also specified, initialize it
             if let Some(extraction_directory) = output_directory {
                 // Make the extraction directory an absolute path
-                match path::absolute(&extraction_directory) {
+                match path::absolute(extraction_directory) {
                     Err(_) => {
                         return Err(BinwalkError::new(&format!(
                             "Failed to get absolute path for '{}'",

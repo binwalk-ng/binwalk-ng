@@ -3,7 +3,7 @@ use entropy::shannon_entropy;
 use plotly::layout::{Axis, Layout};
 use plotly::{ImageFormat, Plot, Scatter};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct EntropyError;
@@ -17,7 +17,7 @@ pub struct BlockEntropy {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct FileEntropy {
-    pub file: String,
+    pub file: PathBuf,
     pub blocks: Vec<BlockEntropy>,
 }
 
@@ -58,19 +58,19 @@ fn blocks(data: &[u8]) -> Vec<BlockEntropy> {
 }
 
 pub fn plot(
-    file_path: impl Into<String>,
-    out_file: Option<PathBuf>,
+    file_path: impl AsRef<Path>,
+    out_file: Option<&Path>,
 ) -> Result<FileEntropy, EntropyError> {
     let mut x: Vec<usize> = Vec::new();
     let mut y: Vec<f32> = Vec::new();
-    let target_file: String = file_path.into();
+    let target_file = file_path.as_ref();
     let mut file_entropy = FileEntropy {
-        file: target_file.clone(),
+        file: target_file.to_path_buf(),
         ..Default::default()
     };
 
     // Read in the target file data
-    if let Ok(file_data) = read_input(&target_file) {
+    if let Ok(file_data) = read_input(target_file) {
         // Calculate the entropy of each file block
         file_entropy.blocks = blocks(&file_data);
 
@@ -96,7 +96,7 @@ pub fn plot(
             Some(out_file_name) => {
                 // TODO: Switch to plotly_static, which is the recommended way to do this
                 #[allow(deprecated)]
-                plot.write_image(&out_file_name, ImageFormat::PNG, 2048, 1024, 1.0);
+                plot.write_image(out_file_name, ImageFormat::PNG, 2048, 1024, 1.0);
             }
         }
 

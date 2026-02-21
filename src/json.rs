@@ -4,6 +4,7 @@ use std::fs;
 use std::io;
 use std::io::Seek;
 use std::io::Write;
+use std::path::Path;
 use std::path::PathBuf;
 
 use crate::binwalk_ng::AnalysisResults;
@@ -30,13 +31,13 @@ pub struct JsonLogger {
 }
 
 impl JsonLogger {
-    pub fn new(log_file: Option<PathBuf>) -> JsonLogger {
+    pub fn new(log_file: Option<&Path>) -> JsonLogger {
         let mut new_instance = JsonLogger {
             ..Default::default()
         };
 
         if let Some(log_file) = log_file {
-            new_instance.json_file = Some(log_file.clone());
+            new_instance.json_file = Some(log_file.to_path_buf());
         }
 
         new_instance

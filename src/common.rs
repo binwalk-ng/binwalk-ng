@@ -1,7 +1,9 @@
 //! Common Functions
 use log::{debug, error};
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::Read;
+use std::path::Path;
 
 /// Read a data into memory, either from disk or from stdin, and return its contents.
 ///
@@ -16,9 +18,13 @@ use std::io::Read;
 /// # Ok(())
 /// # } _doctest_main_src_common_rs_11_0(); }
 /// ```
-pub fn read_input(file: impl Into<String>) -> Result<Vec<u8>, std::io::Error> {
-    let f = file.into();
-    if f == "-" { read_stdin() } else { read_file(f) }
+pub fn read_input(file: impl AsRef<Path>) -> Result<Vec<u8>, std::io::Error> {
+    let path = file.as_ref();
+    if path == OsStr::new("-") {
+        read_stdin()
+    } else {
+        read_file(path)
+    }
 }
 
 /// Read data from standard input and return its contents.
@@ -50,22 +56,25 @@ pub fn read_stdin() -> Result<Vec<u8>, std::io::Error> {
 /// # Ok(())
 /// # } _doctest_main_src_common_rs_48_0(); }
 /// ```
-pub fn read_file(file: impl Into<String>) -> Result<Vec<u8>, std::io::Error> {
+pub fn read_file(file: impl AsRef<Path>) -> Result<Vec<u8>, std::io::Error> {
     let mut file_data = Vec::new();
-    let file_path = file.into();
+    let file_path = file.as_ref();
 
-    match File::open(&file_path) {
+    match File::open(file_path) {
         Err(e) => {
-            error!("Failed to open file {file_path}: {e}");
+            error!("Failed to open file {}: {e}", file_path.display());
             Err(e)
         }
         Ok(mut fp) => match fp.read_to_end(&mut file_data) {
             Err(e) => {
-                error!("Failed to read file {file_path} into memory: {e}");
+                error!(
+                    "Failed to read file {} into memory: {e}",
+                    file_path.display()
+                );
                 Err(e)
             }
             Ok(file_size) => {
-                debug!("Loaded {file_size} bytes from {file_path}");
+                debug!("Loaded {file_size} bytes from {}", file_path.display());
                 Ok(file_data)
             }
         },
