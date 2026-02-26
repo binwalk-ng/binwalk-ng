@@ -81,7 +81,7 @@ pub fn extract_symbol_table(
         result.size = Some(symtab_entry_offset - offset);
 
         // This is not a drill!
-        if output_directory.is_some() {
+        if let Some(output_directory) = output_directory {
             let chroot = Chroot::new(output_directory);
 
             // Convert symbol table entires to JSON

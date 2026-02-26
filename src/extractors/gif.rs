@@ -56,7 +56,7 @@ pub fn extract_gif_image(
                 result.success = true;
 
                 // Do extraction, if requested
-                if output_directory.is_some() {
+                if let Some(output_directory) = output_directory {
                     let chroot = Chroot::new(output_directory);
                     result.success =
                         chroot.carve_file(OUTFILE_NAME, file_data, offset, result.size.unwrap());

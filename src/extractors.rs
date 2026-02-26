@@ -116,7 +116,7 @@
 //!                     result.size = Some(foobar_header.header_size + foobar_header.data_size);
 //!
 //!                     // If an output directory was specified, extract the contents of the FooBar file to disk
-//!                     if !output_directory.is_none() {
+//!                     if let Some(output_directory) = output_directory {
 //!                         // Chroot file I/O inside the specified output directory
 //!                         let chroot = Chroot::new(output_directory);
 //!

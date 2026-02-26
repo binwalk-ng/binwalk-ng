@@ -56,7 +56,7 @@ pub fn wince_dump(
                     result.size = Some(wince_header.header_size + data_blocks.total_size);
 
                     // If extraction was requested, extract each block to a file on disk
-                    if output_directory.is_some() {
+                    if let Some(output_directory) = output_directory {
                         let chroot = Chroot::new(output_directory);
 
                         for block in data_blocks.entries {

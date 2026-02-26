@@ -57,7 +57,7 @@ pub fn extract_trx_partitions(
             result.size = Some(trx_header.total_size);
 
             // If extraction was requested, carve the TRX partitions
-            if output_directory.is_some() {
+            if let Some(output_directory) = output_directory {
                 let chroot = Chroot::new(output_directory);
 
                 for i in 0..trx_header.partitions.len() {

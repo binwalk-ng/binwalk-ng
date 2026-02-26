@@ -69,7 +69,7 @@ pub fn autel_deobfuscate(
                         let decoded_block = decode_autel_block(block_bytes);
 
                         // Write to file, if requested
-                        if output_directory.is_some() {
+                        if let Some(output_directory) = output_directory {
                             let chroot = Chroot::new(output_directory);
                             if !chroot.append_to_file(OUTPUT_FILE_NAME, &decoded_block) {
                                 break;

@@ -52,7 +52,7 @@ pub fn inflate_decompressor(
                 if n > 0 {
                     adler32_checksum.update_buffer(&decompressed_buffer[0..n]);
 
-                    if output_directory.is_some() {
+                    if let Some(output_directory) = output_directory {
                         let chroot = Chroot::new(output_directory);
                         if !chroot.append_to_file(OUTPUT_FILE_NAME, &decompressed_buffer[0..n]) {
                             // If writing data to file fails, break

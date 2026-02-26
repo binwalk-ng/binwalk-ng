@@ -89,7 +89,7 @@ pub fn bzip2_decompressor(
                 }
 
                 // Decompressed a block of data, if extraction was requested write the decompressed block to the output file
-                if output_directory.is_some() {
+                if let Some(output_directory) = output_directory {
                     let n: usize = (decompressor.total_out() as usize) - bytes_written;
 
                     let chroot = Chroot::new(output_directory);

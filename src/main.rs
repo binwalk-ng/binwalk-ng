@@ -378,7 +378,7 @@ fn carve_file_data_to_disk(
     offset: usize,
     size: usize,
 ) -> bool {
-    let chroot = extractors::common::Chroot::new(None);
+    let chroot = extractors::common::Chroot::default();
 
     // Carved file path will be: <source file path>_<offset>_<name>.raw
     let carved_file_path = format!("{source_file_path}_{offset}_{name}.raw",);

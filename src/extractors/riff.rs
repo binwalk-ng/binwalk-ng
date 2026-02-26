@@ -49,7 +49,7 @@ pub fn extract_riff_image(
         result.size = Some(riff_header.size);
         result.success = true;
 
-        if output_directory.is_some() {
+        if let Some(output_directory) = output_directory {
             let chroot = Chroot::new(output_directory);
 
             let file_path: String = if riff_header.chunk_type == WAV_TYPE {

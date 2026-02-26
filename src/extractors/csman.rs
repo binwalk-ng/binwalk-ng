@@ -114,7 +114,7 @@ pub fn extract_csman_dat(
                 result.size = Some(csman_header.header_size + csman_header.data_size);
 
                 // If extraction was requested, extract each entry using the entry key as the file name
-                if output_directory.is_some() {
+                if let Some(output_directory) = output_directory {
                     // All files will be written inside the provided output directory
                     let chroot = Chroot::new(output_directory);
 

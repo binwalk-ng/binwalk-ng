@@ -60,7 +60,7 @@ pub fn extract_android_sparse(
 
                 Ok(chunk_header) => {
                     // If not a dry run, extract the data from the next chunk
-                    if output_directory.is_some() {
+                    if let Some(output_directory) = output_directory {
                         let chroot = Chroot::new(output_directory);
                         let chunk_data_start: usize = next_chunk_offset + chunk_header.header_size;
                         let chunk_data_end: usize = chunk_data_start + chunk_header.data_size;

@@ -51,7 +51,7 @@ pub fn extract_dahua_zip(
 
         // If extraction was requested, carve the zip archive to disk, replacing the Dahua ZIP magic bytes
         // with the standard ZIP magic bytes.
-        if output_directory.is_some() {
+        if let Some(output_directory) = output_directory {
             // Start and end offsets of the data to carve
             let start_data = offset + ZIP_HEADER.len();
             let end_data = offset + result.size.unwrap();

@@ -75,7 +75,7 @@ pub fn extract_dtb(
                     break;
                 // DTB property, extract it to disk
                 } else if node.property {
-                    if output_directory.is_some() {
+                    if let Some(output_directory) = output_directory {
                         let chroot = Chroot::new(output_directory);
                         let dir_path = hierarchy.join(std::path::MAIN_SEPARATOR_STR);
                         let file_path = chroot.safe_path_join(&dir_path, &node.name);

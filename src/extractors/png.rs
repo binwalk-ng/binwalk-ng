@@ -53,7 +53,7 @@ pub fn extract_png_image(
         result.success = true;
 
         // If extraction was requested, extract the PNG
-        if output_directory.is_some() {
+        if let Some(output_directory) = output_directory {
             let chroot = Chroot::new(output_directory);
             result.success =
                 chroot.carve_file(OUTFILE_NAME, file_data, offset, result.size.unwrap());

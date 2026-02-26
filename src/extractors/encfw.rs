@@ -45,7 +45,7 @@ pub fn encfw_decrypt(
         result.success = true;
 
         // Write to file, if requested
-        if output_directory.is_some() {
+        if let Some(output_directory) = output_directory {
             let chroot = Chroot::new(output_directory);
             result.success = chroot.create_file(OUTPUT_FILE_NAME, &decrypted_data);
         }

@@ -59,7 +59,7 @@ pub fn extract_bmp_image(
                 result.size = Some(bmp_file_header.size);
                 result.success = true;
 
-                if output_directory.is_some() {
+                if let Some(output_directory) = output_directory {
                     let chroot = Chroot::new(output_directory);
                     result.success =
                         chroot.carve_file(OUTFILE_NAME, file_data, offset, bmp_file_header.size);

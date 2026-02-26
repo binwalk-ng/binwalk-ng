@@ -65,7 +65,7 @@ pub fn extract_uimage(
             }
 
             // If extraction was requested and the data CRC is valid, carve the uImage data out to a file
-            if data_crc_valid && output_directory.is_some() {
+            if data_crc_valid && let Some(output_directory) = output_directory {
                 let chroot = Chroot::new(output_directory);
                 let mut file_base_name: String = DEFAULT_OUTPUT_FILE_NAME.to_string();
 

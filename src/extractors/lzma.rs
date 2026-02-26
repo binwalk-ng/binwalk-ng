@@ -102,7 +102,7 @@ pub fn lzma_decompress(
                     }
 
                     // Some data was decompressed successfully; if extraction was requested, write the data to disk.
-                    if output_directory.is_some() {
+                    if let Some(output_directory) = output_directory {
                         // Number of decompressed bytes in the output buffer
                         let n = (decompressor.total_out() as usize) - bytes_written;
 

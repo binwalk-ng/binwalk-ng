@@ -54,7 +54,7 @@ pub fn extract_mbr_partitions(
                 result.size = Some(mbr_header.image_size);
 
                 // Do extraction if requested
-                if output_directory.is_some() {
+                if let Some(output_directory) = output_directory {
                     // Chroot extracted files into the output directory
                     let chroot = Chroot::new(output_directory);
 

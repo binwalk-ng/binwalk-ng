@@ -53,7 +53,7 @@ pub fn extract_mh01_image(
             result.size = Some(mh01_header.total_size);
 
             // If extraction was requested, do it
-            if output_directory.is_some() {
+            if let Some(output_directory) = output_directory {
                 let chroot = Chroot::new(output_directory);
 
                 // Try to decrypt the firmware

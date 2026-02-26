@@ -61,7 +61,7 @@ fn extract_swapped(
             result.size = Some(swapped_data.len());
 
             // Write to file, if requested
-            if output_directory.is_some() {
+            if let Some(output_directory) = output_directory {
                 let chroot = Chroot::new(output_directory);
                 result.success = chroot.create_file(OUTPUT_FILE_NAME, &swapped_data);
             }
