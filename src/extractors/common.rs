@@ -95,7 +95,8 @@ impl Chroot {
     /// use binwalk_ng::extractors::common::Chroot;
     ///
     /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
-    /// # let chroot_dir = tempfile::tempdir().unwrap();
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let chroot_dir = temp_dir.path();
     ///
     /// let chroot = Chroot::new(&chroot_dir);
     ///
@@ -150,7 +151,8 @@ impl Chroot {
     /// use std::path::MAIN_SEPARATOR;
     ///
     /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
-    /// # let chroot_dir = tempfile::tempdir().unwrap();
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let chroot_dir = temp_dir.path();
     ///
     /// let chroot = Chroot::new(&chroot_dir);
     ///
@@ -172,7 +174,7 @@ impl Chroot {
     /// let expected_path3 = std::path::Path::new(&chroot_dir).join(dir_name).join(file_name);
     ///
     /// let path4 = chroot.safe_path_join(&chroot_dir, &abs_path);
-    /// let expected_path4 = std::path::Path::new(&chroot_dir).join(dir_name).join(file_name);
+    /// let expected_path4 = chroot_dir.join(dir_name).join(file_name);
     ///
     /// assert_eq!(path1, expected_path1.display().to_string());
     /// assert_eq!(path2, expected_path2.display().to_string());
@@ -205,7 +207,8 @@ impl Chroot {
     /// use binwalk_ng::extractors::common::Chroot;
     ///
     /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
-    /// # let chroot_dir = tempfile::tempdir().unwrap();
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let chroot_dir = temp_dir.path();
     ///
     /// let file_name = "test.txt";
     ///
@@ -231,12 +234,13 @@ impl Chroot {
     /// let file_name = "created_file.txt";
     ///
     /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
-    ///# let chroot_dir = tempfile::tempdir().unwrap();
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let chroot_dir = temp_dir.path();
     ///
     /// let chroot = Chroot::new(&chroot_dir);
     ///
     /// assert_eq!(chroot.create_file(file_name, file_data), true);
-    /// assert_eq!(std::fs::read_to_string(std::path::Path::new(&chroot_dir).join(file_name))?, std::str::from_utf8(file_data)?);
+    /// assert_eq!(std::fs::read_to_string(chroot_dir.join(file_name))?, std::str::from_utf8(file_data)?);
     /// # Ok(())
     /// # } _doctest_main_src_extractors_common_rs_213_0(); }
     /// ```
@@ -277,7 +281,8 @@ impl Chroot {
     /// let file_name = "carved_file.txt";
     ///
     /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
-    /// # let chroot_dir = tempfile::tempdir().unwrap();
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let chroot_dir = temp_dir.path();
     ///
     /// let chroot = Chroot::new(&chroot_dir);
     ///
@@ -332,7 +337,8 @@ impl Chroot {
     /// use binwalk_ng::extractors::common::Chroot;
     ///
     /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
-    /// # let chroot_dir = tempfile::tempdir().unwrap();
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let chroot_dir = temp_dir.path();
     ///
     /// let dev_major: usize = 1;
     /// let dev_minor: usize = 2;
@@ -365,7 +371,8 @@ impl Chroot {
     /// use binwalk_ng::extractors::common::Chroot;
     ///
     /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
-    /// # let chroot_dir = tempfile::tempdir().unwrap();
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let chroot_dir = temp_dir.path();
     ///
     /// let dev_major: usize = 1;
     /// let dev_minor: usize = 2;
@@ -398,7 +405,8 @@ impl Chroot {
     /// use binwalk_ng::extractors::common::Chroot;
     ///
     /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
-    /// # let chroot_dir = tempfile::tempdir().unwrap();
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let chroot_dir = temp_dir.path();
     ///
     /// let file_name = "fifo_file";
     ///
@@ -424,7 +432,8 @@ impl Chroot {
     /// use binwalk_ng::extractors::common::Chroot;
     ///
     /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
-    /// # let chroot_dir = tempfile::tempdir().unwrap();
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let chroot_dir = temp_dir.path();
     ///
     /// let file_name = "socket_file";
     ///
@@ -450,7 +459,8 @@ impl Chroot {
     /// use binwalk_ng::extractors::common::Chroot;
     ///
     /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
-    /// # let chroot_dir = tempfile::tempdir().unwrap();
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let chroot_dir = temp_dir.path();
     ///
     /// let file_data: &[u8] = b"foobar";
     /// let file_name = "append.txt";
@@ -458,7 +468,7 @@ impl Chroot {
     /// let chroot = Chroot::new(&chroot_dir);
     ///
     /// assert_eq!(chroot.append_to_file(file_name, file_data), true);
-    /// assert_eq!(std::fs::read_to_string(std::path::Path::new(&chroot_dir).join(file_name))?, std::str::from_utf8(file_data)?);
+    /// assert_eq!(std::fs::read_to_string(chroot_dir.join(file_name))?, std::str::from_utf8(file_data)?);
     /// # Ok(())
     /// # } _doctest_main_src_extractors_common_rs_426_0(); }
     /// ```
@@ -509,7 +519,8 @@ impl Chroot {
     /// use binwalk_ng::extractors::common::Chroot;
     ///
     /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
-    /// # let chroot_dir = tempfile::tempdir().unwrap();
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let chroot_dir = temp_dir.path();
     ///
     /// let dir_name = "my_directory";
     ///
@@ -546,7 +557,8 @@ impl Chroot {
     /// use binwalk_ng::extractors::common::Chroot;
     ///
     /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
-    /// # let chroot_dir = tempfile::tempdir().unwrap();
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let chroot_dir = temp_dir.path();
     ///
     /// let dir_name = "my_directory";
     ///
@@ -593,7 +605,8 @@ impl Chroot {
     /// use binwalk_ng::extractors::common::Chroot;
     ///
     /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
-    /// # let chroot_dir = tempfile::tempdir().unwrap();
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let chroot_dir = temp_dir.path();
     ///
     /// let file_name = "runme.exe";
     ///

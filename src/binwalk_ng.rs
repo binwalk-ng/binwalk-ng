@@ -574,10 +574,11 @@ impl Binwalk {
     ///     .join("gzip.bin");
     ///
     /// let extraction_directory = std::path::Path::new("tests").join("extractions");
-    /// # let extraction_directory = tempfile::tempdir().unwrap();
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let extraction_directory = temp_dir.path();
     ///
-    /// let binwalker = Binwalk::configure(Some(target_path.as_path()),
-    ///                                    Some(extraction_directory.as_path()),
+    /// let binwalker = Binwalk::configure(Some(&target_path),
+    ///                                    Some(&extraction_directory),
     ///                                    vec![],
     ///                                    vec![],
     ///                                    None,
@@ -683,12 +684,13 @@ impl Binwalk {
     ///     .join("gzip.bin");
     ///
     /// let extraction_directory = std::path::Path::new("tests").join("extractions");
-    /// # let extraction_directory = tempfile::tempdir().unwrap();
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let extraction_directory = temp_dir.path();
     ///
     /// let file_data = common::read_file(&target_path).expect("Failed to read file data");
     ///
-    /// let binwalker = Binwalk::configure(Some(target_path.as_path()),
-    ///                                    Some(extraction_directory.as_path()),
+    /// let binwalker = Binwalk::configure(Some(&target_path),
+    ///                                    Some(&extraction_directory),
     ///                                    vec![],
     ///                                    vec![],
     ///                                    None,
@@ -752,10 +754,11 @@ impl Binwalk {
     ///     .join("gzip.bin");
     ///
     /// let extraction_directory = std::path::Path::new("tests").join("extractions");
-    /// # let extraction_directory = tempfile::tempdir().unwrap();
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let extraction_directory = temp_dir.path();
     ///
-    /// let binwalker = Binwalk::configure(Some(target_path.as_path()),
-    ///                                    Some(extraction_directory.as_path()),
+    /// let binwalker = Binwalk::configure(Some(&target_path),
+    ///                                    Some(&extraction_directory),
     ///                                    vec![],
     ///                                    vec![],
     ///                                    None,
