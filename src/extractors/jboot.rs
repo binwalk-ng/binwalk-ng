@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::common::crc32;
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::structures::jboot::parse_jboot_sch2_header;
@@ -35,7 +37,7 @@ pub fn sch2_extractor() -> Extractor {
 pub fn extract_jboot_sch2_kernel(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     // Output file name
     const OUTFILE_NAME: &str = "kernel.bin";
@@ -59,7 +61,7 @@ pub fn extract_jboot_sch2_kernel(
                 result.size = Some(sch2_header.header_size + sch2_header.kernel_size);
                 result.success = true;
 
-                if output_directory.is_some() {
+                if let Some(output_directory) = output_directory {
                     let chroot = Chroot::new(output_directory);
                     result.success = chroot.carve_file(
                         OUTFILE_NAME,

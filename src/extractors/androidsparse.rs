@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::common::is_offset_safe;
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::structures::androidsparse;
@@ -35,7 +37,7 @@ pub fn android_sparse_extractor() -> Extractor {
 pub fn extract_android_sparse(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     const OUTFILE_NAME: &str = "unsparsed.img";
 
@@ -60,7 +62,7 @@ pub fn extract_android_sparse(
 
                 Ok(chunk_header) => {
                     // If not a dry run, extract the data from the next chunk
-                    if output_directory.is_some() {
+                    if let Some(output_directory) = output_directory {
                         let chroot = Chroot::new(output_directory);
                         let chunk_data_start: usize = next_chunk_offset + chunk_header.header_size;
                         let chunk_data_end: usize = chunk_data_start + chunk_header.data_size;

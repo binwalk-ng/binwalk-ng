@@ -217,7 +217,7 @@ pub fn print_analysis_results(quiet: bool, extraction_attempted: bool, results: 
     }
 
     // Print signature results
-    print_header(&results.file_path);
+    print_header(&results.file_path.display().to_string());
     print_signatures(&results.file_map);
 
     // If extraction was attempted, print extraction results

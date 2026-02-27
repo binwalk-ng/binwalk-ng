@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::structures::matter_ota::parse_matter_ota_header;
 
@@ -34,7 +36,7 @@ pub fn matter_ota_extractor() -> Extractor {
 pub fn extract_matter_ota(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     const OUTFILE_NAME: &str = "matter_payload.bin";
 
@@ -58,7 +60,7 @@ pub fn extract_matter_ota(
 
         // Sanity check reported payload size and get the payload data
         if let Some(payload_data) = file_data.get(payload_start..payload_end)
-            && output_directory.is_some()
+            && let Some(output_directory) = output_directory
         {
             let chroot = Chroot::new(output_directory);
             result.success = chroot.carve_file(OUTFILE_NAME, payload_data, 0, payload_data.len());

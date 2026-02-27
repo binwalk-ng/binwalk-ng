@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::common::is_offset_safe;
 use crate::extractors::common::{
     Chroot, ExtractionError, ExtractionResult, Extractor, ExtractorType,
@@ -59,7 +61,7 @@ pub fn romfs_extractor() -> Extractor {
 pub fn extract_romfs(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     let mut result = ExtractionResult {
         ..Default::default()
@@ -82,7 +84,7 @@ pub fn extract_romfs(
                     result.size = Some(romfs_header.image_size);
 
                     // Do extraction, if an output directory was provided
-                    if output_directory.is_some() {
+                    if let Some(output_directory) = output_directory {
                         let mut file_count: usize = 0;
                         let root_parent = "".to_string();
 
@@ -228,16 +230,17 @@ fn process_romfs_entries(
 fn extract_romfs_entries(
     romfs_data: &[u8],
     romfs_files: &Vec<RomFSEntry>,
-    parent_directory: &str,
-    chroot_directory: &str,
+    parent_directory: impl AsRef<Path>,
+    chroot_directory: impl AsRef<Path>,
 ) -> usize {
     let mut file_count: usize = 0;
 
-    let chroot = Chroot::new(Some(chroot_directory));
+    let chroot_directory = chroot_directory.as_ref();
+    let chroot = Chroot::new(chroot_directory);
 
     for file_entry in romfs_files {
         let extraction_success: bool;
-        let file_path = chroot.safe_path_join(parent_directory, &file_entry.name);
+        let file_path = chroot.safe_path_join(parent_directory.as_ref(), &file_entry.name);
 
         if file_entry.directory {
             extraction_success = chroot.create_directory(&file_path);
@@ -284,7 +287,7 @@ fn extract_romfs_entries(
                 chroot.make_executable(&file_path);
             }
         } else {
-            warn!("Failed to extract RomFS file {file_path}");
+            warn!("Failed to extract RomFS file {}", file_path.display());
         }
     }
 

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::structures::riff::parse_riff_header;
 
@@ -35,7 +37,7 @@ pub fn riff_extractor() -> Extractor {
 pub fn extract_riff_image(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     const OUTFILE_NAME: &str = "image.riff";
     const WAV_OUTFILE_NAME: &str = "video.wav";
@@ -49,7 +51,7 @@ pub fn extract_riff_image(
         result.size = Some(riff_header.size);
         result.success = true;
 
-        if output_directory.is_some() {
+        if let Some(output_directory) = output_directory {
             let chroot = Chroot::new(output_directory);
 
             let file_path: String = if riff_header.chunk_type == WAV_TYPE {

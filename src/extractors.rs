@@ -96,7 +96,7 @@
 //! }
 //!
 //! /// This function extracts the contents of a FooBar file
-//! pub fn extract_foobar_file(file_data: Vec<u8>, offset: usize, output_directory: Option<&str>) -> ExtractionResult {
+//! pub fn extract_foobar_file(file_data: Vec<u8>, offset: usize, output_directory: Option<&Path>) -> ExtractionResult {
 //!
 //!     // This will be the return value
 //!     let mut result = ExtractionResult{..Default::default()};
@@ -116,7 +116,7 @@
 //!                     result.size = Some(foobar_header.header_size + foobar_header.data_size);
 //!
 //!                     // If an output directory was specified, extract the contents of the FooBar file to disk
-//!                     if !output_directory.is_none() {
+//!                     if let Some(output_directory) = output_directory {
 //!                         // Chroot file I/O inside the specified output directory
 //!                         let chroot = Chroot::new(output_directory);
 //!

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::common::is_offset_safe;
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::structures::png::parse_png_chunk_header;
@@ -35,7 +37,7 @@ pub fn png_extractor() -> Extractor {
 pub fn extract_png_image(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     const PNG_HEADER_LEN: usize = 8;
     const OUTFILE_NAME: &str = "image.png";
@@ -53,7 +55,7 @@ pub fn extract_png_image(
         result.success = true;
 
         // If extraction was requested, extract the PNG
-        if output_directory.is_some() {
+        if let Some(output_directory) = output_directory {
             let chroot = Chroot::new(output_directory);
             result.success =
                 chroot.carve_file(OUTFILE_NAME, file_data, offset, result.size.unwrap());

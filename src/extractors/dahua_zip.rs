@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::signatures::zip::find_zip_eof;
 
@@ -34,7 +36,7 @@ pub fn dahua_zip_extractor() -> Extractor {
 pub fn extract_dahua_zip(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     const OUTFILE_NAME: &str = "dahua.zip";
     const ZIP_HEADER: &[u8] = b"PK";
@@ -51,7 +53,7 @@ pub fn extract_dahua_zip(
 
         // If extraction was requested, carve the zip archive to disk, replacing the Dahua ZIP magic bytes
         // with the standard ZIP magic bytes.
-        if output_directory.is_some() {
+        if let Some(output_directory) = output_directory {
             // Start and end offsets of the data to carve
             let start_data = offset + ZIP_HEADER.len();
             let end_data = offset + result.size.unwrap();

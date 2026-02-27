@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::extractors::common::{ExtractionResult, Extractor, ExtractorType};
 use crate::extractors::inflate;
 
@@ -37,7 +39,7 @@ pub fn zlib_extractor() -> Extractor {
 pub fn zlib_decompress(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     // Size of the zlib header
     const HEADER_SIZE: usize = 2;

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::common::crc32;
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::structures::uimage::parse_uimage_header;
@@ -34,9 +36,9 @@ pub fn uimage_extractor() -> Extractor {
 pub fn extract_uimage(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
-    // If no name is povided in the uImage header, use this as the output file name
+    // If no name is provided in the uImage header, use this as the output file name
     const DEFAULT_OUTPUT_FILE_NAME: &str = "uimage_data";
     const OUTPUT_FILE_EXT: &str = "bin";
 
@@ -65,7 +67,7 @@ pub fn extract_uimage(
             }
 
             // If extraction was requested and the data CRC is valid, carve the uImage data out to a file
-            if data_crc_valid && output_directory.is_some() {
+            if data_crc_valid && let Some(output_directory) = output_directory {
                 let chroot = Chroot::new(output_directory);
                 let mut file_base_name: String = DEFAULT_OUTPUT_FILE_NAME.to_string();
 

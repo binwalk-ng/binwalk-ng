@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use aho_corasick::AhoCorasick;
 
@@ -64,7 +66,7 @@ pub fn pem_certificate_extractor() -> Extractor {
 pub fn pem_certificate_carver(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     const CERTIFICATE_FILE_NAME: &str = "pem.crt";
     pem_carver(
@@ -78,7 +80,7 @@ pub fn pem_certificate_carver(
 pub fn pem_key_carver(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     const KEY_FILE_NAME: &str = "pem.key";
     pem_carver(file_data, offset, output_directory, Some(KEY_FILE_NAME))
@@ -87,7 +89,7 @@ pub fn pem_key_carver(
 pub fn pem_carver(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
     fname: Option<&str>,
 ) -> ExtractionResult {
     let mut result = ExtractionResult {
@@ -99,7 +101,7 @@ pub fn pem_carver(
         result.success = true;
 
         if let Some(outfile) = fname
-            && output_directory.is_some()
+            && let Some(output_directory) = output_directory
         {
             let chroot = Chroot::new(output_directory);
             result.success = chroot.carve_file(outfile, file_data, offset, result.size.unwrap());

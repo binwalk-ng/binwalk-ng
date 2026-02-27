@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use liblzma::stream::{Action, Status, Stream};
 
@@ -34,7 +36,7 @@ pub fn lzma_extractor() -> Extractor {
 pub fn lzma_decompress(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     // Output file name
     const OUTPUT_FILE_NAME: &str = "decompressed.bin";
@@ -102,7 +104,7 @@ pub fn lzma_decompress(
                     }
 
                     // Some data was decompressed successfully; if extraction was requested, write the data to disk.
-                    if output_directory.is_some() {
+                    if let Some(output_directory) = output_directory {
                         // Number of decompressed bytes in the output buffer
                         let n = (decompressor.total_out() as usize) - bytes_written;
 

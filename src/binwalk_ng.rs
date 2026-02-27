@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path;
 use std::path::Path;
+use std::path::PathBuf;
 use uuid::Uuid;
 
 #[cfg(windows)]
@@ -38,7 +39,7 @@ impl BinwalkError {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct AnalysisResults {
     /// Path to the file that was analyzed
-    pub file_path: String,
+    pub file_path: PathBuf,
     /// File signature results, as returned by Binwalk::scan
     pub file_map: Vec<signatures::common::SignatureResult>,
     /// File extraction results, as returned by Binwalk::extract.
@@ -71,9 +72,9 @@ pub struct Binwalk {
     /// Count of all magic patterns (short and regular)
     pub pattern_count: usize,
     /// The base file requested for analysis
-    pub base_target_file: String,
+    pub base_target_file: PathBuf,
     /// The base output directory for extracted files
-    pub base_output_directory: String,
+    pub base_output_directory: PathBuf,
     /// A list of signatures that must start at offset 0
     pub short_signatures: Vec<signatures::common::Signature>,
     /// A list of magic bytes to search for throughout the entire file
@@ -152,7 +153,7 @@ impl Binwalk {
                     )));
                 }
                 Ok(abspath) => {
-                    new_instance.base_target_file = abspath.display().to_string();
+                    new_instance.base_target_file = abspath;
                 }
             }
 
@@ -167,7 +168,7 @@ impl Binwalk {
                         )));
                     }
                     Ok(absolute_path) => {
-                        new_instance.base_output_directory = absolute_path.display().to_string();
+                        new_instance.base_output_directory = absolute_path;
                     }
                 }
 
@@ -185,7 +186,7 @@ impl Binwalk {
                     }
                     Ok(new_target_file_path) => {
                         // This is the new base target path (a symlink inside the extraction directory)
-                        new_instance.base_target_file = new_target_file_path.clone();
+                        new_instance.base_target_file = new_target_file_path;
                     }
                 }
             }
@@ -573,12 +574,12 @@ impl Binwalk {
     ///     .join("inputs")
     ///     .join("gzip.bin");
     ///
-    /// # let tempdir = tempfile::tempdir().unwrap();
     /// let extraction_directory = std::path::Path::new("tests").join("extractions");
-    /// # let extraction_directory = extraction_directory.join(tempdir);
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let extraction_directory = temp_dir.path();
     ///
-    /// let binwalker = Binwalk::configure(Some(target_path.as_path()),
-    ///                                    Some(extraction_directory.as_path()),
+    /// let binwalker = Binwalk::configure(Some(&target_path),
+    ///                                    Some(&extraction_directory),
     ///                                    vec![],
     ///                                    vec![],
     ///                                    None,
@@ -602,10 +603,10 @@ impl Binwalk {
     pub fn extract(
         &self,
         file_data: &[u8],
-        file_name: impl Into<String>,
+        file_name: impl AsRef<Path>,
         file_map: &Vec<signatures::common::SignatureResult>,
     ) -> HashMap<String, extractors::common::ExtractionResult> {
-        let file_path = file_name.into();
+        let file_path = file_name.as_ref();
         let mut extraction_results: HashMap<String, extractors::common::ExtractionResult> =
             HashMap::new();
 
@@ -624,7 +625,7 @@ impl Binwalk {
                 Some(_) => {
                     // Run an extraction for this signature
                     let mut extraction_result =
-                        extractors::common::execute(file_data, &file_path, signature, &extractor);
+                        extractors::common::execute(file_data, file_path, signature, &extractor);
 
                     if !extraction_result.success {
                         debug!(
@@ -655,7 +656,7 @@ impl Binwalk {
                             // Re-run the extraction
                             extraction_result = extractors::common::execute(
                                 file_data,
-                                &file_path,
+                                file_path,
                                 &new_signature,
                                 &extractor,
                             );
@@ -683,14 +684,14 @@ impl Binwalk {
     ///     .join("inputs")
     ///     .join("gzip.bin");
     ///
-    /// # let tempdir = tempfile::tempdir().unwrap();
     /// let extraction_directory = std::path::Path::new("tests").join("extractions");
-    /// # let extraction_directory = extraction_directory.join(tempdir);
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let extraction_directory = temp_dir.path();
     ///
     /// let file_data = common::read_file(&target_path).expect("Failed to read file data");
     ///
-    /// let binwalker = Binwalk::configure(Some(target_path.as_path()),
-    ///                                    Some(extraction_directory.as_path()),
+    /// let binwalker = Binwalk::configure(Some(&target_path),
+    ///                                    Some(&extraction_directory),
     ///                                    vec![],
     ///                                    vec![],
     ///                                    None,
@@ -711,19 +712,19 @@ impl Binwalk {
     pub fn analyze_buf(
         &self,
         file_data: &[u8],
-        target_file: impl Into<String>,
+        target_file: impl AsRef<Path>,
         do_extraction: bool,
     ) -> AnalysisResults {
-        let file_path = target_file.into();
+        let file_path = target_file.as_ref();
 
         // Return value
         let mut results: AnalysisResults = AnalysisResults {
-            file_path: file_path.clone(),
+            file_path: file_path.to_path_buf(),
             ..Default::default()
         };
 
         // Scan file data for signatures
-        debug!("Analysis start: {file_path}");
+        debug!("Analysis start: {}", file_path.display());
         results.file_map = self.scan(file_data);
 
         // Only extract if told to, and if there were some signatures found in this file
@@ -733,10 +734,10 @@ impl Binwalk {
                 "Submitting {} signature results to extractor",
                 results.file_map.len()
             );
-            results.extractions = self.extract(file_data, &file_path, &results.file_map);
+            results.extractions = self.extract(file_data, file_path, &results.file_map);
         }
 
-        debug!("Analysis end: {file_path}");
+        debug!("Analysis end: {}", file_path.display());
 
         results
     }
@@ -753,12 +754,12 @@ impl Binwalk {
     ///     .join("inputs")
     ///     .join("gzip.bin");
     ///
-    /// # let tempdir = tempfile::tempdir().unwrap();
     /// let extraction_directory = std::path::Path::new("tests").join("extractions");
-    /// # let extraction_directory = extraction_directory.join(tempdir);
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let extraction_directory = temp_dir.path();
     ///
-    /// let binwalker = Binwalk::configure(Some(target_path.as_path()),
-    ///                                    Some(extraction_directory.as_path()),
+    /// let binwalker = Binwalk::configure(Some(&target_path),
+    ///                                    Some(&extraction_directory),
     ///                                    vec![],
     ///                                    vec![],
     ///                                    None,
@@ -777,53 +778,51 @@ impl Binwalk {
     /// # } _doctest_main_src_binwalk_rs_745_0(); }
     /// ```
     #[allow(dead_code)]
-    pub fn analyze(&self, target_file: impl Into<String>, do_extraction: bool) -> AnalysisResults {
-        let file_path = target_file.into();
+    pub fn analyze(&self, target_file: impl AsRef<Path>, do_extraction: bool) -> AnalysisResults {
+        let file_path = target_file.as_ref();
 
-        let file_data = match read_file(&file_path) {
+        let file_data = match read_file(file_path) {
             Err(_) => {
-                error!("Failed to read data from {file_path}");
+                error!("Failed to read data from {}", file_path.display());
                 b"".to_vec()
             }
             Ok(data) => data,
         };
 
-        self.analyze_buf(&file_data, &file_path, do_extraction)
+        self.analyze_buf(&file_data, file_path, do_extraction)
     }
 }
 
 /// Initializes the extraction output directory
 fn init_extraction_directory(
-    target_file: &str,
-    extraction_directory: &str,
-) -> Result<String, std::io::Error> {
+    target_path: impl AsRef<Path>,
+    extraction_directory: impl AsRef<Path>,
+) -> Result<PathBuf, std::io::Error> {
+    let extraction_directory = extraction_directory.as_ref();
     // Create the output directory, equivalent of mkdir -p
     match fs::create_dir_all(extraction_directory) {
         Ok(_) => {
-            debug!("Created base output directory: '{extraction_directory}'");
+            debug!(
+                "Created base output directory: '{}'",
+                extraction_directory.display()
+            );
         }
         Err(e) => {
-            error!("Failed to create base output directory '{extraction_directory}': {e}");
+            error!(
+                "Failed to create base output directory '{}': {e}",
+                extraction_directory.display()
+            );
             return Err(e);
         }
     }
 
-    // Create a Path for the target file
-    let target_path = path::Path::new(&target_file);
+    let target_path = target_path.as_ref();
 
     // Build a symlink path to the target file in the extraction directory
-    let link_target_path_str = format!(
-        "{}{}{}",
-        extraction_directory,
-        path::MAIN_SEPARATOR,
-        target_path.file_name().unwrap().to_str().unwrap()
-    );
-
-    // Create a path for the symlink target path
-    let link_path = path::Path::new(&link_target_path_str);
+    let link_path = extraction_directory.join(target_path.file_name().unwrap());
 
     if link_path.exists() {
-        return Ok(link_target_path_str);
+        return Ok(link_path);
     }
 
     debug!(
@@ -835,8 +834,8 @@ fn init_extraction_directory(
     // Create a symlink from inside the extraction directory to the specified target file
     #[cfg(unix)]
     {
-        match unix::fs::symlink(target_path, link_path) {
-            Ok(_) => Ok(link_target_path_str),
+        match unix::fs::symlink(target_path, &link_path) {
+            Ok(_) => Ok(link_path),
             Err(e) => {
                 error!(
                     "Failed to create symlink {} -> {}: {}",
@@ -852,7 +851,7 @@ fn init_extraction_directory(
     {
         match std::fs::hard_link(target_path, link_path) {
             Ok(_) => {
-                return Ok(link_target_path_str);
+                return Ok(link_path.to_path_buf());
             }
             Err(e) => {
                 error!(

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::extractors::common::{ExtractionResult, Extractor, ExtractorType};
 use crate::extractors::inflate;
 use crate::structures::gzip::parse_gzip_header;
@@ -35,7 +37,7 @@ pub fn gzip_extractor() -> Extractor {
 pub fn gzip_decompress(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     let mut exresult = ExtractionResult {
         ..Default::default()

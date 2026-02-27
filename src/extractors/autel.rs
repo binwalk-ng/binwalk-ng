@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::structures::autel::parse_autel_header;
 
@@ -37,7 +39,7 @@ pub fn autel_extractor() -> Extractor {
 pub fn autel_deobfuscate(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     const OUTPUT_FILE_NAME: &str = "autel.decoded";
 
@@ -69,7 +71,7 @@ pub fn autel_deobfuscate(
                         let decoded_block = decode_autel_block(block_bytes);
 
                         // Write to file, if requested
-                        if output_directory.is_some() {
+                        if let Some(output_directory) = output_directory {
                             let chroot = Chroot::new(output_directory);
                             if !chroot.append_to_file(OUTPUT_FILE_NAME, &decoded_block) {
                                 break;

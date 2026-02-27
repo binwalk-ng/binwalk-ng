@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 
 /// Defines the internal extractor function for u16 swapped firmware images
@@ -33,7 +35,7 @@ pub fn swapped_extractor_u16() -> Extractor {
 pub fn extract_swapped_u16(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     const SWAP_BYTE_COUNT: usize = 2;
     extract_swapped(file_data, offset, output_directory, SWAP_BYTE_COUNT)
@@ -43,7 +45,7 @@ pub fn extract_swapped_u16(
 fn extract_swapped(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
     n: usize,
 ) -> ExtractionResult {
     const OUTPUT_FILE_NAME: &str = "swapped.bin";
@@ -61,7 +63,7 @@ fn extract_swapped(
             result.size = Some(swapped_data.len());
 
             // Write to file, if requested
-            if output_directory.is_some() {
+            if let Some(output_directory) = output_directory {
                 let chroot = Chroot::new(output_directory);
                 result.success = chroot.create_file(OUTPUT_FILE_NAME, &swapped_data);
             }

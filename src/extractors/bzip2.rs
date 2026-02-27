@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::common::is_offset_safe;
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use bzip2::{Decompress, Status};
@@ -35,7 +37,7 @@ pub fn bzip2_extractor() -> Extractor {
 pub fn bzip2_decompressor(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     // Size of decompression buffer
     const BLOCK_SIZE: usize = 900 * 1024;
@@ -89,7 +91,7 @@ pub fn bzip2_decompressor(
                 }
 
                 // Decompressed a block of data, if extraction was requested write the decompressed block to the output file
-                if output_directory.is_some() {
+                if let Some(output_directory) = output_directory {
                     let n: usize = (decompressor.total_out() as usize) - bytes_written;
 
                     let chroot = Chroot::new(output_directory);

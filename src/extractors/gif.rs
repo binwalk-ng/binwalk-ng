@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::common::is_offset_safe;
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::structures::common::StructureError;
@@ -37,7 +39,7 @@ pub fn gif_extractor() -> Extractor {
 pub fn extract_gif_image(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     const OUTFILE_NAME: &str = "image.gif";
 
@@ -56,7 +58,7 @@ pub fn extract_gif_image(
                 result.success = true;
 
                 // Do extraction, if requested
-                if output_directory.is_some() {
+                if let Some(output_directory) = output_directory {
                     let chroot = Chroot::new(output_directory);
                     result.success =
                         chroot.carve_file(OUTFILE_NAME, file_data, offset, result.size.unwrap());

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::common::crc32;
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::structures::trx::parse_trx_header;
@@ -35,7 +37,7 @@ pub fn trx_extractor() -> Extractor {
 pub fn extract_trx_partitions(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     const CRC_DATA_START_OFFSET: usize = 12;
 
@@ -57,7 +59,7 @@ pub fn extract_trx_partitions(
             result.size = Some(trx_header.total_size);
 
             // If extraction was requested, carve the TRX partitions
-            if output_directory.is_some() {
+            if let Some(output_directory) = output_directory {
                 let chroot = Chroot::new(output_directory);
 
                 for i in 0..trx_header.partitions.len() {
