@@ -854,8 +854,8 @@ impl Default for Chroot {
 
 /// Recursively walks a given directory and returns a list of regular non-zero size files in the given directory path.
 #[allow(dead_code)]
-pub fn get_extracted_files(directory: &str) -> Vec<String> {
-    let mut regular_files: Vec<String> = vec![];
+pub fn get_extracted_files(directory: &str) -> Vec<PathBuf> {
+    let mut regular_files: Vec<PathBuf> = vec![];
 
     for entry in WalkDir::new(directory).into_iter() {
         match entry {
@@ -868,7 +868,7 @@ pub fn get_extracted_files(directory: &str) -> Vec<String> {
                     Ok(md) => {
                         // Only interested in non-empty, regular files
                         if md.is_file() && md.len() > 0 {
-                            regular_files.push(entry_path.display().to_string());
+                            regular_files.push(entry_path.to_path_buf());
                         }
                     }
                 }
@@ -882,7 +882,7 @@ pub fn get_extracted_files(directory: &str) -> Vec<String> {
 /// Executes an extractor for the provided SignatureResult.
 pub fn execute(
     file_data: &[u8],
-    file_path: &str,
+    file_path: impl AsRef<Path>,
     signature: &SignatureResult,
     extractor: &Option<Extractor>,
 ) -> ExtractionResult {
@@ -891,7 +891,7 @@ pub fn execute(
     };
 
     // Create an output directory for the extraction
-    if let Ok(output_directory) = create_output_directory(file_path, signature.offset) {
+    if let Ok(output_directory) = create_output_directory(&file_path, signature.offset) {
         // Make sure a default extractor was actually defined (this function should not be called if signature.extractor is None)
         match &extractor {
             None => {
@@ -989,12 +989,13 @@ pub fn execute(
 /// Spawn an external extractor process.
 fn spawn(
     file_data: &[u8],
-    file_path: &str,
+    file_path: impl AsRef<Path>,
     output_directory: &str,
     signature: &SignatureResult,
     mut extractor: Extractor,
 ) -> Result<ProcInfo, std::io::Error> {
     let chroot = Chroot::default();
+    let file_path = file_path.as_ref();
 
     // This function *only* handles execution of external extraction utilities; internal extractors must be invoked directly
     let command = match &extractor.utility {
@@ -1024,7 +1025,7 @@ fn spawn(
     );
     info!(
         "Carving data from {} {:#X}..{:#X} to {}",
-        file_path,
+        file_path.display(),
         signature.offset,
         signature.offset + signature.size,
         carved_file
@@ -1133,13 +1134,17 @@ fn proc_wait(mut worker_info: ProcInfo) -> Result<ExtractionResult, ExtractionEr
 }
 
 // Create an output directory in which to place extraction results
-fn create_output_directory(file_path: &str, offset: usize) -> Result<String, std::io::Error> {
+fn create_output_directory(
+    file_path: impl AsRef<Path>,
+    offset: usize,
+) -> Result<String, std::io::Error> {
     let chroot = Chroot::default();
+    let file_path = file_path.as_ref();
 
     // Output directory will be: <file_path.extracted/<hex offset>
     let output_directory = format!(
         "{}.extracted{}{:X}",
-        file_path,
+        file_path.display(),
         path::MAIN_SEPARATOR,
         offset
     );

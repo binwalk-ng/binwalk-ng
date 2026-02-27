@@ -3,6 +3,7 @@ use clap::Parser;
 use log::{debug, error, info};
 use std::collections::VecDeque;
 use std::panic;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process;
 use std::process::ExitCode;
@@ -149,7 +150,7 @@ fn main() -> ExitCode {
 
     debug!(
         "Queuing initial target file: {}",
-        binwalker.base_target_file
+        binwalker.base_target_file.display()
     );
 
     // Queue the initial file path
@@ -205,7 +206,7 @@ fn main() -> ExitCode {
 
             // Nothing found? Nothing else to do for this file.
             if results.file_map.is_empty() {
-                debug!("Found no results for file {}", results.file_path);
+                debug!("Found no results for file {}", results.file_path.display());
                 continue;
             }
 
@@ -221,8 +222,8 @@ fn main() -> ExitCode {
                         for file_path in extractors::common::get_extracted_files(
                             &extraction_result.output_directory,
                         ) {
-                            debug!("Queuing {file_path} for analysis");
-                            target_files.push_back(file_path.clone());
+                            debug!("Queuing {} for analysis", file_path.display());
+                            target_files.push_back(file_path);
                         }
                     }
                 }
@@ -239,7 +240,8 @@ fn main() -> ExitCode {
     {
         error!(
             "Request to remove extraction symlink file {} failed: {}",
-            binwalker.base_target_file, e
+            binwalker.base_target_file.display(),
+            e
         );
     }
 
@@ -282,16 +284,17 @@ fn should_display(results: &AnalysisResults, file_count: usize, verbose: bool) -
 fn spawn_worker(
     pool: &ThreadPool,
     bw: binwalk_ng::Binwalk,
-    target_file: String,
+    target_file: impl AsRef<Path>,
     do_extraction: bool,
     do_carve: bool,
     worker_tx: mpsc::Sender<AnalysisResults>,
 ) {
+    let target_file = target_file.as_ref().to_path_buf();
     pool.execute(move || {
         // Read in file data
         let file_data = match common::read_file(&target_file) {
             Err(_) => {
-                error!("Failed to read {target_file} data");
+                error!("Failed to read {} data", target_file.display());
                 b"".to_vec()
             }
             Ok(data) => data,
@@ -303,13 +306,17 @@ fn spawn_worker(
         // If data carving was requested as part of extraction, carve analysis results to disk
         if do_carve {
             let carve_count = carve_file_map(&file_data, &results);
-            info!("Carved {carve_count} data blocks to disk from {target_file}");
+            info!(
+                "Carved {carve_count} data blocks to disk from {}",
+                target_file.display()
+            );
         }
 
         // Report file results back to main thread
         if let Err(e) = worker_tx.send(results) {
             panic!(
-                "Worker thread for {target_file} failed to send results back to main thread: {e}"
+                "Worker thread for {} failed to send results back to main thread: {e}",
+                target_file.display()
             );
         }
     });
@@ -372,7 +379,7 @@ fn carve_file_map(file_data: &[u8], results: &binwalk_ng::AnalysisResults) -> us
 
 /// Carves a block of file data to a new file on disk
 fn carve_file_data_to_disk(
-    source_file_path: &str,
+    source_file_path: impl AsRef<Path>,
     file_data: &[u8],
     name: &str,
     offset: usize,
@@ -381,7 +388,10 @@ fn carve_file_data_to_disk(
     let chroot = extractors::common::Chroot::default();
 
     // Carved file path will be: <source file path>_<offset>_<name>.raw
-    let carved_file_path = format!("{source_file_path}_{offset}_{name}.raw",);
+    let carved_file_path = format!(
+        "{}_{offset}_{name}.raw",
+        source_file_path.as_ref().display()
+    );
 
     debug!("Carving {carved_file_path}");
 
