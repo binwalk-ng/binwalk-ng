@@ -187,17 +187,18 @@ impl Chroot {
         let path2 = path2.as_ref();
         let path2 = path2.strip_prefix("/").unwrap_or(path2);
 
-        let mut joined_path: PathBuf = self.sanitize_path(path1.join(path2), true).to_path_buf();
+        let mut joined_path = self.sanitize_path(path1.join(path2)).to_path_buf();
 
         // If the joined path does not start with the chroot directory,
         // prepend the chroot directory to the final joined path.
         // on Windows: If no chroot directory is specified, skip the operation
         if cfg!(windows) && self.chroot_directory == path::MAIN_SEPARATOR.to_string() {
             // do nothing and skip
-        } else if !joined_path.starts_with(&self.chroot_directory)
-            && let Ok(relative_append) = joined_path.strip_prefix("/")
-        {
-            joined_path = self.chroot_directory.join(relative_append).to_path_buf();
+        } else if !joined_path.starts_with(&self.chroot_directory) {
+            joined_path = self
+                .chroot_directory
+                .join(joined_path.strip_prefix("/").unwrap_or(&joined_path))
+                .to_path_buf();
         }
 
         joined_path
@@ -794,27 +795,18 @@ impl Chroot {
     }
 
     /// Interprets a given path containing '..' directories.
-    fn sanitize_path(&self, file_path: impl AsRef<Path>, preserve_root_path_sep: bool) -> PathBuf {
-        let path = file_path.as_ref();
+    fn sanitize_path(&self, file_path: impl AsRef<Path>) -> PathBuf {
+        let mut components_stack: Vec<PathBuf> = vec![PathBuf::from("/")];
 
-        let mut components_stack: Vec<PathBuf> = Vec::new();
-        let mut has_root = false;
-
-        for component in path.components() {
+        for component in file_path.as_ref().components() {
             match component {
-                Component::RootDir => {
-                    if preserve_root_path_sep {
-                        has_root = true;
-                    }
-                }
-
-                Component::CurDir => {
-                    // Skip "."
+                Component::RootDir | Component::CurDir => {
+                    // Skip
                 }
 
                 Component::ParentDir => {
                     // Prevent traversal above root
-                    if !components_stack.is_empty() {
+                    if components_stack.len() > 1 {
                         components_stack.pop();
                     }
                 }
@@ -830,17 +822,7 @@ impl Chroot {
             }
         }
 
-        let mut sanitized = PathBuf::from("/");
-
-        if has_root {
-            sanitized.push(Path::new(std::path::MAIN_SEPARATOR_STR));
-        }
-
-        for part in components_stack {
-            sanitized.push(part);
-        }
-
-        sanitized
+        components_stack.iter().collect()
     }
 }
 
