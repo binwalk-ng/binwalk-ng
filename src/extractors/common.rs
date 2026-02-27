@@ -195,9 +195,10 @@ impl Chroot {
         if cfg!(windows) && self.chroot_directory == path::MAIN_SEPARATOR.to_string() {
             // do nothing and skip
         } else if !joined_path.starts_with(&self.chroot_directory)
-            && let Ok(relative_append) = joined_path.strip_prefix("/") {
-                joined_path = self.chroot_directory.join(relative_append).to_path_buf();
-            }
+            && let Ok(relative_append) = joined_path.strip_prefix("/")
+        {
+            joined_path = self.chroot_directory.join(relative_append).to_path_buf();
+        }
 
         joined_path
     }
@@ -661,18 +662,6 @@ impl Chroot {
         false
     }
 
-    /// Returns the safe absolute target path inside chroot,
-    /// handling both absolute and relative original targets
-    fn get_safe_target(&self, safe_symlink: &Path, original_target: &Path) -> PathBuf {
-        if original_target.is_absolute() {
-            self.chrooted_path(original_target)
-        } else {
-            // target is relative → resolve against symlink's parent
-            let parent = safe_symlink.parent().unwrap_or_else(|| Path::new("/"));
-            self.safe_path_join(parent, original_target)
-        }
-    }
-
     /// Removes the chroot prefix → returns path relative to chroot root
     /// e.g. "/chroot/bin/ls" → "/bin/ls"
     fn strip_chroot_prefix(&self, path: &Path) -> PathBuf {
@@ -725,39 +714,49 @@ impl Chroot {
         symlink_path: impl AsRef<Path>,
         target_path: impl AsRef<Path>,
     ) -> bool {
-        let target = target_path.as_ref();
         let symlink = symlink_path.as_ref();
+        let target = target_path.as_ref();
 
-        // Chroot the symlink file path and create a Path object
+        // Get chroot-safe absolute paths
         let safe_symlink = self.chrooted_path(symlink);
-        let safe_target = self.get_safe_target(&safe_symlink, target);
+        let safe_target_base = if target.is_absolute() {
+            self.chrooted_path(target)
+        } else {
+            // Relative target → resolve relative to symlink's parent
+            let parent = safe_symlink.parent().unwrap_or_else(|| Path::new("/"));
+            self.safe_path_join(parent, target)
+        };
 
-        let rel_symlink = self.strip_chroot_prefix(&safe_symlink);
-        let mut rel_target = self.strip_chroot_prefix(&safe_target);
+        let symlink_inside = self.strip_chroot_prefix(&safe_symlink);
+        let target_inside = self.strip_chroot_prefix(&safe_target_base);
 
-        if let Some(symlink_parent_depth) = rel_symlink.components().count().checked_sub(1) {
-            for _ in 0..symlink_parent_depth {
-                rel_target = PathBuf::from("..").join(&rel_target);
-            }
+        // Build relative path from symlink location → target location
+        let mut relative_target = PathBuf::new();
+
+        // How many .. we need = number of components in symlink path - 1
+        let depth = symlink_inside.components().count().saturating_sub(1);
+        for _ in 0..depth {
+            relative_target.push("..");
         }
 
-        let rel_target = if rel_target.is_absolute() {
-            rel_target.components().skip(1).collect()
-        } else {
-            rel_target
-        };
+        // Append the target path components
+        relative_target.push(target_inside);
+
+        // If it starts with /, turn it into ./
+        if relative_target.starts_with("/") {
+            let mut dot = PathBuf::from(".");
+            dot.push(relative_target);
+            relative_target = dot;
+        }
+
+        // Create the symlink
 
         #[cfg(unix)]
         {
-            match unix_fs::symlink(&rel_target, &safe_symlink) {
+            match unix_fs::symlink(&relative_target, &safe_symlink) {
                 Ok(()) => true,
                 Err(e) => {
-                    error!(
-                        "Failed to create symlink {} → {} : {}",
-                        safe_symlink.display(),
-                        rel_target.display(),
-                        e
-                    );
+                    error!("Failed to create symlink {symlink:?} -> {target:?} : {e}");
                     false
                 }
             }
@@ -765,26 +764,22 @@ impl Chroot {
 
         #[cfg(windows)]
         {
-            // Windows needs to know if target is file or directory
-            // But detecting it correctly inside chroot is tricky → many implementations
-            // just always try symlink_file first, then fallback to symlink_dir
-            use std::os::windows::fs::{symlink_dir, symlink_file};
+            // Windows needs to know whether it's a file or directory symlink
+            // But most chroot-like environments are Unix-like, so often people
+            // just use symlink_file() or always use symlink_dir() — choose wisely
 
-            if let Err(e) = symlink_file(&rel_target, &safe_symlink) {
-                if let Err(e2) = symlink_dir(&rel_target, &safe_symlink) {
-                    error!(
-                        "Failed to create symlink {} → {} : {} / {}",
-                        safe_symlink.display(),
-                        rel_target.display(),
-                        e,
-                        e2
-                    );
+            // try file symlink first
+            if let Ok(()) = std::os::windows::fs::symlink_file(&relative_target, &safe_symlink) {
+                return true;
+            }
+
+            // try directory symlink if file failed
+            match std::os::windows::fs::symlink_dir(&relative_target, &safe_symlink) {
+                Ok(()) => true,
+                Err(e) => {
+                    error!("Failed to create symlink {symlink:?} -> {target:?} : {e}");
                     false
-                } else {
-                    true
                 }
-            } else {
-                true
             }
         }
     }
@@ -1079,7 +1074,6 @@ fn spawn(
                 carved_file: carved_file.clone(),
                 exit_codes: extractor.exit_codes,
             };
-
             Ok(proc_info)
         }
     }
