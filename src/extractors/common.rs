@@ -148,7 +148,7 @@ impl Chroot {
     ///
     /// ```
     /// use binwalk_ng::extractors::common::Chroot;
-    /// use std::path::MAIN_SEPARATOR;
+    /// use std::path::{Path, PathBuf};
     ///
     /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
     /// # let temp_dir = tempfile::tempdir().unwrap();
@@ -157,44 +157,47 @@ impl Chroot {
     /// let chroot = Chroot::new(&chroot_dir);
     ///
     /// let dir_name = "etc";
+    /// let abs_path_dir = Path::new("/").join(dir_name);
     /// let file_name = "passwd";
-    /// let abs_path = format!("{}{}{}{}", MAIN_SEPARATOR, dir_name, MAIN_SEPARATOR, file_name);
-    /// let abs_path_dir = format!("{}{}", MAIN_SEPARATOR, dir_name);
-    /// let rel_path_dir = format!("..{}..{}..{}{}", MAIN_SEPARATOR, MAIN_SEPARATOR, MAIN_SEPARATOR, dir_name);
-    /// let abs_path_file = format!("{}{}", MAIN_SEPARATOR, file_name);
-    /// let rel_path_file = format!("..{}..{}..{}{}", MAIN_SEPARATOR, MAIN_SEPARATOR, MAIN_SEPARATOR, file_name);
+    /// let abs_path = abs_path_dir.join(file_name);
+    /// let rel_path_dir: PathBuf = ["..", "..", "..", dir_name].iter().collect();
+    /// let abs_path_file = Path::new("/").join(file_name);
+    /// let rel_path_file: PathBuf = ["..", "..", "..", file_name].iter().collect();
     ///
     /// let path1 = chroot.safe_path_join(&abs_path_dir, file_name);
-    /// let expected_path1 = std::path::Path::new(&chroot_dir).join(dir_name).join(file_name);
+    /// let expected_path1 = chroot_dir.join(dir_name).join(file_name);
     ///
     /// let path2 = chroot.safe_path_join(&abs_path_dir, &rel_path_file);
-    /// let expected_path2 = std::path::Path::new(&chroot_dir).join(file_name);
+    /// let expected_path2 = chroot_dir.join(file_name);
     ///
     /// let path3 = chroot.safe_path_join(&rel_path_dir, &abs_path_file);
-    /// let expected_path3 = std::path::Path::new(&chroot_dir).join(dir_name).join(file_name);
+    /// let expected_path3 = chroot_dir.join(dir_name).join(file_name);
     ///
     /// let path4 = chroot.safe_path_join(&chroot_dir, &abs_path);
     /// let expected_path4 = chroot_dir.join(dir_name).join(file_name);
     ///
-    /// assert_eq!(path1, expected_path1.display().to_string());
-    /// assert_eq!(path2, expected_path2.display().to_string());
-    /// assert_eq!(path3, expected_path3.display().to_string());
-    /// assert_eq!(path4, expected_path4.display().to_string());
+    /// assert_eq!(path1, expected_path1);
+    /// assert_eq!(path2, expected_path2);
+    /// assert_eq!(path3, expected_path3);
+    /// assert_eq!(path4, expected_path4);
     /// ```
     pub fn safe_path_join(&self, path1: impl AsRef<Path>, path2: impl AsRef<Path>) -> PathBuf {
         // Join and sanitize both paths; retain the leading '/' (if there is one)
-        let mut joined_path: PathBuf = self
-            .sanitize_path(path1.as_ref().join(path2), true)
-            .to_path_buf();
+        let path1 = path1.as_ref();
+        let path2 = path2.as_ref();
+        let path2 = path2.strip_prefix("/").unwrap_or(path2);
+
+        let mut joined_path: PathBuf = self.sanitize_path(path1.join(path2), true).to_path_buf();
 
         // If the joined path does not start with the chroot directory,
         // prepend the chroot directory to the final joined path.
         // on Windows: If no chroot directory is specified, skip the operation
         if cfg!(windows) && self.chroot_directory == path::MAIN_SEPARATOR.to_string() {
             // do nothing and skip
-        } else if !joined_path.starts_with(&self.chroot_directory) {
-            joined_path = self.chroot_directory.join(joined_path).to_path_buf();
-        }
+        } else if !joined_path.starts_with(&self.chroot_directory)
+            && let Ok(relative_append) = joined_path.strip_prefix("/") {
+                joined_path = self.chroot_directory.join(relative_append).to_path_buf();
+            }
 
         joined_path
     }
@@ -701,7 +704,8 @@ impl Chroot {
     /// use binwalk_ng::extractors::common::Chroot;
     ///
     /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
-    /// # let tempdir = tempfile::tempdir().unwrap();
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let chroot_dir = temp_dir.path();
     ///
     /// let symlink_name = "symlink";
     /// let target_path = "target";
@@ -730,7 +734,7 @@ impl Chroot {
 
         let rel_symlink = self.strip_chroot_prefix(&safe_symlink);
         let mut rel_target = self.strip_chroot_prefix(&safe_target);
-        // 3. Turn target into a relative path from symlink's directory
+
         if let Some(symlink_parent_depth) = rel_symlink.components().count().checked_sub(1) {
             for _ in 0..symlink_parent_depth {
                 rel_target = PathBuf::from("..").join(&rel_target);
@@ -743,7 +747,6 @@ impl Chroot {
             rel_target
         };
 
-        // 4. Create the actual symlink
         #[cfg(unix)]
         {
             match unix_fs::symlink(&rel_target, &safe_symlink) {
@@ -832,7 +835,7 @@ impl Chroot {
             }
         }
 
-        let mut sanitized = PathBuf::new();
+        let mut sanitized = PathBuf::from("/");
 
         if has_root {
             sanitized.push(Path::new(std::path::MAIN_SEPARATOR_STR));
