@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::structures::mbr::parse_mbr_image;
 
@@ -34,7 +36,7 @@ pub fn mbr_extractor() -> Extractor {
 pub fn extract_mbr_partitions(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     // Return value
     let mut result = ExtractionResult {

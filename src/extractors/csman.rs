@@ -3,6 +3,7 @@ use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorTy
 use crate::structures::csman::{CSManEntry, parse_csman_entry, parse_csman_header};
 use miniz_oxide::inflate;
 use std::collections::HashMap;
+use std::path::Path;
 
 /// Defines the internal extractor function for CSMan DAT files
 ///
@@ -37,7 +38,7 @@ pub fn csman_extractor() -> Extractor {
 pub fn extract_csman_dat(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     const COMPRESSED_HEADER_SIZE: usize = 2;
 

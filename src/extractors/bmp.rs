@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::structures::bmp::{get_dib_header_size, parse_bmp_file_header};
 
@@ -34,7 +36,7 @@ pub fn bmp_extractor() -> Extractor {
 pub fn extract_bmp_image(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     const OUTFILE_NAME: &str = "image.bmp";
 

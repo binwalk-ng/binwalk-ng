@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::common::is_offset_safe;
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::structures::wince::{parse_wince_block_header, parse_wince_header};
@@ -35,7 +37,7 @@ pub fn wince_extractor() -> Extractor {
 pub fn wince_dump(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     let mut result = ExtractionResult {
         ..Default::default()

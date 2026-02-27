@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 
 /// Defines the internal extractor function for decrypting known encrypted firmware
@@ -33,7 +35,7 @@ pub fn encfw_extractor() -> Extractor {
 pub fn encfw_decrypt(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     const OUTPUT_FILE_NAME: &str = "decrypted.bin";
 

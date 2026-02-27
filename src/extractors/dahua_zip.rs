@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::signatures::zip::find_zip_eof;
 
@@ -34,7 +36,7 @@ pub fn dahua_zip_extractor() -> Extractor {
 pub fn extract_dahua_zip(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     const OUTFILE_NAME: &str = "dahua.zip";
     const ZIP_HEADER: &[u8] = b"PK";

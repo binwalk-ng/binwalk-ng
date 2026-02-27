@@ -1,7 +1,7 @@
 use crate::extractors::common::Chroot;
 use adler32::RollingAdler32;
 use flate2::bufread::DeflateDecoder;
-use std::io::Read;
+use std::{io::Read, path::Path};
 
 #[derive(Debug, Default, Clone)]
 pub struct DeflateResult {
@@ -15,7 +15,7 @@ pub struct DeflateResult {
 pub fn inflate_decompressor(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> DeflateResult {
     // Size of decompression buffer
     const BLOCK_SIZE: usize = 8192;

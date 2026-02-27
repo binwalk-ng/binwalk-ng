@@ -61,7 +61,7 @@ pub fn romfs_extractor() -> Extractor {
 pub fn extract_romfs(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     let mut result = ExtractionResult {
         ..Default::default()

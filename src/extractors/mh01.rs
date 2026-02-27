@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::structures::mh01::parse_mh01_header;
 
@@ -34,7 +36,7 @@ pub fn mh01_extractor() -> Extractor {
 pub fn extract_mh01_image(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     // File names for the three portions of the MH01 firmware image
     const IV_FILE_NAME: &str = "iv.bin";

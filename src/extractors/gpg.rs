@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::extractors::common::{ExtractionResult, Extractor, ExtractorType};
 use crate::extractors::inflate;
 
@@ -34,7 +36,7 @@ pub fn gpg_extractor() -> Extractor {
 pub fn gpg_decompress(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     // Size of the GPG header
     const HEADER_SIZE: usize = 2;

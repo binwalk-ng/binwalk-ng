@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 
 /// Defines the internal extractor function for carving out JPEG images
@@ -34,7 +36,7 @@ pub fn jpeg_extractor() -> Extractor {
 pub fn extract_jpeg_image(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     const OUTFILE_NAME: &str = "image.jpg";
 

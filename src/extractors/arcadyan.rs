@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::extractors::common::{ExtractionResult, Extractor, ExtractorType};
 use crate::extractors::lzma::lzma_decompress;
 
@@ -34,7 +36,7 @@ pub fn obfuscated_lzma_extractor() -> Extractor {
 pub fn extract_obfuscated_lzma(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     const LZMA_DATA_OFFSET: usize = 4;
     const MIN_DATA_SIZE: usize = 0x100;

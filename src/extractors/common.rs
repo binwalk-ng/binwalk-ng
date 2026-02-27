@@ -26,7 +26,7 @@ pub struct ExtractionError;
 
 /// Built-in internal extractors must provide a function conforming to this definition.
 /// Arguments: file_data, offset, output_directory.
-pub type InternalExtractor = fn(&[u8], usize, Option<&str>) -> ExtractionResult;
+pub type InternalExtractor = fn(&[u8], usize, Option<&Path>) -> ExtractionResult;
 
 /// Enum to define either an Internal or External extractor type
 #[derive(Debug, Default, Clone)]
@@ -65,7 +65,7 @@ pub struct ExtractionResult {
     /// Automatically populated with the corresponding Extractor.do_not_recurse field by extractors::common::execute.
     pub do_not_recurse: bool,
     /// The output directory where the extractor dropped its files, automatically populated by extractors::common::execute
-    pub output_directory: String,
+    pub output_directory: PathBuf,
 }
 
 /// Stores information about external extractor processes. For internal use only.
@@ -836,7 +836,7 @@ impl Default for Chroot {
 
 /// Recursively walks a given directory and returns a list of regular non-zero size files in the given directory path.
 #[allow(dead_code)]
-pub fn get_extracted_files(directory: &str) -> Vec<PathBuf> {
+pub fn get_extracted_files(directory: impl AsRef<Path>) -> Vec<PathBuf> {
     let mut regular_files: Vec<PathBuf> = vec![];
 
     for entry in WalkDir::new(directory).into_iter() {
@@ -960,7 +960,8 @@ pub fn execute(
             && let Err(e) = fs::remove_dir_all(&output_directory)
         {
             warn!(
-                "Failed to clean up extraction directory {output_directory} after extraction failure: {e}"
+                "Failed to clean up extraction directory {} after extraction failure: {e}",
+                output_directory.display()
             );
         }
     }
@@ -972,7 +973,7 @@ pub fn execute(
 fn spawn(
     file_data: &[u8],
     file_path: impl AsRef<Path>,
-    output_directory: &str,
+    output_directory: &Path,
     signature: &SignatureResult,
     mut extractor: Extractor,
 ) -> Result<ProcInfo, std::io::Error> {
@@ -999,7 +1000,7 @@ fn spawn(
     // Carved file path will be <output directory>/<signature.name>_<hex offset>.<extractor.extension>
     let carved_file = format!(
         "{}{}{}_{:X}.{}",
-        output_directory,
+        output_directory.display(),
         path::MAIN_SEPARATOR,
         signature.name,
         signature.offset,
@@ -1119,17 +1120,17 @@ fn proc_wait(mut worker_info: ProcInfo) -> Result<ExtractionResult, ExtractionEr
 fn create_output_directory(
     file_path: impl AsRef<Path>,
     offset: usize,
-) -> Result<String, std::io::Error> {
+) -> Result<PathBuf, std::io::Error> {
     let chroot = Chroot::default();
     let file_path = file_path.as_ref();
 
     // Output directory will be: <file_path.extracted/<hex offset>
-    let output_directory = format!(
-        "{}.extracted{}{:X}",
-        file_path.display(),
-        path::MAIN_SEPARATOR,
-        offset
-    );
+
+    let mut dir_name = file_path.file_name().unwrap().to_os_string();
+    dir_name.push(".extracted");
+    let output_directory = file_path
+        .with_file_name(dir_name)
+        .join(format!("{:X}", offset));
 
     // First, remove the output directory if it exists from a previous run
     if !chroot.remove_directory(&output_directory) {
@@ -1146,9 +1147,12 @@ fn create_output_directory(
 
 /// Returns true if the size of the provided extractor output directory is greater than zero.
 /// Note that any intermediate/carved files must be deleted *before* calling this function.
-fn was_something_extracted(output_directory: &str) -> bool {
-    let output_directory_path = path::Path::new(output_directory);
-    debug!("Checking output directory {output_directory} for results");
+fn was_something_extracted(output_directory: impl AsRef<Path>) -> bool {
+    let output_directory = output_directory.as_ref();
+    debug!(
+        "Checking output directory {} for results",
+        output_directory.display()
+    );
 
     // Walk the output directory looking for something, anything, that isn't an empty file
     for entry in WalkDir::new(output_directory).into_iter() {
@@ -1159,7 +1163,7 @@ fn was_something_extracted(output_directory: &str) -> bool {
             }
             Ok(entry) => {
                 // Don't include the base output directory path itself
-                if entry.path() == output_directory_path {
+                if entry.path() == output_directory {
                     continue;
                 }
 

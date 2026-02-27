@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::common::is_offset_safe;
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::structures::pcap::{parse_pcapng_block, parse_pcapng_section_block};
@@ -36,7 +38,7 @@ pub fn pcapng_extractor() -> Extractor {
 pub fn pcapng_carver(
     file_data: &[u8],
     offset: usize,
-    output_directory: Option<&str>,
+    output_directory: Option<&Path>,
 ) -> ExtractionResult {
     // Output file name
     const OUTPUT_FILE_NAME: &str = "capture.pcapng";
