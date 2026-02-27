@@ -2,39 +2,7 @@
 use log::{debug, error};
 use std::fs::File;
 use std::io::Read;
-
-/// Read a data into memory, either from disk or from stdin, and return its contents.
-///
-/// ## Example
-///
-/// ```
-/// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_common_rs_11_0() -> Result<(), Box<dyn std::error::Error>> {
-/// use binwalk_ng::common::read_input;
-///
-/// let file_data = read_input("/etc/passwd", false)?;
-/// assert!(file_data.len() > 0);
-/// # Ok(())
-/// # } _doctest_main_src_common_rs_11_0(); }
-/// ```
-pub fn read_input(file: impl Into<String>, stdin: bool) -> Result<Vec<u8>, std::io::Error> {
-    if stdin { read_stdin() } else { read_file(file) }
-}
-
-/// Read data from standard input and return its contents.
-pub fn read_stdin() -> Result<Vec<u8>, std::io::Error> {
-    let mut stdin_data = Vec::new();
-
-    match std::io::stdin().read_to_end(&mut stdin_data) {
-        Err(e) => {
-            error!("Failed to read data from stdin: {e}");
-            Err(e)
-        }
-        Ok(nbytes) => {
-            debug!("Loaded {nbytes} bytes from stdin");
-            Ok(stdin_data)
-        }
-    }
-}
+use std::path::Path;
 
 /// Read a file data into memory and return its contents.
 ///
@@ -49,22 +17,25 @@ pub fn read_stdin() -> Result<Vec<u8>, std::io::Error> {
 /// # Ok(())
 /// # } _doctest_main_src_common_rs_48_0(); }
 /// ```
-pub fn read_file(file: impl Into<String>) -> Result<Vec<u8>, std::io::Error> {
+pub fn read_file(file: impl AsRef<Path>) -> Result<Vec<u8>, std::io::Error> {
     let mut file_data = Vec::new();
-    let file_path = file.into();
+    let file_path = file.as_ref();
 
-    match File::open(&file_path) {
+    match File::open(file_path) {
         Err(e) => {
-            error!("Failed to open file {file_path}: {e}");
+            error!("Failed to open file {}: {e}", file_path.display());
             Err(e)
         }
         Ok(mut fp) => match fp.read_to_end(&mut file_data) {
             Err(e) => {
-                error!("Failed to read file {file_path} into memory: {e}");
+                error!(
+                    "Failed to read file {} into memory: {e}",
+                    file_path.display()
+                );
                 Err(e)
             }
             Ok(file_size) => {
-                debug!("Loaded {file_size} bytes from {file_path}");
+                debug!("Loaded {file_size} bytes from {}", file_path.display());
                 Ok(file_data)
             }
         },

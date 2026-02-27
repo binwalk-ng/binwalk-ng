@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path;
+use std::path::Path;
 use uuid::Uuid;
 
 #[cfg(windows)]
@@ -96,7 +97,7 @@ impl Binwalk {
     /// ```
     #[allow(dead_code)]
     pub fn new() -> Binwalk {
-        Binwalk::configure(None, None, None, None, None, false).unwrap()
+        Binwalk::configure(None, None, vec![], vec![], None, false).unwrap()
     }
 
     /// Create a new Binwalk instance.
@@ -121,18 +122,18 @@ impl Binwalk {
     ///
     /// let binwalker = Binwalk::configure(None,
     ///                                    None,
-    ///                                    None,
-    ///                                    Some(exclude_filters),
+    ///                                    vec![],
+    ///                                    exclude_filters,
     ///                                    None,
     ///                                    false)?;
     /// # Ok(binwalker)
     /// # } _doctest_main_src_binwalk_rs_102_0(); }
     /// ```
     pub fn configure(
-        target_file_name: Option<String>,
-        output_directory: Option<String>,
-        include: Option<Vec<String>>,
-        exclude: Option<Vec<String>>,
+        target_file_name: Option<&Path>,
+        output_directory: Option<&Path>,
+        include: Vec<String>,
+        exclude: Vec<String>,
         signatures: Option<Vec<signatures::common::Signature>>,
         full_search: bool,
     ) -> Result<Binwalk, BinwalkError> {
@@ -143,10 +144,11 @@ impl Binwalk {
         // Target file is optional, especially if being called via the library
         if let Some(target_file) = target_file_name {
             // Set the target file path, make it an absolute path
-            match path::absolute(&target_file) {
+            match path::absolute(target_file) {
                 Err(_) => {
                     return Err(BinwalkError::new(&format!(
-                        "Failed to get absolute path for '{target_file}'"
+                        "Failed to get absolute path for '{}'",
+                        target_file.display()
                     )));
                 }
                 Ok(abspath) => {
@@ -157,14 +159,15 @@ impl Binwalk {
             // If an output extraction directory was also specified, initialize it
             if let Some(extraction_directory) = output_directory {
                 // Make the extraction directory an absolute path
-                match path::absolute(&extraction_directory) {
+                match path::absolute(extraction_directory) {
                     Err(_) => {
                         return Err(BinwalkError::new(&format!(
-                            "Failed to get absolute path for '{extraction_directory}'"
+                            "Failed to get absolute path for '{}'",
+                            extraction_directory.display()
                         )));
                     }
-                    Ok(abspath) => {
-                        new_instance.base_output_directory = abspath.display().to_string();
+                    Ok(absolute_path) => {
+                        new_instance.base_output_directory = absolute_path.display().to_string();
                     }
                 }
 
@@ -568,21 +571,16 @@ impl Binwalk {
     ///
     /// let target_path = std::path::Path::new("tests")
     ///     .join("inputs")
-    ///     .join("gzip.bin")
-    ///     .display()
-    ///     .to_string();
+    ///     .join("gzip.bin");
     ///
     /// # let tempdir = tempfile::tempdir().unwrap();
-    /// let extraction_directory = std::path::Path::new("tests")
-    ///     .join("extractions")
-    ///     .join(tempdir)
-    ///     .display()
-    ///     .to_string();
+    /// let extraction_directory = std::path::Path::new("tests").join("extractions");
+    /// # let extraction_directory = extraction_directory.join(tempdir);
     ///
-    /// let binwalker = Binwalk::configure(Some(target_path),
-    ///                                    Some(extraction_directory.clone()),
-    ///                                    None,
-    ///                                    None,
+    /// let binwalker = Binwalk::configure(Some(target_path.as_path()),
+    ///                                    Some(extraction_directory.as_path()),
+    ///                                    vec![],
+    ///                                    vec![],
     ///                                    None,
     ///                                    false)?;
     ///
@@ -683,23 +681,18 @@ impl Binwalk {
     ///
     /// let target_path = std::path::Path::new("tests")
     ///     .join("inputs")
-    ///     .join("gzip.bin")
-    ///     .display()
-    ///     .to_string();
+    ///     .join("gzip.bin");
     ///
     /// # let tempdir = tempfile::tempdir().unwrap();
-    /// let extraction_directory = std::path::Path::new("tests")
-    ///     .join("extractions")
-    /// #   .join(tempdir)
-    ///     .display()
-    ///     .to_string();
+    /// let extraction_directory = std::path::Path::new("tests").join("extractions");
+    /// # let extraction_directory = extraction_directory.join(tempdir);
     ///
     /// let file_data = common::read_file(&target_path).expect("Failed to read file data");
     ///
-    /// let binwalker = Binwalk::configure(Some(target_path),
-    ///                                    Some(extraction_directory.clone()),
-    ///                                    None,
-    ///                                    None,
+    /// let binwalker = Binwalk::configure(Some(target_path.as_path()),
+    ///                                    Some(extraction_directory.as_path()),
+    ///                                    vec![],
+    ///                                    vec![],
     ///                                    None,
     ///                                    false)?;
     ///
@@ -758,21 +751,16 @@ impl Binwalk {
     ///
     /// let target_path = std::path::Path::new("tests")
     ///     .join("inputs")
-    ///     .join("gzip.bin")
-    ///     .display()
-    ///     .to_string();
+    ///     .join("gzip.bin");
     ///
     /// # let tempdir = tempfile::tempdir().unwrap();
-    /// let extraction_directory = std::path::Path::new("tests")
-    ///     .join("extractions")
-    /// #   .join(tempdir)
-    ///     .display()
-    ///     .to_string();
+    /// let extraction_directory = std::path::Path::new("tests").join("extractions");
+    /// # let extraction_directory = extraction_directory.join(tempdir);
     ///
-    /// let binwalker = Binwalk::configure(Some(target_path),
-    ///                                    Some(extraction_directory.clone()),
-    ///                                    None,
-    ///                                    None,
+    /// let binwalker = Binwalk::configure(Some(target_path.as_path()),
+    ///                                    Some(extraction_directory.as_path()),
+    ///                                    vec![],
+    ///                                    vec![],
     ///                                    None,
     ///                                    false)?;
     ///
@@ -882,11 +870,11 @@ fn init_extraction_directory(
 /// Returns true if the signature should be included for file analysis, else returns false.
 fn include_signature(
     signature: &signatures::common::Signature,
-    include: &Option<Vec<String>>,
-    exclude: &Option<Vec<String>>,
+    include: &Vec<String>,
+    exclude: &Vec<String>,
 ) -> bool {
-    if let Some(include_signatures) = include {
-        for include_str in include_signatures {
+    if !include.is_empty() {
+        for include_str in include {
             if signature.name.to_lowercase() == include_str.to_lowercase() {
                 return true;
             }
@@ -895,8 +883,8 @@ fn include_signature(
         return false;
     }
 
-    if let Some(exclude_signatures) = exclude {
-        for exclude_str in exclude_signatures {
+    if !exclude.is_empty() {
+        for exclude_str in exclude {
             if signature.name.to_lowercase() == exclude_str.to_lowercase() {
                 return false;
             }

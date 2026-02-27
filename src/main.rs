@@ -1,7 +1,9 @@
 use binwalk_ng::AnalysisResults;
+use clap::Parser;
 use log::{debug, error, info};
 use std::collections::VecDeque;
 use std::panic;
+use std::path::PathBuf;
 use std::process;
 use std::process::ExitCode;
 use std::sync::mpsc;
@@ -10,7 +12,7 @@ use std::time;
 use threadpool::ThreadPool;
 
 mod binwalk_ng;
-mod cliparser;
+mod cli_parser;
 mod common;
 mod display;
 #[cfg(feature = "entropy-plot")]
@@ -22,9 +24,6 @@ mod signatures;
 mod structures;
 
 fn main() -> ExitCode {
-    // File name used when reading from stdin
-    const STDIN: &str = "stdin";
-
     // Only use one thread if unable to auto-detect available core info
     const DEFAULT_WORKER_COUNT: usize = 1;
 
@@ -36,13 +35,13 @@ fn main() -> ExitCode {
     const BINWALK_RM_SYMLINK: &str = "BINWALK_RM_EXTRACTION_SYMLINK";
 
     // Output directory for extracted files
-    let mut output_directory: Option<String> = None;
+    let mut output_directory: Option<PathBuf> = None;
 
     /*
      * Maintain a queue of files waiting to be analyzed.
      * Note that ThreadPool has its own internal queue so this may seem redundant, however,
      * queuing a large number of jobs via the ThreadPool queue results in *massive* amounts
-     * of unecessary memory consumption, especially when recursively analyzing many files.
+     * of unnecessary memory consumption, especially when recursively analyzing many files.
      */
     let mut target_files = VecDeque::new();
 
@@ -55,22 +54,17 @@ fn main() -> ExitCode {
     env_logger::init();
 
     // Process command line arguments
-    let mut cliargs = cliparser::parse();
+    let cli_args = cli_parser::CliArgs::parse();
 
     // If --list was specified, just display a list of signatures and return
-    if cliargs.list {
-        display::print_signature_list(cliargs.quiet, &magic::patterns());
+    if cli_args.list {
+        display::print_signature_list(cli_args.quiet, &magic::patterns());
         return ExitCode::SUCCESS;
     }
 
-    // Set a dummy file name when reading from stdin
-    if cliargs.stdin {
-        cliargs.file_name = Some(STDIN.to_string());
-    }
+    let mut json_logger = json::JsonLogger::new(cli_args.log.as_deref());
 
-    let mut json_logger = json::JsonLogger::new(cliargs.log);
-
-    if cliargs.entropy {
+    if cli_args.entropy {
         #[cfg(not(feature = "entropy-plot"))]
         {
             panic!(
@@ -80,16 +74,16 @@ fn main() -> ExitCode {
         #[cfg(feature = "entropy-plot")]
         {
             // generate the entropy graph and return
-            display::print_plain(cliargs.quiet, "Calculating file entropy...");
+            display::print_plain(cli_args.quiet, "Calculating file entropy...");
 
             if let Ok(entropy_results) =
-                entropy::plot(cliargs.file_name.unwrap(), cliargs.stdin, cliargs.png)
+                entropy::plot(cli_args.file_name.unwrap(), cli_args.png.as_deref())
             {
                 // Log entropy results to JSON file, if requested
                 json_logger.log(json::JSONType::Entropy(entropy_results.clone()));
                 json_logger.close();
 
-                display::println_plain(cliargs.quiet, "done.");
+                display::println_plain(cli_args.quiet, "done.");
             } else {
                 panic!("Entropy analysis failed!");
             }
@@ -99,18 +93,18 @@ fn main() -> ExitCode {
     }
 
     // If extraction or data carving was requested, we need to initialize the output directory
-    if cliargs.extract || cliargs.carve {
-        output_directory = Some(cliargs.directory);
+    if cli_args.extract || cli_args.carve {
+        output_directory = Some(cli_args.directory);
     }
 
     // Initialize binwalk
     let binwalker = match binwalk_ng::Binwalk::configure(
-        cliargs.file_name,
-        output_directory,
-        cliargs.include,
-        cliargs.exclude,
+        cli_args.file_name.as_deref(),
+        output_directory.as_deref(),
+        cli_args.include,
+        cli_args.exclude,
         None,
-        cliargs.search_all,
+        cli_args.search_all,
     ) {
         Err(e) => {
             error!("Binwalk initialization failed: {}", e.message);
@@ -120,7 +114,7 @@ fn main() -> ExitCode {
     };
 
     // If the user specified --threads, honor that request; else, auto-detect available parallelism
-    let available_workers = cliargs.threads.unwrap_or_else(|| {
+    let available_workers = cli_args.threads.unwrap_or_else(|| {
         // Get CPU core info
         match thread::available_parallelism() {
             // In case of error use the default
@@ -159,7 +153,7 @@ fn main() -> ExitCode {
     );
 
     // Queue the initial file path
-    target_files.insert(target_files.len(), binwalker.base_target_file.clone());
+    target_files.push_back(binwalker.base_target_file.clone());
 
     /*
      * Main loop.
@@ -178,9 +172,8 @@ fn main() -> ExitCode {
                 &workers,
                 binwalker.clone(),
                 target_file,
-                cliargs.stdin && file_count == 0,
-                cliargs.extract,
-                cliargs.carve,
+                cli_args.extract,
+                cli_args.carve,
                 worker_tx.clone(),
             );
         }
@@ -217,19 +210,19 @@ fn main() -> ExitCode {
             }
 
             // Print analysis results to screen
-            if should_display(&results, file_count, cliargs.verbose) {
-                display::print_analysis_results(cliargs.quiet, cliargs.extract, &results);
+            if should_display(&results, file_count, cli_args.verbose) {
+                display::print_analysis_results(cli_args.quiet, cli_args.extract, &results);
             }
 
             // If running recursively, add extraction results to list of files to analyze
-            if cliargs.matryoshka {
+            if cli_args.matryoshka {
                 for (_signature_id, extraction_result) in results.extractions.into_iter() {
                     if !extraction_result.do_not_recurse {
                         for file_path in extractors::common::get_extracted_files(
                             &extraction_result.output_directory,
                         ) {
                             debug!("Queuing {file_path} for analysis");
-                            target_files.insert(target_files.len(), file_path.clone());
+                            target_files.push_back(file_path.clone());
                         }
                     }
                 }
@@ -240,7 +233,7 @@ fn main() -> ExitCode {
     json_logger.close();
 
     // If BINWALK_RM_SYMLINK env var was set, delete the base_target_file symlink
-    if (cliargs.carve || cliargs.extract)
+    if (cli_args.carve || cli_args.extract)
         && std::env::var(BINWALK_RM_SYMLINK).is_ok()
         && let Err(e) = std::fs::remove_file(&binwalker.base_target_file)
     {
@@ -252,7 +245,7 @@ fn main() -> ExitCode {
 
     // All done, show some basic statistics
     display::print_stats(
-        cliargs.quiet,
+        cli_args.quiet,
         run_time,
         file_count,
         binwalker.signature_count,
@@ -290,14 +283,13 @@ fn spawn_worker(
     pool: &ThreadPool,
     bw: binwalk_ng::Binwalk,
     target_file: String,
-    stdin: bool,
     do_extraction: bool,
     do_carve: bool,
     worker_tx: mpsc::Sender<AnalysisResults>,
 ) {
     pool.execute(move || {
         // Read in file data
-        let file_data = match common::read_input(&target_file, stdin) {
+        let file_data = match common::read_file(&target_file) {
             Err(_) => {
                 error!("Failed to read {target_file} data");
                 b"".to_vec()

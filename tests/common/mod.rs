@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use binwalk_ng::{AnalysisResults, Binwalk};
 
 /// Convenience function for running an integration test against the specified file, with the provided signature filter.
@@ -38,22 +40,18 @@ pub fn assert_results_ok(
 }
 
 /// Run Binwalk, with extraction, against the specified file, with the provided signature filter
-pub fn run_binwalk(signature_filter: &str, file_name: &str) -> AnalysisResults {
+pub fn run_binwalk(signature_filter: &str, file_name: impl AsRef<Path>) -> AnalysisResults {
     // Build the path to the input file
-    let file_path = std::path::Path::new("tests")
-        .join("inputs")
-        .join(file_name)
-        .display()
-        .to_string();
+    let file_path = Path::new("tests").join("inputs").join(file_name);
 
     let output_directory = tempfile::tempdir().unwrap();
 
     // Configure binwalk
     let binwalker = Binwalk::configure(
-        Some(file_path),
-        Some(output_directory.path().display().to_string()),
-        Some(vec![signature_filter.to_string()]),
-        None,
+        Some(file_path.as_path()),
+        Some(output_directory.as_ref()),
+        vec![signature_filter.to_string()],
+        vec![],
         None,
         false,
     )
