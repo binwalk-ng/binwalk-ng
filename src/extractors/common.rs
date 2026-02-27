@@ -3,6 +3,7 @@ use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
+
 use std::path::Path;
 use std::path::{self, Component, PathBuf};
 use std::process;
@@ -12,7 +13,7 @@ use walkdir::WalkDir;
 use std::os::windows;
 
 #[cfg(unix)]
-use std::os::unix;
+use std::os::unix::fs as unix_fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
@@ -93,14 +94,10 @@ impl Chroot {
     /// ```
     /// use binwalk_ng::extractors::common::Chroot;
     ///
-    /// # let tempdir = tempfile::tempdir().unwrap();
-    /// let chroot_dir = std::path::Path::new("tests")
-    ///     .join("binwalk_unit_tests")
-    /// #   .join(tempdir)
-    ///     .display()
-    ///     .to_string();
+    /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
+    /// # let chroot_dir = tempfile::tempdir().unwrap();
     ///
-    /// let chroot = Chroot::new(Some(&chroot_dir));
+    /// let chroot = Chroot::new(&chroot_dir);
     ///
     /// assert_eq!(&chroot.chroot_directory, &chroot_dir);
     /// assert_eq!(std::path::Path::new(&chroot_dir).exists(), true);
@@ -152,14 +149,10 @@ impl Chroot {
     /// use binwalk_ng::extractors::common::Chroot;
     /// use std::path::MAIN_SEPARATOR;
     ///
-    /// # let tempdir = tempfile::tempdir().unwrap();
-    /// let chroot_dir = std::path::Path::new("tests")
-    ///     .join("binwalk_unit_tests")
-    /// #   .join(tempdir)
-    ///     .display()
-    ///     .to_string();
+    /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
+    /// # let chroot_dir = tempfile::tempdir().unwrap();
     ///
-    /// let chroot = Chroot::new(Some(&chroot_dir));
+    /// let chroot = Chroot::new(&chroot_dir);
     ///
     /// let dir_name = "etc";
     /// let file_name = "passwd";
@@ -211,16 +204,12 @@ impl Chroot {
     /// ```
     /// use binwalk_ng::extractors::common::Chroot;
     ///
-    /// # let tempdir = tempfile::tempdir().unwrap();
-    /// let chroot_dir = std::path::Path::new("tests")
-    ///     .join("binwalk_unit_tests")
-    /// #   .join(tempdir)
-    ///     .display()
-    ///     .to_string();
+    /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
+    /// # let chroot_dir = tempfile::tempdir().unwrap();
     ///
     /// let file_name = "test.txt";
     ///
-    /// let chroot = Chroot::new(Some(&chroot_dir));
+    /// let chroot = Chroot::new(&chroot_dir);
     /// let path = chroot.chrooted_path(file_name);
     ///
     /// assert_eq!(path, std::path::Path::new(&chroot_dir).join(file_name).display().to_string());
@@ -241,14 +230,10 @@ impl Chroot {
     ///
     /// let file_name = "created_file.txt";
     ///
-    /// # let tempdir = tempfile::tempdir().unwrap();
-    /// let chroot_dir = std::path::Path::new("tests")
-    ///     .join("binwalk_unit_tests")
-    /// #   .join(tempdir)
-    ///     .display()
-    ///     .to_string();
+    /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
+    ///# let chroot_dir = tempfile::tempdir().unwrap();
     ///
-    /// let chroot = Chroot::new(Some(&chroot_dir));
+    /// let chroot = Chroot::new(&chroot_dir);
     ///
     /// assert_eq!(chroot.create_file(file_name, file_data), true);
     /// assert_eq!(std::fs::read_to_string(std::path::Path::new(&chroot_dir).join(file_name))?, std::str::from_utf8(file_data)?);
@@ -291,14 +276,10 @@ impl Chroot {
     ///
     /// let file_name = "carved_file.txt";
     ///
-    /// # let tempdir = tempfile::tempdir().unwrap();
-    /// let chroot_dir = std::path::Path::new("tests")
-    ///     .join("binwalk_unit_tests")
-    /// #   .join(tempdir)
-    ///     .display()
-    ///     .to_string();
+    /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
+    /// # let chroot_dir = tempfile::tempdir().unwrap();
     ///
-    /// let chroot = Chroot::new(Some(&chroot_dir));
+    /// let chroot = Chroot::new(&chroot_dir);
     ///
     /// assert_eq!(chroot.carve_file(file_name, data, 0, CARVE_SIZE), true);
     /// assert_eq!(std::fs::read_to_string(std::path::Path::new(&chroot_dir).join(file_name))?, std::str::from_utf8(&data[0..CARVE_SIZE])?);
@@ -350,18 +331,14 @@ impl Chroot {
     /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_extractors_common_rs_312_0() -> Result<(), Box<dyn std::error::Error>> {
     /// use binwalk_ng::extractors::common::Chroot;
     ///
-    /// # let tempdir = tempfile::tempdir().unwrap();
-    /// let chroot_dir = std::path::Path::new("tests")
-    ///     .join("binwalk_unit_tests")
-    /// #   .join(tempdir)
-    ///     .display()
-    ///     .to_string();
+    /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
+    /// # let chroot_dir = tempfile::tempdir().unwrap();
     ///
     /// let dev_major: usize = 1;
     /// let dev_minor: usize = 2;
     /// let file_name = "char_device";
     ///
-    /// let chroot = Chroot::new(Some(&chroot_dir));
+    /// let chroot = Chroot::new(&chroot_dir);
     ///
     /// assert_eq!(chroot.create_character_device(file_name, dev_major, dev_minor), true);
     /// assert_eq!(std::fs::read_to_string(std::path::Path::new(&chroot_dir).join(file_name))?, "c 1 2");
@@ -387,18 +364,14 @@ impl Chroot {
     /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_extractors_common_rs_345_0() -> Result<(), Box<dyn std::error::Error>> {
     /// use binwalk_ng::extractors::common::Chroot;
     ///
-    /// # let tempdir = tempfile::tempdir().unwrap();
-    /// let chroot_dir = std::path::Path::new("tests")
-    ///     .join("binwalk_unit_tests")
-    /// #   .join(tempdir)
-    ///     .display()
-    ///     .to_string();
+    /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
+    /// # let chroot_dir = tempfile::tempdir().unwrap();
     ///
     /// let dev_major: usize = 1;
     /// let dev_minor: usize = 2;
     /// let file_name = "block_device";
     ///
-    /// let chroot = Chroot::new(Some(&chroot_dir));
+    /// let chroot = Chroot::new(&chroot_dir);
     ///
     /// assert_eq!(chroot.create_block_device(file_name, dev_major, dev_minor), true);
     /// assert_eq!(std::fs::read_to_string(std::path::Path::new(&chroot_dir).join(file_name))?, "b 1 2");
@@ -424,16 +397,12 @@ impl Chroot {
     /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_extractors_common_rs_377_0() -> Result<(), Box<dyn std::error::Error>> {
     /// use binwalk_ng::extractors::common::Chroot;
     ///
-    /// # let tempdir = tempfile::tempdir().unwrap();
-    /// let chroot_dir = std::path::Path::new("tests")
-    ///     .join("binwalk_unit_tests")
-    /// #   .join(tempdir)
-    ///     .display()
-    ///     .to_string();
+    /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
+    /// # let chroot_dir = tempfile::tempdir().unwrap();
     ///
     /// let file_name = "fifo_file";
     ///
-    /// let chroot = Chroot::new(Some(&chroot_dir));
+    /// let chroot = Chroot::new(&chroot_dir);
     ///
     /// assert_eq!(chroot.create_fifo(file_name), true);
     /// assert_eq!(std::fs::read_to_string(std::path::Path::new(&chroot_dir).join(file_name))?, "fifo");
@@ -454,16 +423,12 @@ impl Chroot {
     /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_extractors_common_rs_401_0() -> Result<(), Box<dyn std::error::Error>> {
     /// use binwalk_ng::extractors::common::Chroot;
     ///
-    /// # let tempdir = tempfile::tempdir().unwrap();
-    /// let chroot_dir = std::path::Path::new("tests")
-    ///     .join("binwalk_unit_tests")
-    /// #   .join(tempdir)
-    ///     .display()
-    ///     .to_string();
+    /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
+    /// # let chroot_dir = tempfile::tempdir().unwrap();
     ///
     /// let file_name = "socket_file";
     ///
-    /// let chroot = Chroot::new(Some(&chroot_dir));
+    /// let chroot = Chroot::new(&chroot_dir);
     ///
     /// assert_eq!(chroot.create_socket(file_name), true);
     /// assert_eq!(std::fs::read_to_string(std::path::Path::new(&chroot_dir).join(file_name))?, "socket");
@@ -484,17 +449,13 @@ impl Chroot {
     /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_extractors_common_rs_426_0() -> Result<(), Box<dyn std::error::Error>> {
     /// use binwalk_ng::extractors::common::Chroot;
     ///
-    /// # let tempdir = tempfile::tempdir().unwrap();
-    /// let chroot_dir = std::path::Path::new("tests")
-    ///     .join("binwalk_unit_tests")
-    /// #   .join(tempdir)
-    ///     .display()
-    ///     .to_string();
+    /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
+    /// # let chroot_dir = tempfile::tempdir().unwrap();
     ///
     /// let file_data: &[u8] = b"foobar";
     /// let file_name = "append.txt";
     ///
-    /// let chroot = Chroot::new(Some(&chroot_dir));
+    /// let chroot = Chroot::new(&chroot_dir);
     ///
     /// assert_eq!(chroot.append_to_file(file_name, file_data), true);
     /// assert_eq!(std::fs::read_to_string(std::path::Path::new(&chroot_dir).join(file_name))?, std::str::from_utf8(file_data)?);
@@ -547,16 +508,12 @@ impl Chroot {
     /// ```
     /// use binwalk_ng::extractors::common::Chroot;
     ///
-    /// # let tempdir = tempfile::tempdir().unwrap();
-    /// let chroot_dir = std::path::Path::new("tests")
-    ///     .join("binwalk_unit_tests")
-    /// #   .join(tempdir)
-    ///     .display()
-    ///     .to_string();
+    /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
+    /// # let chroot_dir = tempfile::tempdir().unwrap();
     ///
     /// let dir_name = "my_directory";
     ///
-    /// let chroot = Chroot::new(Some(&chroot_dir));
+    /// let chroot = Chroot::new(&chroot_dir);
     ///
     /// assert_eq!(chroot.create_directory(dir_name), true);
     /// assert_eq!(std::path::Path::new(&chroot_dir).join(dir_name).exists(), true);
@@ -588,16 +545,12 @@ impl Chroot {
     /// ```
     /// use binwalk_ng::extractors::common::Chroot;
     ///
-    /// # let tempdir = tempfile::tempdir().unwrap();
-    /// let chroot_dir = std::path::Path::new("tests")
-    ///     .join("binwalk_unit_tests")
-    /// #   .join(tempdir)
-    ///     .display()
-    ///     .to_string();
+    /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
+    /// # let chroot_dir = tempfile::tempdir().unwrap();
     ///
     /// let dir_name = "my_directory";
     ///
-    /// let chroot = Chroot::new(Some(&chroot_dir));
+    /// let chroot = Chroot::new(&chroot_dir);
     ///
     /// assert_eq!(chroot.create_directory(dir_name), true);
     /// assert_eq!(chroot.remove_directory(dir_name), true);
@@ -639,16 +592,12 @@ impl Chroot {
     /// ```
     /// use binwalk_ng::extractors::common::Chroot;
     ///
-    /// # let tempdir = tempfile::tempdir().unwrap();
-    /// let chroot_dir = std::path::Path::new("tests")
-    ///     .join("binwalk_unit_tests")
-    /// #   .join(tempdir)
-    ///     .display()
-    ///     .to_string();
+    /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
+    /// # let chroot_dir = tempfile::tempdir().unwrap();
     ///
     /// let file_name = "runme.exe";
     ///
-    /// let chroot = Chroot::new(Some(&chroot_dir));
+    /// let chroot = Chroot::new(&chroot_dir);
     /// chroot.create_file(file_name, b"AAAA");
     ///
     /// assert_eq!(chroot.make_executable(file_name), true);
@@ -696,6 +645,37 @@ impl Chroot {
         false
     }
 
+    /// Returns the safe absolute target path inside chroot,
+    /// handling both absolute and relative original targets
+    fn get_safe_target(&self, safe_symlink: &Path, original_target: &Path) -> PathBuf {
+        if original_target.is_absolute() {
+            self.chrooted_path(original_target)
+        } else {
+            // target is relative → resolve against symlink's parent
+            let parent = safe_symlink.parent().unwrap_or_else(|| Path::new("/"));
+            self.safe_path_join(parent, original_target)
+        }
+    }
+
+    /// Removes the chroot prefix → returns path relative to chroot root
+    /// e.g. "/chroot/bin/ls" → "/bin/ls"
+    fn strip_chroot_prefix(&self, path: &Path) -> PathBuf {
+        let chroot = Path::new(&self.chroot_directory);
+
+        if self.chroot_directory.is_absolute() && self.chroot_directory.parent().is_none() {
+            path.to_path_buf()
+        } else if let Ok(stripped) = path.strip_prefix(chroot) {
+            if stripped.as_os_str().is_empty() {
+                PathBuf::from("/")
+            } else {
+                PathBuf::from("/").join(stripped)
+            }
+        } else {
+            // fallback / safety
+            path.to_path_buf()
+        }
+    }
+
     /// Creates a symbolic link in the chroot directory, named `symlink_path`, which points to `target_path`.
     ///
     /// Note that both the symlink and target paths will be sanitized to stay in the chroot directory.
@@ -707,12 +687,8 @@ impl Chroot {
     /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_extractors_common_rs_571_0() -> Result<(), Box<dyn std::error::Error>> {
     /// use binwalk_ng::extractors::common::Chroot;
     ///
+    /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
     /// # let tempdir = tempfile::tempdir().unwrap();
-    /// let chroot_dir = std::path::Path::new("tests")
-    ///     .join("binwalk_unit_tests")
-    /// #   .join(tempdir)
-    ///     .display()
-    ///     .to_string();
     ///
     /// let symlink_name = "symlink";
     /// let target_path = "target";
@@ -720,7 +696,7 @@ impl Chroot {
     /// let expected_symlink_path = std::path::Path::new(&chroot_dir).join(symlink_name);
     /// let expected_target_path = std::path::Path::new(&chroot_dir).join(target_path);
     ///
-    /// let chroot = Chroot::new(Some(&chroot_dir));
+    /// let chroot = Chroot::new(&chroot_dir);
     ///
     /// assert_eq!(chroot.create_symlink(symlink_name, target_path), true);
     /// assert_eq!(std::fs::canonicalize(expected_symlink_path)?.to_str(), expected_target_path.to_str());
@@ -737,106 +713,62 @@ impl Chroot {
 
         // Chroot the symlink file path and create a Path object
         let safe_symlink = self.chrooted_path(symlink);
-        let safe_symlink_path = path::Path::new(&safe_symlink);
+        let safe_target = self.get_safe_target(&safe_symlink, target);
 
-        // Normalize the symlink target path to a chrooted absolute path
-        let safe_target = if target.is_absolute() {
-            // If the target path is absolute, just chroot it inside the chroot directory
-            self.chrooted_path(target)
-        } else {
-            // Get the symlink file's parent directory path
-            let relative_dir: String = match safe_symlink_path.parent() {
-                None => {
-                    // There is no parent, or parent is the root directory; assume the root directory
-                    path::MAIN_SEPARATOR.to_string()
-                }
-                Some(parent_dir) => {
-                    // Got the parent directory
-                    parent_dir.display().to_string()
-                }
-            };
-
-            // Join the target path with its relative directory, ensuring it does not traverse outside
-            // the specified chroot directory
-            self.safe_path_join(&relative_dir, target)
-        };
-
-        // Remove the chroot directory from the target and symlink paths.
-        // This results in each being an absolute path that is relative to the chroot directory,
-        // e.g., '/my_chroot_dir/bin/busybox' -> '/bin/busybox'.
-        //
-        // Note: need at least one leading '/', so if the chroot directory is just '/', just use the string as-is.
-        let mut safe_target_rel_path =
-            if self.chroot_directory.is_absolute() && self.chroot_directory.parent().is_none() {
-                safe_target.clone()
-            } else {
-                safe_symlink
-                    .strip_prefix(&self.chroot_directory)
-                    .unwrap_or(&safe_symlink)
-                    .to_path_buf()
-            };
-
-        let _safe_symlink_rel_path =
-            if self.chroot_directory.is_absolute() && self.chroot_directory.parent().is_none() {
-                safe_symlink.clone()
-            } else {
-                safe_symlink
-                    .strip_prefix(&self.chroot_directory)
-                    .unwrap_or(&safe_symlink)
-                    .to_path_buf()
-            };
-
-        // Count the number of path separators (minus the leading one) and an '../' to the target
-        // path for each; e.g., '/bin/busybox' -> '..//bin/busybox'.
-        // TODO: FIX
-        /*for _i in 0..safe_symlink_rel_path.matches(path::MAIN_SEPARATOR).count() - 1 {
-            safe_target_rel_path = format!("..{}{}", path::MAIN_SEPARATOR, safe_target_rel_path);
+        let rel_symlink = self.strip_chroot_prefix(&safe_symlink);
+        let mut rel_target = self.strip_chroot_prefix(&safe_target);
+        // 3. Turn target into a relative path from symlink's directory
+        if let Some(symlink_parent_depth) = rel_symlink.components().count().checked_sub(1) {
+            for _ in 0..symlink_parent_depth {
+                rel_target = PathBuf::from("..").join(&rel_target);
+            }
         }
 
-        // Add a '.' at the beginning of any paths that start with '/', e.g., '/tmp' -> './tmp'.
-        if safe_target_rel_path.starts_with(path::MAIN_SEPARATOR) {
-            safe_target_rel_path = format!(".{safe_target_rel_path}");
-        }*/
+        let rel_target = if rel_target.is_absolute() {
+            rel_target.components().skip(1).collect()
+        } else {
+            rel_target
+        };
 
-        // The target path is now a safely chrooted path that is relative to the symlink file path.
-        // Ex:
-        //
-        //     Original symlink: "/my_chroot_dir/usr/sbin/ls" is a symlink to "/bin/busybox"
-        //     Safe relative symlink: "/my_chroot_dir/usr/sbin/ls" is a symlink to "./../../bin/busybox"
-        let safe_target_path = path::Path::new(&safe_target_rel_path);
-
+        // 4. Create the actual symlink
         #[cfg(unix)]
         {
-            match unix::fs::symlink(safe_target_path, safe_symlink_path) {
-                Ok(_) => true,
+            match unix_fs::symlink(&rel_target, &safe_symlink) {
+                Ok(()) => true,
                 Err(e) => {
                     error!(
-                        "Failed to create symlink from {} -> {}: {e}",
-                        symlink.display(),
-                        target.display()
+                        "Failed to create symlink {} → {} : {}",
+                        safe_symlink.display(),
+                        rel_target.display(),
+                        e
                     );
                     false
                 }
             }
         }
+
         #[cfg(windows)]
         {
-            // let sym = match safe_target_path.is_dir() {
-            //     true => windows::fs::symlink_dir(safe_target_path, safe_symlink_path),
-            //     false => windows::fs::symlink_file(safe_target_path, safe_symlink_path),
-            // };
+            // Windows needs to know if target is file or directory
+            // But detecting it correctly inside chroot is tricky → many implementations
+            // just always try symlink_file first, then fallback to symlink_dir
+            use std::os::windows::fs::{symlink_dir, symlink_file};
 
-            match windows::fs::symlink_dir(safe_target_path, safe_symlink_path) {
-                Ok(_) => {
-                    return true;
-                }
-                Err(e) => {
+            if let Err(e) = symlink_file(&rel_target, &safe_symlink) {
+                if let Err(e2) = symlink_dir(&rel_target, &safe_symlink) {
                     error!(
-                        "Failed to create symlink from {} -> {}: {}",
-                        symlink, target, e
+                        "Failed to create symlink {} → {} : {} / {}",
+                        safe_symlink.display(),
+                        rel_target.display(),
+                        e,
+                        e2
                     );
-                    return false;
+                    false
+                } else {
+                    true
                 }
+            } else {
+                true
             }
         }
     }
