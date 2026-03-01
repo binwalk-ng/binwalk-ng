@@ -206,18 +206,11 @@ pub fn linux_kernel_version_parser(
 
 /// Searches the file data for a linux symbol table
 fn has_linux_symbol_table(file_data: &[u8]) -> bool {
-    let mut match_count: usize = 0;
-
     // Same magic bytes that vmlinux-to-elf searches for
     let symtab_magic = vec![b"\x000\x001\x002\x003\x004\x005\x006\x007\x008\x009\x00"];
 
     let grep = AhoCorasick::new(symtab_magic).unwrap();
 
-    // Grep for matches on the Linux symbol table magic bytes
-    for _ in grep.find_overlapping_iter(file_data) {
-        match_count += 1;
-    }
-
-    // There should be only one match
-    match_count == 1
+    // Grep for matches on the Linux symbol table magic bytes, there should be only one match
+    grep.find_overlapping_iter(file_data).count() == 1
 }

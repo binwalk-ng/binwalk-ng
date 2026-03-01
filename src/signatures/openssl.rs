@@ -47,15 +47,8 @@ pub fn openssl_crypt_parser(
 fn is_salt_invalid(salt: usize) -> bool {
     const SALT_LEN: usize = 8;
 
-    let mut bad_byte_count: usize = 0;
-
-    for i in 0..SALT_LEN {
-        let salt_byte = ((salt >> (8 * i)) & 0xFF) as u8;
-
-        if salt_byte == 0 || is_printable_ascii(salt_byte) {
-            bad_byte_count += 1;
-        }
-    }
-
-    bad_byte_count == SALT_LEN
+    (0..SALT_LEN).all(|i| {
+        let byte = ((salt >> (8 * i)) & 0xFF) as u8;
+        byte == 0 || is_printable_ascii(byte)
+    })
 }

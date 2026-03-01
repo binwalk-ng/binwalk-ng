@@ -1029,9 +1029,9 @@ fn spawn(
     }
 
     // Replace all "%e" command arguments with the path to the carved file
-    for i in 0..extractor.arguments.len() {
-        if extractor.arguments[i] == SOURCE_FILE_PLACEHOLDER {
-            extractor.arguments[i] = carved_file.clone();
+    for arg in &mut extractor.arguments {
+        if *arg == SOURCE_FILE_PLACEHOLDER {
+            *arg = carved_file.clone();
         }
     }
 
@@ -1055,7 +1055,7 @@ fn spawn(
             // If the process was spawned successfully, return some information about the process
             let proc_info = ProcInfo {
                 child,
-                carved_file: carved_file.clone(),
+                carved_file: carved_file,
                 exit_codes: extractor.exit_codes,
             };
             Ok(proc_info)

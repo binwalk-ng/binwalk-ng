@@ -158,18 +158,10 @@ pub fn parse(
 /// assert_eq!(struct_size, 17);
 /// ```
 pub fn size(structure: &Vec<(&str, &str)>) -> usize {
-    let mut struct_size: usize = 0;
-
-    for (_name, ctype) in structure {
-        match type_to_size(ctype) {
-            None => continue,
-            Some(member_size) => {
-                struct_size += member_size;
-            }
-        }
-    }
-
-    struct_size
+    structure
+        .iter()
+        .filter_map(|(_, ctype)| type_to_size(ctype))
+        .sum()
 }
 
 fn type_to_size(ctype: &str) -> Option<usize> {

@@ -29,45 +29,15 @@ fn line_delimiter() -> String {
 }
 
 fn center_text(text: &str) -> String {
-    let mut padding_width: i32;
-    let mut centered_string: String = "".to_string();
+    let padding_width = terminal_width().saturating_sub(text.len()) / 2;
 
-    match ((terminal_width() / 2) - (text.len() / 2)).try_into() {
-        Err(_e) => padding_width = 0,
-        Ok(value) => padding_width = value,
-    }
-
-    if padding_width < 0 {
-        padding_width = 0;
-    }
-
-    for _i in 0..padding_width {
-        centered_string += " ";
-    }
-
-    centered_string += text;
-
-    centered_string
+    format!("{:>width$}{}", "", text, width = padding_width)
 }
 
 fn pad_to_length(text: &str, len: usize) -> String {
-    let mut pad_size: i32;
-    let mut padded_string = String::from(text);
+    let pad_size = len.saturating_sub(text.len());
 
-    match (len - text.len()).try_into() {
-        Err(_e) => pad_size = 0,
-        Ok(value) => pad_size = value,
-    }
-
-    if pad_size < 0 {
-        pad_size = 0;
-    }
-
-    for _i in 0..pad_size {
-        padded_string += " ";
-    }
-
-    padded_string
+    format!("{}{:width$}", text, "", width = pad_size)
 }
 
 fn line_wrap(text: &str, prefix_size: usize) -> String {

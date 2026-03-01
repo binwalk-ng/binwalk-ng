@@ -163,20 +163,14 @@ fn romfs_align(x: usize) -> usize {
 
 /// Pretty simple checksum used by RomFS
 fn romfs_crc_valid(crc_data: &[u8]) -> bool {
-    let word_size: usize = std::mem::size_of::<u32>();
+    const WORD_SIZE: usize = std::mem::size_of::<u32>();
 
     // Checksum size must be 4-byte aligned
-    if crc_data.len().is_multiple_of(word_size) {
-        let mut i: usize = 0;
-        let mut sum: u32 = 0;
-
-        // Sum each word
-        while i < crc_data.len() {
-            sum = sum.wrapping_add(u32::from_be_bytes(
-                crc_data[i..i + word_size].try_into().unwrap(),
-            ));
-            i += word_size;
-        }
+    if crc_data.len().is_multiple_of(WORD_SIZE) {
+        let sum: u32 = crc_data
+            .chunks_exact(WORD_SIZE)
+            .map(|chunk| u32::from_be_bytes(chunk.try_into().unwrap()))
+            .fold(0u32, u32::wrapping_add);
 
         /*
          * The header checksum is set such that summing the bytes should result in a sum of 0.
