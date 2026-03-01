@@ -115,13 +115,11 @@ fn extract_chunk(
     } else if chunk_header.is_fill {
         // Fill chunks are block_count blocks that contain a repeated sequence of data (typically 4-bytes repeated over and over again)
         for _ in 0..chunk_header.block_count {
-            let mut i = 0;
             let mut fill_block: Vec<u8> = vec![];
 
             // Fill each block with the repeated data
-            while i < sparse_header.block_size {
+            while fill_block.len() < sparse_header.block_size {
                 fill_block.extend(chunk_data);
-                i += chunk_data.len();
             }
 
             // Append fill block to file
@@ -130,12 +128,7 @@ fn extract_chunk(
             }
         }
     } else if chunk_header.is_dont_care {
-        let mut null_block: Vec<u8> = vec![];
-
-        // Build a block full of NULL bytes
-        while null_block.len() < sparse_header.block_size {
-            null_block.push(0);
-        }
+        let null_block = vec![0u8; sparse_header.block_size];
 
         // Write block_count NULL blocks to disk
         for _ in 0..chunk_header.block_count {
