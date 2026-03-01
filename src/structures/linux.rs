@@ -75,10 +75,8 @@ pub fn parse_linux_arm64_boot_image_header(
         ..Default::default()
     };
 
-    let boot_image_header =
-        BootImageHeader::ref_from_bytes(img_data).map_err(|_| StructureError)?;
-
-    // Parse the header
+    let (boot_image_header, _) =
+        BootImageHeader::ref_from_prefix(img_data).map_err(|_| StructureError)?;
 
     // Make sure the reserved fields are not set
     if !(boot_image_header.reserved1.get() == 0
