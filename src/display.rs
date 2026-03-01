@@ -35,9 +35,7 @@ fn center_text(text: &str) -> String {
 }
 
 fn pad_to_length(text: &str, len: usize) -> String {
-    let pad_size = len.saturating_sub(text.len());
-
-    format!("{}{:width$}", text, "", width = pad_size)
+    format!("{text:width$}", width = len)
 }
 
 fn line_wrap(text: &str, prefix_size: usize) -> String {
