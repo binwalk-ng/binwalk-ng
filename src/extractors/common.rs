@@ -1055,8 +1055,8 @@ fn spawn(
             // If the process was spawned successfully, return some information about the process
             let proc_info = ProcInfo {
                 child,
-                carved_file: carved_file,
                 exit_codes: extractor.exit_codes,
+                carved_file,
             };
             Ok(proc_info)
         }
