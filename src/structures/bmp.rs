@@ -1,4 +1,5 @@
-use crate::structures::common::{self, StructureError};
+use crate::structures::common::StructureError;
+use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
 #[derive(Debug, Default, Clone)]
 pub struct BMPFileHeader {
@@ -6,47 +7,49 @@ pub struct BMPFileHeader {
     pub bitmap_bits_offset: usize,
 }
 
-pub fn parse_bmp_file_header(bmp_data: &[u8]) -> Result<BMPFileHeader, StructureError> {
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct RawHeader {
     // https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-bitmapfileheader
-    let bmp_header_structure = vec![
-        ("bfType", "u16"),
-        ("bfSize", "u32"),
-        ("bfReserved1", "u16"),
-        ("bfReserved2", "u16"),
-        ("bfOffBits", "u32"),
-    ];
+    bf_type: zerocopy::U16<LE>,
+    bf_size: zerocopy::U32<LE>,
+    bf_reserved1: zerocopy::U16<LE>,
+    bf_reserved2: zerocopy::U16<LE>,
+    bf_off_bits: zerocopy::U32<LE>,
+}
 
-    if let Ok(bmp_header) = common::parse(bmp_data, &bmp_header_structure, "little") {
-        let bmp_data_size = bmp_data.len();
+pub fn parse_bmp_file_header(bmp_data: &[u8]) -> Result<BMPFileHeader, StructureError> {
+    let (raw_header, _rest) = RawHeader::ref_from_prefix(bmp_data).map_err(|_| StructureError)?;
+    let bmp_data_size = bmp_data.len();
 
-        // The BMP file size cannot be bigger than bmp_data
-        if bmp_data_size < bmp_header["bfSize"] {
-            return Err(StructureError);
-        }
+    let bf_size = raw_header.bf_size.get() as usize;
+    let bf_off_bits = raw_header.bf_off_bits.get() as usize;
 
-        // The file size cannot be 0
-        if bmp_header["bfSize"] == 0 {
-            return Err(StructureError);
-        }
-
-        // The offset cannot be 0
-        if bmp_header["bfOffBits"] == 0 {
-            return Err(StructureError);
-        }
-
-        // The offset cannot be bigger than the file
-        if bmp_header["bfOffBits"] > bmp_data_size {
-            return Err(StructureError);
-        }
-
-        // If everything is Ok so far, return a BMPFileHeader
-        return Ok(BMPFileHeader {
-            size: bmp_header["bfSize"],
-            bitmap_bits_offset: bmp_header["bfOffBits"],
-        });
+    // The BMP file size cannot be bigger than bmp_data
+    if bmp_data_size < bf_size {
+        return Err(StructureError);
     }
 
-    Err(StructureError)
+    // The file size cannot be 0
+    if bf_size == 0 {
+        return Err(StructureError);
+    }
+
+    // The offset cannot be 0
+    if bf_off_bits == 0 {
+        return Err(StructureError);
+    }
+
+    // The offset cannot be bigger than the file
+    if bf_off_bits > bmp_data_size {
+        return Err(StructureError);
+    }
+
+    // If everything is Ok so far, return a BMPFileHeader
+    Ok(BMPFileHeader {
+        size: bf_size,
+        bitmap_bits_offset: bf_off_bits,
+    })
 }
 
 // https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-bitmapv5header
