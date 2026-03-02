@@ -1,5 +1,6 @@
-use crate::structures::common::{self, StructureError};
+use crate::structures::common::StructureError;
 use std::collections::HashMap;
+use zerocopy::{FromBytes, Immutable, KnownLayout, Unaligned};
 
 /// Struct to store some useful ELF info
 #[derive(Debug, Default, Clone)]
@@ -11,26 +12,35 @@ pub struct ELFHeader {
     pub endianness: String,
 }
 
+// https://en.wikipedia.org/wiki/Executable_and_Linkable_Format#ELF_header
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct ElfHeaderBytes {
+    magic: [u8; 4],
+    class: u8,
+    endianness: u8,
+    version: u8,
+    osabi: u8,
+    abiversion: u8,
+    padding: [u8; 7],
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct ElfInfo {
+    elf_type: u16,
+    machine: u16,
+    version: u32,
+}
+
 /// Partially parses an ELF header
 pub fn parse_elf_header(elf_data: &[u8]) -> Result<ELFHeader, StructureError> {
     const ELF_INFO_STRUCT_SIZE: usize = 8;
     const ELF_IDENT_STRUCT_SIZE: usize = 16;
 
-    const EXPECTED_VERSION: usize = 1;
+    const EXPECTED_VERSION: u32 = 1;
 
-    let elf_ident_structure = vec![
-        ("magic", "u32"),
-        ("class", "u8"),
-        ("endianness", "u8"),
-        ("version", "u8"),
-        ("osabi", "u8"),
-        ("abiversion", "u8"),
-        ("padding_1", "u32"),
-        ("padding_2", "u24"),
-    ];
-
-    // Just enough of the ELF structure to grab some useful info
-    let elf_info_structure = vec![("type", "u16"), ("machine", "u16"), ("version", "u32")];
+    let (elf_header, _) = ElfHeaderBytes::ref_from_prefix(elf_data).map_err(|_| StructureError)?;
 
     let elf_classes = HashMap::from([(1, 32), (2, 64)]);
 
@@ -271,46 +281,58 @@ pub fn parse_elf_header(elf_data: &[u8]) -> Result<ELFHeader, StructureError> {
     };
 
     // Endianness doesn't matter here, and we don't know what the ELF's endianness is yet
-    if let Ok(e_ident) = common::parse(elf_data, &elf_ident_structure, "little") {
-        // Sanity check the e_ident fields
-        if e_ident["padding_1"] == 0
-            && e_ident["padding_2"] == 0
-            && e_ident["version"] == EXPECTED_VERSION
-            && elf_classes.contains_key(&e_ident["class"])
-            && elf_osabi.contains_key(&e_ident["osabi"])
-            && elf_endianness.contains_key(&e_ident["endianness"])
-        {
-            // Set the ident info
-            elf_hdr_info.class = elf_classes[&e_ident["class"]].to_string();
-            elf_hdr_info.osabi = elf_osabi[&e_ident["osabi"]].to_string();
-            elf_hdr_info.endianness = elf_endianness[&e_ident["endianness"]].to_string();
 
-            // The rest of the ELF info comes immediately after the ident structure
-            let elf_info_start: usize = ELF_IDENT_STRUCT_SIZE;
-            let elf_info_end: usize = elf_info_start + ELF_INFO_STRUCT_SIZE;
+    // Sanity check the e_ident fields
+    if elf_header.padding.iter().all(|&x| x == 0)
+        && elf_header.version as u32 == EXPECTED_VERSION
+        && let Some(elf_class) = elf_classes.get(&elf_header.class)
+        && let Some(osabi) = elf_osabi.get(&elf_header.osabi)
+        && let Some(endianness) = elf_endianness.get(&elf_header.endianness)
+    {
+        // Set the ident info
+        elf_hdr_info.class = elf_class.to_string();
+        elf_hdr_info.osabi = osabi.to_string();
+        elf_hdr_info.endianness = endianness.to_string();
 
-            if let Some(elf_info_raw) = elf_data.get(elf_info_start..elf_info_end) {
-                // Parse the remaining info from the ELF header
-                if let Ok(elf_info) = common::parse(
-                    elf_info_raw,
-                    &elf_info_structure,
-                    elf_endianness[&e_ident["endianness"]],
-                ) {
-                    // Sanity check the remaining ELF header fields
-                    if elf_info["version"] == EXPECTED_VERSION
-                        && elf_types.contains_key(&elf_info["type"])
-                    {
-                        // Set the ELF info fields
-                        elf_hdr_info.exe_type = elf_types[&elf_info["type"]].to_string();
-                        elf_hdr_info.machine = elf_machines
-                            .get(&elf_info["machine"])
-                            // Use 'Unknown' as a fallback for the machine type
-                            .unwrap_or(&"Unknown")
-                            .to_string();
+        // The rest of the ELF info comes immediately after the ident structure
+        let elf_info_start: usize = ELF_IDENT_STRUCT_SIZE;
+        let elf_info_end: usize = elf_info_start + ELF_INFO_STRUCT_SIZE;
 
-                        return Ok(elf_hdr_info);
-                    }
-                }
+        if let Some(elf_info_raw) = elf_data.get(elf_info_start..elf_info_end) {
+            // Parse the remaining info from the ELF header
+            // The endianness of this struct is dynamic, but zerocopy does not support dynamic endianness
+            // so in the next lines we do some ugly endianness converting
+            let elf_info = ElfInfo::ref_from_bytes(elf_info_raw).map_err(|_| StructureError)?;
+
+            let (elf_version, elf_type, elf_machine) = if *endianness == "big" {
+                (
+                    u32::from_be(elf_info.version),
+                    u16::from_be(elf_info.elf_type),
+                    u16::from_be(elf_info.machine),
+                )
+            } else {
+                (
+                    u32::from_le(elf_info.version),
+                    u16::from_le(elf_info.elf_type),
+                    u16::from_le(elf_info.machine),
+                )
+            };
+
+            if elf_version != EXPECTED_VERSION {
+                return Err(StructureError);
+            }
+
+            // Sanity check the remaining ELF header fields
+            if let Some(elf_type_str) = elf_types.get(&elf_type) {
+                // Set the ELF info fields
+                elf_hdr_info.exe_type = elf_type_str.to_string();
+                elf_hdr_info.machine = elf_machines
+                    .get(&elf_machine)
+                    // Use 'Unknown' as a fallback for the machine type
+                    .unwrap_or(&"Unknown")
+                    .to_string();
+
+                return Ok(elf_hdr_info);
             }
         }
     }
