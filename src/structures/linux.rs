@@ -44,7 +44,8 @@ pub fn parse_linux_arm_zimage_header(
     const NOP_LE: u32 = 0xE1A00000;
     const NOP_BE: u32 = 0x0000A0E1;
 
-    let zimage_header = zImageHeader::ref_from_bytes(zimage_data).map_err(|_| StructureError)?;
+    let (zimage_header, _) =
+        zImageHeader::ref_from_prefix(zimage_data).map_err(|_| StructureError)?;
 
     let first = zimage_header.noops.first().ok_or(StructureError)?;
     if !zimage_header.noops.iter().all(|x| x == first) {
