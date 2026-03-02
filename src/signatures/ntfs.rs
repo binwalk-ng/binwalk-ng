@@ -21,10 +21,11 @@ pub fn ntfs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
 
     if let Ok(ntfs_header) = parse_ntfs_header(&file_data[offset..]) {
         // The reported sector count does not include the NTFS boot sector itself
-        result.size = ntfs_header.sector_size * (ntfs_header.sector_count + 1);
+        let sector_size = ntfs_header.sector_size as usize;
+        result.size = sector_size * (ntfs_header.sector_count as usize + 1);
 
         // Simple sanity check on the reported total size
-        if result.size > ntfs_header.sector_size {
+        if result.size > sector_size {
             result.description = format!(
                 "{}, number of sectors: {}, bytes per sector: {}, total size: {} bytes",
                 result.description, ntfs_header.sector_count, ntfs_header.sector_size, result.size
