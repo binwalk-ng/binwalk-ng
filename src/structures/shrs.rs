@@ -4,7 +4,7 @@ use zerocopy::{BE, FromBytes, Immutable, KnownLayout, Unaligned};
 /// Struct to store SHRS firmware header info
 #[derive(Debug, Default, Clone)]
 pub struct SHRSHeader {
-    pub iv: Vec<u8>,
+    pub iv: [u8; 16],
     pub data_size: u32,
     pub header_size: usize,
 }
@@ -27,7 +27,7 @@ pub fn parse_shrs_header(shrs_data: &[u8]) -> Result<SHRSHeader, StructureError>
         SHRSHeaderBytes::ref_from_prefix(shrs_data).map_err(|_| StructureError)?;
 
     Ok(SHRSHeader {
-        iv: shrs_header.iv.to_vec(),
+        iv: shrs_header.iv,
         data_size: shrs_header.encrypted_data_size.get(),
         header_size: HEADER_SIZE,
     })
