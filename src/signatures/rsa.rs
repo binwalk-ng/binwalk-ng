@@ -1,5 +1,4 @@
 use crate::signatures::common::{CONFIDENCE_MEDIUM, SignatureError, SignatureResult};
-use crate::structures::common;
 use std::collections::HashMap;
 
 /// Human readable description
@@ -193,7 +192,7 @@ struct RSAKeyInfo {
     pub bits: usize,
     pub can_sign: bool,
     pub can_encrypt: bool,
-    pub key_id: usize,
+    pub key_id: u64,
     pub data_size: usize,
 }
 
@@ -208,8 +207,6 @@ fn rsa_key_parser(
     const SIGN_AND_ENCRYPT: u8 = 1;
     const VALID_BYTES_SIZE: usize = 2;
 
-    let key_id_structure = vec![("id", "u64")];
-
     let mut result = RSAKeyInfo {
         ..Default::default()
     };
@@ -221,41 +218,35 @@ fn rsa_key_parser(
         // Check the terminator byte
         if key_data[key_definition.terminator_offset] == TERMINATOR_BYTE {
             // Get the key ID
-            if let Ok(key_id) = common::parse(
-                &key_data[key_definition.keyid_offset..],
-                &key_id_structure,
-                "big",
-            ) {
-                // Report the key ID
-                result.key_id = key_id["id"];
+            result.key_id = key_data
+                .get(key_definition.keyid_offset..key_definition.keyid_offset + size_of::<u64>())
+                .ok_or(SignatureError)
+                .map(|c| u64::from_be_bytes(c.try_into().unwrap()))?;
 
-                // Determine if this key can be used to sign or encrypt
-                result.can_encrypt = key_data[key_definition.usage_offset] == ENCRYPT_ONLY;
-                result.can_sign = key_data[key_definition.usage_offset] == SIGN_AND_ENCRYPT;
+            // Determine if this key can be used to sign or encrypt
+            result.can_encrypt = key_data[key_definition.usage_offset] == ENCRYPT_ONLY;
+            result.can_sign = key_data[key_definition.usage_offset] == SIGN_AND_ENCRYPT;
 
-                // If a key can sign, it can also encrypt
-                if result.can_sign {
-                    result.can_encrypt = true;
-                }
+            // If a key can sign, it can also encrypt
+            if result.can_sign {
+                result.can_encrypt = true;
+            }
 
-                // A key that can't sign or encrypt would be useless!
-                if result.can_sign || result.can_encrypt {
-                    // Each key has a set of fixed-size bytes that are expected to exist at certian offsets
-                    for (valid_bytes_start, valid_bytes) in
-                        key_definition.valid_checks.clone().into_iter()
-                    {
-                        // Get the bytes to validate; always a size of 2
-                        let valid_bytes_end: usize = valid_bytes_start + VALID_BYTES_SIZE;
-                        let key_bytes = key_data[valid_bytes_start..valid_bytes_end].to_vec();
+            // A key that can't sign or encrypt would be useless!
+            if result.can_sign || result.can_encrypt {
+                // Each key has a set of fixed-size bytes that are expected to exist at certain offsets
+                for (valid_bytes_start, valid_bytes) in &key_definition.valid_checks {
+                    // Get the bytes to validate; always a size of 2
+                    let valid_bytes_end = valid_bytes_start + VALID_BYTES_SIZE;
+                    let key_bytes = &key_data[*valid_bytes_start..valid_bytes_end];
 
-                        // Check the bytes in the key data against the list of expected bytes
-                        for expected_bytes in valid_bytes {
-                            // Got 'em!
-                            if key_bytes == expected_bytes {
-                                result.bits = key_definition.key_size;
-                                result.data_size = key_data_len;
-                                return Ok(result);
-                            }
+                    // Check the bytes in the key data against the list of expected bytes
+                    for expected_bytes in valid_bytes {
+                        // Got 'em!
+                        if key_bytes == expected_bytes {
+                            result.bits = key_definition.key_size;
+                            result.data_size = key_data_len;
+                            return Ok(result);
                         }
                     }
                 }
