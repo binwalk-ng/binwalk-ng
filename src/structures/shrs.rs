@@ -1,36 +1,34 @@
-use crate::structures::common::{self, StructureError};
+use crate::structures::common::StructureError;
+use zerocopy::{BE, FromBytes, Immutable, KnownLayout, Unaligned};
 
 /// Struct to store SHRS firmware header info
 #[derive(Debug, Default, Clone)]
 pub struct SHRSHeader {
     pub iv: Vec<u8>,
-    pub data_size: usize,
+    pub data_size: u32,
     pub header_size: usize,
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct SHRSHeaderBytes {
+    magic: zerocopy::U32<BE>,
+    unknown1: zerocopy::U32<BE>,
+    encrypted_data_size: zerocopy::U32<BE>,
+    iv: [u8; 16],
 }
 
 /// Parses an SHRS header
 pub fn parse_shrs_header(shrs_data: &[u8]) -> Result<SHRSHeader, StructureError> {
-    const IV_START: usize = 12;
-    const IV_END: usize = IV_START + 16;
     const HEADER_SIZE: usize = 0x6DC;
 
-    let shrs_structure = vec![
-        ("magic", "u32"),
-        ("unknown1", "u32"),
-        ("encrypted_data_size", "u32"),
-        // 16-byte IV immediately follows
-    ];
-
     // Parse the header
-    if let Ok(shrs_header) = common::parse(shrs_data, &shrs_structure, "big")
-        && let Some(iv_bytes) = shrs_data.get(IV_START..IV_END)
-    {
-        return Ok(SHRSHeader {
-            iv: iv_bytes.to_vec(),
-            data_size: shrs_header["encrypted_data_size"],
-            header_size: HEADER_SIZE,
-        });
-    }
+    let (shrs_header, _) =
+        SHRSHeaderBytes::ref_from_prefix(shrs_data).map_err(|_| StructureError)?;
 
-    Err(StructureError)
+    Ok(SHRSHeader {
+        iv: shrs_header.iv.to_vec(),
+        data_size: shrs_header.encrypted_data_size.get(),
+        header_size: HEADER_SIZE,
+    })
 }
