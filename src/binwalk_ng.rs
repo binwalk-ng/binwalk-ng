@@ -849,7 +849,7 @@ fn init_extraction_directory(
     }
     #[cfg(windows)]
     {
-        match std::fs::hard_link(target_path, link_path) {
+        match std::fs::hard_link(target_path, &link_path) {
             Ok(_) => {
                 return Ok(link_path.to_path_buf());
             }
