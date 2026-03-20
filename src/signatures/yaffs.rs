@@ -183,7 +183,7 @@ fn get_image_size(
     }
 
     // Sanity check the calculated image size; should be large enough to fit MIN_NUMBER_OF_OBJS, but not extend past EOF
-    if image_size > (block_size * MIN_NUMBER_OF_OBJS) && image_size <= available_data {
+    if (block_size * MIN_NUMBER_OF_OBJS) < image_size && image_size <= available_data {
         return Ok(image_size);
     }
 
