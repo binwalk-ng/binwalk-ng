@@ -6,6 +6,7 @@ pub struct LZFSEBlock {
     pub eof: bool,
     pub data_size: usize,
     pub header_size: usize,
+    pub uncompressed_size: usize,
 }
 
 /// Parse an LZFSE block header
@@ -48,6 +49,7 @@ fn parse_endofstream_block_header(_lzfse_data: &[u8]) -> Result<LZFSEBlock, Stru
         eof: true,
         data_size: 0,
         header_size: 4,
+        uncompressed_size: 0,
     })
 }
 
@@ -58,10 +60,12 @@ fn parse_uncompressed_block_header(lzfse_data: &[u8]) -> Result<LZFSEBlock, Stru
     let block_structure = vec![("magic", "u32"), ("n_raw_bytes", "u32")];
 
     if let Ok(header) = parse(lzfse_data, &block_structure, "little") {
+        let data_size = header["n_raw_bytes"];
         return Ok(LZFSEBlock {
             eof: false,
-            data_size: header["n_raw_bytes"],
+            data_size,
             header_size: HEADER_SIZE,
+            uncompressed_size: data_size,
         });
     }
 
@@ -94,6 +98,7 @@ fn parse_compressedv1_block_header(lzfse_data: &[u8]) -> Result<LZFSEBlock, Stru
             eof: false,
             data_size: header["n_literal_payload_bytes"] + header["n_lmd_payload_bytes"],
             header_size: HEADER_SIZE,
+            uncompressed_size: header["n_raw_bytes"],
         });
     }
 
@@ -126,6 +131,7 @@ fn parse_compressedv2_block_header(lzfse_data: &[u8]) -> Result<LZFSEBlock, Stru
             eof: false,
             data_size: n_lmd_payload_bytes + n_literal_payload_bytes,
             header_size: block_header["header_size"],
+            uncompressed_size: block_header["uncompressed_size"],
         });
     }
 
@@ -147,6 +153,7 @@ fn parse_compressedlzvn_block_header(lzfse_data: &[u8]) -> Result<LZFSEBlock, St
             eof: false,
             data_size: header["n_payload_bytes"],
             header_size: HEADER_SIZE,
+            uncompressed_size: header["n_raw_bytes"],
         });
     }
 
