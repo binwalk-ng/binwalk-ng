@@ -1,35 +1,35 @@
-use crate::structures::common::{self, StructureError};
-
+use crate::structures::common::StructureError;
+use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 /// Struct to store Android boot image header info
 #[derive(Debug, Default, Clone)]
 pub struct AndroidBootImageHeader {
-    pub kernel_size: usize,
-    pub ramdisk_size: usize,
-    pub kernel_load_address: usize,
-    pub ramdisk_load_address: usize,
+    pub kernel_size: u32,
+    pub ramdisk_size: u32,
+    pub kernel_load_address: u32,
+    pub ramdisk_load_address: u32,
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct AndroidBootImageHeaderBytes {
+    magic: zerocopy::U64<LE>,
+    kernel_size: zerocopy::U32<LE>,
+    kernel_load_addr: zerocopy::U32<LE>,
+    ramdisk_size: zerocopy::U32<LE>,
+    ramdisk_load_addr: zerocopy::U32<LE>,
 }
 
 /// Parses an Android boot image header
 pub fn parse_android_bootimg_header(
     bootimg_data: &[u8],
 ) -> Result<AndroidBootImageHeader, StructureError> {
-    let bootimg_structure = vec![
-        ("magic", "u64"),
-        ("kernel_size", "u32"),
-        ("kernel_load_addr", "u32"),
-        ("ramdisk_size", "u32"),
-        ("ramdisk_load_addr", "u32"),
-    ];
+    let (bootimg_header, _) =
+        AndroidBootImageHeaderBytes::ref_from_prefix(bootimg_data).map_err(|_| StructureError)?;
 
-    // Parse the header
-    if let Ok(bootimg_header) = common::parse(bootimg_data, &bootimg_structure, "little") {
-        return Ok(AndroidBootImageHeader {
-            kernel_size: bootimg_header["kernel_size"],
-            kernel_load_address: bootimg_header["kernel_load_addr"],
-            ramdisk_size: bootimg_header["ramdisk_size"],
-            ramdisk_load_address: bootimg_header["ramdisk_load_addr"],
-        });
-    }
-
-    Err(StructureError)
+    Ok(AndroidBootImageHeader {
+        kernel_size: bootimg_header.kernel_size.get(),
+        kernel_load_address: bootimg_header.kernel_load_addr.get(),
+        ramdisk_size: bootimg_header.ramdisk_size.get(),
+        ramdisk_load_address: bootimg_header.ramdisk_load_addr.get(),
+    })
 }
