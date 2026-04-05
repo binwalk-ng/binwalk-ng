@@ -1,5 +1,6 @@
-use crate::structures::common::{self, StructureError};
+use crate::structures::common::StructureError;
 use std::collections::HashMap;
+use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
 /// Struct to store MBR partition info
 #[derive(Debug, Default, Clone)]
@@ -16,6 +17,17 @@ pub struct MBRHeader {
     pub partitions: Vec<MBRPartition>,
 }
 
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct PartitionEntryBytes {
+    status: u8,
+    chs_start: [u8; 3],
+    os_type: u8,
+    chs_end: [u8; 3],
+    lba_start: zerocopy::U32<LE>,
+    lba_size: zerocopy::U32<LE>,
+}
+
 /// Parse a Master Boot Record image
 pub fn parse_mbr_image(mbr_data: &[u8]) -> Result<MBRHeader, StructureError> {
     const BLOCK_SIZE: usize = 512;
@@ -23,15 +35,6 @@ pub fn parse_mbr_image(mbr_data: &[u8]) -> Result<MBRHeader, StructureError> {
 
     const PARTITION_COUNT: usize = 4;
     const PARTITION_TABLE_OFFSET: usize = 446;
-
-    let partition_entry_structure = vec![
-        ("status", "u8"),
-        ("chs_start", "u24"),
-        ("os_type", "u8"),
-        ("chs_end", "u24"),
-        ("lba_start", "u32"),
-        ("lba_size", "u32"),
-    ];
 
     let known_os_types = HashMap::from([
         (0x07, "NTFS_IFS_HPFS_exFAT"),
@@ -51,8 +54,8 @@ pub fn parse_mbr_image(mbr_data: &[u8]) -> Result<MBRHeader, StructureError> {
         (0xEF, "EFI System Partition"),
     ]);
 
-    let allowed_status_values: Vec<usize> = vec![0, 0x80];
-    let partition_structure_size = common::size(&partition_entry_structure);
+    let allowed_status_values: Vec<u8> = vec![0, 0x80];
+    let partition_structure_size = std::mem::size_of::<PartitionEntryBytes>();
 
     let partition_table_start: usize = PARTITION_TABLE_OFFSET;
     let partition_table_end: usize =
@@ -70,50 +73,42 @@ pub fn parse_mbr_image(mbr_data: &[u8]) -> Result<MBRHeader, StructureError> {
             let partition_entry_start: usize = i * partition_structure_size;
 
             // Parse this partition table entry
-            match common::parse(
-                &partition_table[partition_entry_start..],
-                &partition_entry_structure,
-                "little",
-            ) {
-                Err(_) => {
-                    return Err(StructureError);
-                }
-                Ok(partition_entry) => {
-                    // OS type of zero or LBA size of 0 can be ignored
-                    if partition_entry["os_type"] != 0 || partition_entry["lba_size"] != 0 {
-                        // Validate the reported MBR status value
-                        if allowed_status_values.contains(&partition_entry["status"]) {
-                            // Default to unknown partition type
-                            let this_partition_name = known_os_types
-                                .get(&partition_entry["os_type"])
-                                .copied()
-                                .unwrap_or("Unknown");
+            let (partition_entry, _) =
+                PartitionEntryBytes::ref_from_prefix(&partition_table[partition_entry_start..])
+                    .map_err(|_| StructureError)?;
 
-                            // Create an MBRPartition structure for this entry
-                            let this_partition = MBRPartition {
-                                start: partition_entry["lba_start"] * BLOCK_SIZE,
-                                size: partition_entry["lba_size"] * BLOCK_SIZE,
-                                name: this_partition_name.to_string(),
-                            };
+            // OS type of zero or LBA size of 0 can be ignored
+            if partition_entry.os_type != 0 || partition_entry.lba_size.get() != 0 {
+                // Validate the reported MBR status value
+                if allowed_status_values.contains(&partition_entry.status) {
+                    // Default to unknown partition type
+                    let this_partition_name = known_os_types
+                        .get(&partition_entry.os_type)
+                        .copied()
+                        .unwrap_or("Unknown");
 
-                            // Calculate where this partition ends
-                            let this_partition_end_offset =
-                                this_partition.start + this_partition.size;
+                    // Create an MBRPartition structure for this entry
+                    let this_partition = MBRPartition {
+                        start: partition_entry.lba_start.get() as usize * BLOCK_SIZE,
+                        size: partition_entry.lba_size.get() as usize * BLOCK_SIZE,
+                        name: this_partition_name.to_string(),
+                    };
 
-                            // Some valid MBRs have partitions that start/end out of bounds WRT the disk image.
-                            // Not sure why? At any rate, don't include them in the reported partitions.
-                            if this_partition_end_offset <= mbr_data.len() {
-                                // Don't report the partition where the MBR header resides
-                                if this_partition.start != 0 {
-                                    // Add it to the list of partitions
-                                    mbr_header.partitions.push(this_partition.clone());
-                                }
+                    // Calculate where this partition ends
+                    let this_partition_end_offset = this_partition.start + this_partition.size;
 
-                                // Image size is the end of the farthest away partition
-                                if this_partition_end_offset > mbr_header.image_size {
-                                    mbr_header.image_size = this_partition_end_offset;
-                                }
-                            }
+                    // Some valid MBRs have partitions that start/end out of bounds WRT the disk image.
+                    // Not sure why? At any rate, don't include them in the reported partitions.
+                    if this_partition_end_offset <= mbr_data.len() {
+                        // Don't report the partition where the MBR header resides
+                        if this_partition.start != 0 {
+                            // Add it to the list of partitions
+                            mbr_header.partitions.push(this_partition.clone());
+                        }
+
+                        // Image size is the end of the farthest away partition
+                        if this_partition_end_offset > mbr_header.image_size {
+                            mbr_header.image_size = this_partition_end_offset;
                         }
                     }
                 }
