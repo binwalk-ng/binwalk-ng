@@ -94,6 +94,6 @@ pub fn extract_trx_partitions(
     result
 }
 
-fn trx_crc32(crc_data: &[u8]) -> usize {
-    (crc32(crc_data) ^ 0xFFFFFFFF) as usize
+fn trx_crc32(crc_data: &[u8]) -> u32 {
+    crc32(crc_data) ^ 0xFFFFFFFF
 }
