@@ -31,7 +31,7 @@ pub fn parse_zip_header(zip_data: &[u8]) -> Result<ZipFileHeader, StructureError
         ("extra_field_len", "u16"),
     ];
 
-    let allowed_compression_methods: Vec<usize> = vec![
+    let allowed_compression_methods = [
         0,
         1,
         2,

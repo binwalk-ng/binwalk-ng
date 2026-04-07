@@ -25,7 +25,7 @@ struct UEFIPiHeader {
 /// Parse a UEFI volume header
 pub fn parse_uefi_volume_header(uefi_data: &[u8]) -> Result<UEFIVolumeHeader, StructureError> {
     // The revision field must be 1 or 2
-    let valid_revisions: Vec<u8> = vec![1, 2];
+    let valid_revisions = [1, 2];
 
     // Parse the volume header
     let (uefi_volume_header, _) =
