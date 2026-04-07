@@ -1,6 +1,6 @@
 use crate::structures::common::StructureError;
-use u24::u24;
-use zerocopy::{FromBytes, Immutable, KnownLayout, Unaligned};
+use u24::U24;
+use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
 /// Stores info about a ZSTD file header
 #[derive(Debug, Default, Clone)]
@@ -61,6 +61,12 @@ pub fn parse_zstd_header(zstd_data: &[u8]) -> Result<ZSTDHeader, StructureError>
     Err(StructureError)
 }
 
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct ZstdBlockHeaderBytes {
+    info_bits: U24<LE>,
+}
+
 /// Stores info about a ZSTD block header
 #[derive(Debug, Default, Clone)]
 pub struct ZSTDBlockHeader {
@@ -82,13 +88,14 @@ pub fn parse_block_header(block_data: &[u8]) -> Result<ZSTDBlockHeader, Structur
     const ZSTD_BLOCK_SIZE_SHIFT: u32 = 3;
 
     let mut block_info = ZSTDBlockHeader {
-        header_size: std::mem::size_of::<u24>(),
+        header_size: std::mem::size_of::<ZstdBlockHeaderBytes>(),
         ..Default::default()
     };
 
     // Parse the block header
-    let bytes: [u8; 3] = block_data[0..3].try_into().map_err(|_| StructureError)?;
-    let info_bits = u24::from_le_bytes(bytes).into_u32();
+    let (block_header, _) =
+        ZstdBlockHeaderBytes::ref_from_prefix(block_data).map_err(|_| StructureError)?;
+    let info_bits = block_header.info_bits.get().into_u32();
 
     // Interpret the bit fields of the block header, which indicate the type of block, the size of the block, and if this is the last block
     block_info.last_block = (info_bits & ZSTD_LAST_BLOCK_MASK) != 0;
