@@ -21,7 +21,7 @@ pub fn sevenzip_parser(file_data: &[u8], offset: usize) -> Result<SignatureResul
 
         if let Some(crc_data) = file_data.get(next_crc_start..next_crc_end) {
             // Calculate the next_header CRC
-            let calculated_next_crc: usize = crc32(crc_data) as usize;
+            let calculated_next_crc = crc32(crc_data);
 
             // Validate the next_header CRC
             if calculated_next_crc == sevenzip_header.next_header_crc {
