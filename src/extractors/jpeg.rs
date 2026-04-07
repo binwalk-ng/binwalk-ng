@@ -70,12 +70,12 @@ fn get_jpeg_data_size(jpeg_data: &[u8]) -> Option<usize> {
     let mut next_marker_offset: usize = 0;
 
     // Most JPEG markers include a size field; these do not
-    let no_length_markers: Vec<u8> = vec![
+    let no_length_markers = [
         0x00, 0x01, 0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, EOF_MARKER,
     ];
 
     // In a Start Of Scan block, ignore 0xFF marker magics that are followed by one of these bytes
-    let sos_skip_markers: Vec<u8> = vec![0x00, 0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7];
+    let sos_skip_markers = [0x00, 0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7];
 
     loop {
         // Read the marker magic byte

@@ -27,7 +27,7 @@ pub fn parse_trx_header(header_data: &[u8]) -> Result<TRXHeader, StructureError>
         ("partition4_offset", "u32"),
     ];
 
-    let allowed_versions: Vec<usize> = vec![1, 2];
+    let allowed_versions = [1, 2];
 
     // Size of the fixed-length portion of the header structure
     let mut struct_size: usize = common::size(&trx_header_structure);
