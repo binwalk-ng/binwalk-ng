@@ -38,15 +38,14 @@ pub fn extract_swapped_u16(
     output_directory: Option<&Path>,
 ) -> ExtractionResult {
     const SWAP_BYTE_COUNT: usize = 2;
-    extract_swapped(file_data, offset, output_directory, SWAP_BYTE_COUNT)
+    extract_swapped::<SWAP_BYTE_COUNT>(file_data, offset, output_directory)
 }
 
 /// Extract a block of data where every n bytes have been swapped
-fn extract_swapped(
+fn extract_swapped<const N: usize>(
     file_data: &[u8],
     offset: usize,
     output_directory: Option<&Path>,
-    n: usize,
 ) -> ExtractionResult {
     const OUTPUT_FILE_NAME: &str = "swapped.bin";
 
@@ -55,7 +54,7 @@ fn extract_swapped(
     };
 
     if let Some(data) = file_data.get(offset..) {
-        let swapped_data = byte_swap(data, n);
+        let swapped_data = byte_swap::<N>(data);
 
         result.success = !swapped_data.is_empty();
 
@@ -73,35 +72,37 @@ fn extract_swapped(
     result
 }
 
-/// Swap every n bytes of the provided data
+/// Swap every N bytes of the provided data
 ///
 /// ## Example:
 ///
 /// ```
 /// use binwalk_ng::extractors::swapped::byte_swap;
 ///
-/// assert_eq!(byte_swap(b"ABCD", 2), b"CDAB");
+/// assert_eq!(byte_swap::<2>(b"ABCD"), b"CDAB");
 /// ```
-pub fn byte_swap(data: &[u8], n: usize) -> Vec<u8> {
-    let chunk_size = n * 2;
-    let mut chunker = data.chunks(chunk_size);
-    let mut swapped_data: Vec<u8> = Vec::new();
+///
+/// Remaining bytes are copied as-is:
+///
+/// ```
+/// use binwalk_ng::extractors::swapped::byte_swap;
+///
+/// assert_eq!(byte_swap::<2>(b"ABCD12"), b"CDAB12");
+/// ```
+pub fn byte_swap<const N: usize>(data: &[u8]) -> Vec<u8> {
+    let mut swapped_data: Vec<u8> = vec![0; data.len()];
 
-    loop {
-        match chunker.next() {
-            None => {
-                break;
-            }
-            Some(chunk) => {
-                if chunk.len() != chunk_size {
-                    break;
-                }
-
-                swapped_data.extend(chunk[n..].to_vec());
-                swapped_data.extend(chunk[0..n].to_vec());
-            }
-        }
+    let mut dst_chunks = swapped_data.chunks_exact_mut(N * 2);
+    let mut src_chunks = data.chunks_exact(N * 2);
+    for (dst_chunk, src_chunk) in std::iter::zip(&mut dst_chunks, &mut src_chunks) {
+        let (dst_l, dst_r) = dst_chunk.split_at_mut(N);
+        let (src_l, src_r) = src_chunk.split_at(N);
+        dst_l.copy_from_slice(src_r);
+        dst_r.copy_from_slice(src_l);
     }
+    dst_chunks
+        .into_remainder()
+        .copy_from_slice(src_chunks.remainder());
 
     swapped_data
 }

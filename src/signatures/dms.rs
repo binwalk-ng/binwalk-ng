@@ -29,7 +29,7 @@ pub fn dms_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
 
         if let Some(dms_data) = file_data.get(result.offset..result.offset + MIN_SIZE) {
             // DMS firmware images have every 2 bytes swapped
-            let swapped_data = byte_swap(dms_data, BYTE_SWAP_SIZE);
+            let swapped_data = byte_swap::<BYTE_SWAP_SIZE>(dms_data);
 
             // Validate the DMS firmware header
             if let Ok(dms_header) = parse_dms_header(&swapped_data) {
