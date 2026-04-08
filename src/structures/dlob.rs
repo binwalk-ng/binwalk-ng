@@ -36,9 +36,11 @@ pub fn parse_dlob_header(dlob_data: &[u8]) -> Result<DlobHeader, StructureError>
     // It is expected that the first header is metadata only
     if dlob_header_p1.data_size == 0 {
         // Parse the second part of the header
+        let rest = dlob_data
+            .get(dlob_header_p2_offset..)
+            .ok_or(StructureError)?;
         let (dlob_header_p2, _) =
-            DlobHeaderBytes2::ref_from_prefix(&dlob_data[dlob_header_p2_offset..])
-                .map_err(|_| StructureError)?;
+            DlobHeaderBytes2::ref_from_prefix(rest).map_err(|_| StructureError)?;
 
         // Both parts should have the same magic bytes
         if dlob_header_p1.magic == dlob_header_p2.magic {
