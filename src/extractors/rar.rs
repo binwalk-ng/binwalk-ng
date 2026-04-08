@@ -1,38 +1,43 @@
-use crate::extractors;
+use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
+use std::path::Path;
 
-/// Describes how to run the unrar utility to extract RAR archives
-///
-/// ```
-/// use std::io::ErrorKind;
-/// use std::process::Command;
-/// use binwalk_ng::extractors::common::ExtractorType;
-/// use binwalk_ng::extractors::rar::rar_extractor;
-///
-/// match rar_extractor().utility {
-///     ExtractorType::None => panic!("Invalid extractor type of None"),
-///     ExtractorType::Internal(func) => println!("Internal extractor OK: {:?}", func),
-///     ExtractorType::External(cmd) => {
-///         if let Err(e) = Command::new(&cmd).output() {
-///             if e.kind() == ErrorKind::NotFound {
-///                 panic!("External extractor '{}' not found", cmd);
-///             } else {
-///                 panic!("Failed to execute external extractor '{}': {}", cmd, e);
-///             }
-///         }
-///     }
-/// }
-/// ```
-pub fn rar_extractor() -> extractors::common::Extractor {
-    extractors::common::Extractor {
-        utility: extractors::common::ExtractorType::External("unrar".to_string()),
-        extension: "rar".to_string(),
-        arguments: vec![
-            "x".to_string(),          // Perform extraction
-            "-y".to_string(),         // Answer yes to all questions
-            "-ppassword".to_string(), // Set the password to  'password' for password protected rar files
-            extractors::common::SOURCE_FILE_PLACEHOLDER.to_string(),
-        ],
-        exit_codes: vec![0],
+pub fn rar_extractor() -> Extractor {
+    Extractor {
+        utility: ExtractorType::Internal(extract_rar),
         ..Default::default()
     }
+}
+
+pub fn extract_rar(
+    file_data: &[u8],
+    offset: usize,
+    output_directory: Option<&Path>,
+) -> ExtractionResult {
+    let mut result = ExtractionResult {
+        ..Default::default()
+    };
+
+    if let Ok(archive) = rar_stream::MemoryArchive::new(&file_data[offset..]) {
+        result.size = Some(
+            archive
+                .entries_iter()
+                .map(|x| x.unpacked_size as usize)
+                .sum(),
+        );
+        result.success = true;
+
+        if let Some(output_directory) = output_directory {
+            let chroot = Chroot::new(output_directory);
+
+            for (i, entry) in archive.entries_iter().enumerate() {
+                if entry.is_directory {
+                    chroot.create_directory(entry.name);
+                } else if let Ok(data) = archive.extract(i) {
+                    chroot.create_file(entry.name, &data);
+                }
+            }
+        }
+    }
+
+    result
 }
