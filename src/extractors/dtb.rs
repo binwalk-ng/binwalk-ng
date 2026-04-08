@@ -58,47 +58,47 @@ pub fn extract_dtb(
             // Loop over all DTB node entries
             while is_offset_safe(available_data, entry_offset, previous_entry_offset) {
                 // Parse the next DTB node entry
-                let node = parse_dtb_node(&dtb_header, dtb_data, entry_offset);
-
-                // Beginning of a node, add it to the hierarchy list
-                if node.begin {
-                    if !node.name.is_empty() {
-                        hierarchy.push(node.name.clone());
-                    }
-                // End of a node, remove it from the hierarchy list
-                } else if node.end {
-                    if !hierarchy.is_empty() {
-                        hierarchy.pop();
-                    }
-                // End of the DTB structure, return success only if the whole DTB structure was parsed successfully up to the EOF marker
-                } else if node.eof {
-                    result.success = true;
-                    result.size = Some(available_data);
-                    break;
-                // DTB property, extract it to disk
-                } else if node.property {
-                    if let Some(output_directory) = output_directory {
-                        let chroot = Chroot::new(output_directory);
-                        let dir_path = hierarchy.join(std::path::MAIN_SEPARATOR_STR);
-                        let file_path = chroot.safe_path_join(&dir_path, &node.name);
-
-                        if !chroot.create_directory(dir_path) {
-                            break;
+                if let Ok(node) = parse_dtb_node(&dtb_header, dtb_data, entry_offset) {
+                    // Beginning of a node, add it to the hierarchy list
+                    if node.begin {
+                        if !node.name.is_empty() {
+                            hierarchy.push(node.name.clone());
                         }
-
-                        if !chroot.create_file(file_path, &node.data) {
-                            break;
+                    // End of a node, remove it from the hierarchy list
+                    } else if node.end {
+                        if !hierarchy.is_empty() {
+                            hierarchy.pop();
                         }
+                    // End of the DTB structure, return success only if the whole DTB structure was parsed successfully up to the EOF marker
+                    } else if node.eof {
+                        result.success = true;
+                        result.size = Some(available_data);
+                        break;
+                    // DTB property, extract it to disk
+                    } else if node.property {
+                        if let Some(output_directory) = output_directory {
+                            let chroot = Chroot::new(output_directory);
+                            let dir_path = hierarchy.join(std::path::MAIN_SEPARATOR_STR);
+                            let file_path = chroot.safe_path_join(&dir_path, &node.name);
+
+                            if !chroot.create_directory(dir_path) {
+                                break;
+                            }
+
+                            if !chroot.create_file(file_path, &node.data) {
+                                break;
+                            }
+                        }
+                    // The only other supported node type is NOP
+                    } else if !node.nop {
+                        error!("Unknown or invalid DTB node");
+                        break;
                     }
-                // The only other supported node type is NOP
-                } else if !node.nop {
-                    error!("Unknown or invalid DTB node");
-                    break;
+
+                    // Update offsets to parse the next DTB structure entry
+                    previous_entry_offset = Some(entry_offset);
+                    entry_offset += node.total_size;
                 }
-
-                // Update offsets to parse the next DTB structure entry
-                previous_entry_offset = Some(entry_offset);
-                entry_offset += node.total_size;
             }
         }
     }
