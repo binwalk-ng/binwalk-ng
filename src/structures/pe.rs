@@ -1,61 +1,54 @@
-use crate::structures::common::{self, StructureError};
+use crate::structures::common::StructureError;
 use std::collections::HashMap;
+use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
 /// Stores info about the PE file
 pub struct PEHeader {
     pub machine: String,
 }
 
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct DOSHeaderBytes {
+    e_magic: zerocopy::U16<LE>,    // MZ
+    e_cblp: zerocopy::U16<LE>,     // Bytes on last page of file
+    e_cp: zerocopy::U16<LE>,       // Pages in file
+    e_crlc: zerocopy::U16<LE>,     // Relocations
+    e_cparhdr: zerocopy::U16<LE>,  // Header size, in paragraphs
+    e_minalloc: zerocopy::U16<LE>, // Min extra paragraphs needed
+    e_maxalloc: zerocopy::U16<LE>, // Max extra paragraphs needed
+    e_ss: zerocopy::U16<LE>,       // Initial relative SS value
+    e_sp: zerocopy::U16<LE>,       // Initial SP value
+    e_csum: zerocopy::U16<LE>,     // Checksum
+    e_ip: zerocopy::U16<LE>,       // Initial IP value
+    e_cs: zerocopy::U16<LE>,       // Initial relative CS value
+    e_lfarlc: zerocopy::U16<LE>,   // File address of relocation table
+    e_ovno: zerocopy::U16<LE>,     // Overlay number
+    e_res_1: [u8; 8],
+    e_oemid: zerocopy::U16<LE>,   // OEM identifier
+    e_oeminfo: zerocopy::U16<LE>, // OEM specific information
+    e_res_2: [u8; 20],
+    e_lfanew: zerocopy::U32<LE>, // Offset to the PE header
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct PEHeaderBytes {
+    magic: zerocopy::U32<LE>,
+    machine: zerocopy::U16<LE>,
+    number_of_sections: zerocopy::U16<LE>,
+    timestamp: zerocopy::U32<LE>,
+    symbol_table_ptr: zerocopy::U32<LE>,
+    number_of_symbols: zerocopy::U32<LE>,
+    optional_header_size: zerocopy::U16<LE>,
+    characteristics: zerocopy::U16<LE>,
+}
+
 /// Partially parse a PE header
 pub fn parse_pe_header(pe_data: &[u8]) -> Result<PEHeader, StructureError> {
-    const PE_MAGIC: usize = 0x00004550;
+    const PE_MAGIC: u32 = 0x00004550;
 
-    let dos_structure = vec![
-        ("e_magic", "u16"),    // "MZ"
-        ("e_cblp", "u16"),     // Bytes on last page of file
-        ("e_cp", "u16"),       // Pages in file
-        ("e_crlc", "u16"),     // Relocations
-        ("e_cparhdr", "u16"),  // Header size, in paragraphs
-        ("e_minalloc", "u16"), // Min extra paragraphs needed
-        ("e_maxalloc", "u16"), // Max extra paragraphs needed
-        ("e_ss", "u16"),       // Initial relative SS value
-        ("e_sp", "u16"),       // Initial SP value
-        ("e_csum", "u16"),     // Checksum
-        ("e_ip", "u16"),       // Initial IP value
-        ("e_cs", "u16"),       // Initial relative CS value
-        ("e_lfarlc", "u16"),   // File address of relocation table
-        ("e_ovno", "u16"),     // Overlay number
-        ("e_res_1", "u16"),
-        ("e_res_2", "u16"),
-        ("e_res_3", "u16"),
-        ("e_res_4", "u16"),
-        ("e_oemid", "u16"),   // OEM identifier
-        ("e_oeminfo", "u16"), // OEM specific information
-        ("e_res_5", "u16"),
-        ("e_res_6", "u16"),
-        ("e_res_7", "u16"),
-        ("e_res_8", "u16"),
-        ("e_res_9", "u16"),
-        ("e_res_10", "u16"),
-        ("e_res_11", "u16"),
-        ("e_res_12", "u16"),
-        ("e_res_13", "u16"),
-        ("e_res_14", "u16"),
-        ("e_lfanew", "u32"), // Offset to the PE header
-    ];
-
-    let pe_structure = vec![
-        ("magic", "u32"),
-        ("machine", "u16"),
-        ("number_of_sections", "u16"),
-        ("timestamp", "u32"),
-        ("symbol_table_ptr", "u32"),
-        ("number_of_symbols", "u32"),
-        ("optional_header_size", "u16"),
-        ("characteristics", "u16"),
-    ];
-
-    let known_machine_types: HashMap<usize, &str> = HashMap::from([
+    let known_machine_types = HashMap::from([
         (0, "Unknown"),
         (0x184, "Alpha32"),
         (0x284, "Alpha64"),
@@ -87,43 +80,34 @@ pub fn parse_pe_header(pe_data: &[u8]) -> Result<PEHeader, StructureError> {
     ]);
 
     // Size of PE header structure
-    let pe_header_size = common::size(&pe_structure);
+    let pe_header_size = std::mem::size_of::<PEHeaderBytes>();
 
     // Parse the DOS header
-    if let Ok(dos_header) = common::parse(pe_data, &dos_structure, "little") {
-        // Sanity check the reserved header fields; they should all be 0
-        if dos_header["e_res_1"] == 0
-            && dos_header["e_res_2"] == 0
-            && dos_header["e_res_3"] == 0
-            && dos_header["e_res_4"] == 0
-            && dos_header["e_res_5"] == 0
-            && dos_header["e_res_6"] == 0
-            && dos_header["e_res_7"] == 0
-            && dos_header["e_res_8"] == 0
-            && dos_header["e_res_9"] == 0
-            && dos_header["e_res_10"] == 0
-            && dos_header["e_res_11"] == 0
-            && dos_header["e_res_12"] == 0
-            && dos_header["e_res_13"] == 0
-            && dos_header["e_res_14"] == 0
-        {
-            // Start and end offsets of the PE header
-            let pe_header_start: usize = dos_header["e_lfanew"];
-            let pe_header_end: usize = pe_header_start + pe_header_size;
+    let (dos_header, _) = DOSHeaderBytes::ref_from_prefix(pe_data).map_err(|_| StructureError)?;
+    // Sanity check the reserved header fields; they should all be 0
+    if dos_header
+        .e_res_1
+        .iter()
+        .chain(&dos_header.e_res_2)
+        .all(|&b| b == 0)
+    {
+        // Start and end offsets of the PE header
+        let pe_header_start: usize = dos_header.e_lfanew.get() as usize;
+        let pe_header_end: usize = pe_header_start + pe_header_size;
 
-            // Sanity check the PE header offsets
-            if let Some(pe_header_data) = pe_data.get(pe_header_start..pe_header_end) {
-                // Parse the PE header
-                if let Ok(pe_header) = common::parse(pe_header_data, &pe_structure, "little") {
-                    // Check the PE magic bytes
-                    if pe_header["magic"] == PE_MAGIC {
-                        // Check the reported machine type
-                        if known_machine_types.contains_key(&pe_header["machine"]) {
-                            return Ok(PEHeader {
-                                machine: known_machine_types[&pe_header["machine"]].to_string(),
-                            });
-                        }
-                    }
+        // Sanity check the PE header offsets
+        if let Some(pe_header_data) = pe_data.get(pe_header_start..pe_header_end) {
+            // Parse the PE header
+            let (pe_header, _) =
+                PEHeaderBytes::ref_from_prefix(pe_header_data).map_err(|_| StructureError)?;
+
+            // Check the PE magic bytes
+            if pe_header.magic == PE_MAGIC {
+                // Check the reported machine type
+                if let Some(machine) = known_machine_types.get(&pe_header.machine.get()) {
+                    return Ok(PEHeader {
+                        machine: machine.to_string(),
+                    });
                 }
             }
         }
