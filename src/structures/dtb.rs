@@ -153,11 +153,8 @@ pub fn parse_dtb_node(dtb_header: &DTBHeader, dtb_data: &[u8], node_offset: usiz
 fn dtb_aligned(len: usize) -> usize {
     const ALIGNMENT: usize = 4;
 
-    let rem = len % ALIGNMENT;
-
-    if rem == 0 {
-        len
-    } else {
-        len + (ALIGNMENT - rem)
+    match len % ALIGNMENT {
+        0 => len,
+        rem => len + (ALIGNMENT - rem),
     }
 }

@@ -76,7 +76,7 @@ fn get_pch_regions_size(pch_data: &[u8], offset: usize, fcba: u8) -> Result<u32,
     // The base address of the flash regions is encoded into 8 bits of the FCBA header field, like so
     let flash_region_base_address = (fcba as usize) << 4;
 
-    // Region entries are 32-bit values stored seqeuntially starting at the flash region base address
+    // Region entries are 32-bit values stored sequentially starting at the flash region base address
     for i in 0..FLASH_REGION_COUNT {
         // Get the offset of the next region's 32-bit entry
         let region_entry_start = offset + flash_region_base_address + (i * FLASH_REGION_ENTRY_SIZE);
