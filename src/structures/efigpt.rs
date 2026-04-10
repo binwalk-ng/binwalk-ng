@@ -33,7 +33,7 @@ struct EFIGPTHeaderBytes {
 
 /// Parses an EFI GPT header
 pub fn parse_efigpt_header(efi_data: &[u8]) -> Result<EFIGPTHeader, StructureError> {
-    const EXPTECTED_REVISION: u32 = 0x00010000;
+    const EXPECTED_REVISION: u32 = 0x00010000;
 
     let mut result = EFIGPTHeader {
         ..Default::default()
@@ -48,7 +48,7 @@ pub fn parse_efigpt_header(efi_data: &[u8]) -> Result<EFIGPTHeader, StructureErr
         // Make sure the reserved field is NULL
         if gpt_header.reserved == 0 {
             // Make sure the revision field is the expected valid
-            if gpt_header.revision == EXPTECTED_REVISION {
+            if gpt_header.revision == EXPECTED_REVISION {
                 // Calculate the start and end offsets of the partition entries
                 let partition_entries_start: usize =
                     lba_to_offset(gpt_header.partition_entry_lba.get() as usize);
@@ -117,23 +117,19 @@ struct GPTEntry {
     attributes: zerocopy::U64<LE>,
 }
 
-/// Parse a GPT partition entry
 fn parse_gpt_partition_entry(entry_data: &[u8]) -> Option<GPTPartitionEntry> {
-    let mut result = GPTPartitionEntry {
-        ..Default::default()
-    };
+    let (entry_header, _) = GPTEntry::ref_from_prefix(entry_data).ok()?;
 
-    if let Ok((entry_header, _)) = GPTEntry::ref_from_prefix(entry_data).map_err(|_| StructureError)
-    {
-        // GUID types of NULL can be ignored
-        if entry_header.type_guid_p1 != 0 && entry_header.type_guid_p2 != 0 {
-            result.start_offset = lba_to_offset(entry_header.starting_lba.get() as usize);
-            result.end_offset = lba_to_offset(entry_header.ending_lba.get() as usize);
-            return Some(result);
-        }
+    // GUID types of NULL can be ignored
+    if entry_header.type_guid_p1 == 0 || entry_header.type_guid_p2 == 0 {
+        return None;
     }
 
-    None
+    Some(GPTPartitionEntry {
+        start_offset: lba_to_offset(entry_header.starting_lba.get() as usize),
+        end_offset: lba_to_offset(entry_header.ending_lba.get() as usize),
+        ..Default::default()
+    })
 }
 
 // Convert LBA to offset
