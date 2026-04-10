@@ -1,37 +1,34 @@
-#! /bin/bash -
-# https://unix.stackexchange.com/questions/290696/display-stdout-and-stderr-in-two-separate-streams
-# 
-# This script will run binwalk in a split screen, displaying results in the top screen and debug output in the bottom screen.
-# The `screen` utility must be installed.
+#!/bin/bash
 
-# If BINWALK_PATH is not set, assume it is in the default cargo target path
-if [[ -z "${BINWALK_PATH}" ]]; then
-    BINWALK_PATH="$(cd "$(dirname $0)" && pwd)/../target/release/binwalk"
-fi
+# Use the full path or ensure the binary is reachable
+CMD="./target/release/binwalk $@"
 
 # If no RUST_LOG level is defined, default to `info`
 if [[ -z "${RUST_LOG}" ]]; then
     export RUST_LOG=info
 fi
 
-tmpdir=$(mktemp -d) || exit
-trap 'rm -rf "$tmpdir"' EXIT INT TERM HUP
+# Kill existing session if it exists (for clean testing)
+tmux kill-session -t binwalk_split 2>/dev/null
 
-FIFO=$tmpdir/FIFO
-mkfifo "$FIFO" || exit
+# Create session and window
+tmux new-session -d -s binwalk_split -n "Main"
 
-conf=$tmpdir/conf
+# Split and capture the unique IDs of the panes
+TOP_PANE=$(tmux display-message -p '#{pane_id}')
+BOTTOM_PANE=$(tmux split-window -v -P -F '#{pane_id}')
 
-cat > "$conf" << 'EOF' || exit
-split -h
-focus
-screen -t stderr sh -c 'tty > "$FIFO"; read done < "$FIFO"'
-focus
-screen -t stdout sh -c 'read tty < "$FIFO"; eval "$CMD" 2> "$tty"; echo "[Command exited with status $?, press enter to exit]"; read prompt; echo done > "$FIFO"'
-EOF
+# Small delay to let the shell initialize
+sleep 0.5
 
-CMD="$BINWALK_PATH $*"
+# Get the TTY of the bottom pane
+TTY=$(tmux display-message -t "$BOTTOM_PANE" -p "#{pane_tty}")
 
-export FIFO CMD
+# Send the command to the TOP pane, redirecting stderr to the BOTTOM pane's TTY
+# Added a 'clear' to make sure the prompt is visible
+tmux send-keys -t "$TOP_PANE" "clear" C-m
+tmux send-keys -t "$TOP_PANE" "$CMD 2> $TTY" C-m
 
-screen -mc "$conf"
+# Attach
+tmux attach-session -t binwalk_split
+
