@@ -35,7 +35,7 @@ RUN apt-get update -y \
     libbz2-dev \
     libssl-dev \
     pkg-config \
-    && curl -L -o "${BUILD_DIR}/${SASQUATCH_FILENAME}" "${SASQUATCH_BASE_FILE_URL}\sasquatch_1.0_$(dpkg --print-architecture).deb" \
+    && curl -L -o "${BUILD_DIR}/${SASQUATCH_FILENAME}" "${SASQUATCH_BASE_FILE_URL}/sasquatch_1.0_$(dpkg --print-architecture).deb" \
     && git clone https://github.com/askac/dumpifs.git ${BUILD_DIR}/dumpifs \
     && git clone https://github.com/lzfse/lzfse.git ${BUILD_DIR}/lzfse \
     && git clone https://github.com/Lekensteyn/dmg2img.git ${BUILD_DIR}/dmg2img \
