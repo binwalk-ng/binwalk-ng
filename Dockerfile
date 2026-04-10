@@ -11,9 +11,6 @@ ENV TZ=Etc/UTC
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 
-COPY . ${BINWALK_BUILD_DIR}
-WORKDIR ${BINWALK_BUILD_DIR}
-
 # Pull build needs, build dumpifs, lzfse, dmg2img, vfdecrypt, and binwalk
 # Cleaning up our mess here doesn't matter, as anything generated in
 # this stage won't make it into the final image unless it's explicitly copied
@@ -38,7 +35,7 @@ RUN apt-get update -y \
     libbz2-dev \
     libssl-dev \
     pkg-config \
-    && curl -L -o "${SASQUATCH_FILENAME}" "${SASQUATCH_BASE_FILE_URL}\sasquatch_1.0_$(dpkg --print-architecture).deb" \
+    && curl -L -o "${BUILD_DIR}/${SASQUATCH_FILENAME}" "${SASQUATCH_BASE_FILE_URL}\sasquatch_1.0_$(dpkg --print-architecture).deb" \
     && git clone https://github.com/askac/dumpifs.git ${BUILD_DIR}/dumpifs \
     && git clone https://github.com/lzfse/lzfse.git ${BUILD_DIR}/lzfse \
     && git clone https://github.com/Lekensteyn/dmg2img.git ${BUILD_DIR}/dmg2img \
@@ -46,9 +43,16 @@ RUN apt-get update -y \
     && make -C ${BUILD_DIR}/dumpifs dumpifs \
     && make -C ${BUILD_DIR}/lzfse install \
     && make -C ${BUILD_DIR}/dmg2img dmg2img vfdecrypt HAVE_LZFSE=1 \
-    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-    && . /root/.cargo/env \
-    && cargo build --release
+    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+COPY --link . ${BINWALK_BUILD_DIR}
+WORKDIR ${BINWALK_BUILD_DIR}
+
+RUN --mount=type=cache,target=./target,sharing=locked \
+    --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
+    . /root/.cargo/env \
+    && cargo build --release \
+    && cp target/release/binwalk ${BINWALK_BUILD_DIR}/binwalk
 
 
 ## Prod image build stage
@@ -67,9 +71,6 @@ ENV LC_ALL=C.UTF-8
 
 WORKDIR ${BUILD_DIR}
 
-# Copy the build artifacts from the scratch build stage
-COPY --from=build /usr/local/bin/lzfse ${BUILD_DIR}/dumpifs/dumpifs ${BUILD_DIR}/dmg2img/dmg2img ${BUILD_DIR}/dmg2img/vfdecrypt ${BINWALK_BUILD_DIR}/target/release/binwalk /usr/local/bin/
-
 # Install dependencies, create default working directory, and remove clang & friends.
 # clang is needed to build minilzo, but it's not needed
 # afterward, so it's safe to remove and reduces the image size by ~400MB.
@@ -77,7 +78,7 @@ COPY --from=build /usr/local/bin/lzfse ${BUILD_DIR}/dumpifs/dumpifs ${BUILD_DIR}
 # but that would require that I untangle the Eldritch Horror that is the
 # pip build process, and that's not a particular monster that I'm up to slaying today.
 RUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv,target=/bin/uv \
-    --mount=from=build,source=${BINWALK_BUILD_DIR}/${SASQUATCH_FILENAME},target=/tmp/sasquatch.deb \
+    --mount=from=build,source=${BUILD_DIR}/${SASQUATCH_FILENAME},target=/tmp/sasquatch.deb \
     apt-get update -y \
     && apt-get upgrade -y \
     && apt-get -y install --no-install-recommends \
@@ -118,6 +119,14 @@ RUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv,target=/bin/uv \
     && mkdir -p ${DEFAULT_WORKING_DIR} \
     && chmod 777 ${DEFAULT_WORKING_DIR}
 
+# Copy the build artifacts from the scratch build stage
+COPY --link --from=build \
+    /usr/local/bin/lzfse \
+    ${BUILD_DIR}/dumpifs/dumpifs \
+    ${BUILD_DIR}/dmg2img/dmg2img \
+    ${BUILD_DIR}/dmg2img/vfdecrypt \
+    ${BINWALK_BUILD_DIR}/binwalk \
+    /usr/local/bin/
 
 WORKDIR ${DEFAULT_WORKING_DIR}
 

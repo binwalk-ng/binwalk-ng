@@ -15,7 +15,7 @@ pub fn parse_cramfs_header(cramfs_data: &[u8]) -> Result<CramFSHeader, Structure
     const BIG_ENDIAN_MAGIC: usize = 0x453DCD28;
     const LITTLE_ENDIAN_MAGIC: usize = 0x28CD3D45;
 
-    let allowed_magics: Vec<usize> = vec![BIG_ENDIAN_MAGIC, LITTLE_ENDIAN_MAGIC];
+    let allowed_magics = [BIG_ENDIAN_MAGIC, LITTLE_ENDIAN_MAGIC];
 
     let cramfs_header_structure = vec![
         ("magic", "u32"),
