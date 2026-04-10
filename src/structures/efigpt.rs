@@ -128,7 +128,6 @@ fn parse_gpt_partition_entry(entry_data: &[u8]) -> Option<GPTPartitionEntry> {
     Some(GPTPartitionEntry {
         start_offset: lba_to_offset(entry_header.starting_lba.get() as usize),
         end_offset: lba_to_offset(entry_header.ending_lba.get() as usize),
-        ..Default::default()
     })
 }
 
