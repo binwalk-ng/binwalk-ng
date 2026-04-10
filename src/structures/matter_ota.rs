@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
 use crate::common::{get_cstring, is_offset_safe};
 use crate::structures::common::{self, StructureError};
@@ -31,57 +32,57 @@ struct Element {
     value: Value,
 }
 
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct OtaHeaderBytes {
+    magic: zerocopy::U32<LE>,
+    total_size: zerocopy::U64<LE>,
+    header_size: zerocopy::U32<LE>,
+}
+
 /// Parse a Matter OTA firmware header
 pub fn parse_matter_ota_header(ota_data: &[u8]) -> Result<MatterOTAHeader, StructureError> {
-    let ota_structure = vec![
-        ("magic", "u32"),
-        ("total_size", "u64"),
-        ("header_size", "u32"),
-    ];
+    let (ota_header, _) = OtaHeaderBytes::ref_from_prefix(ota_data).map_err(|_| StructureError)?;
+    let total_size = ota_header.total_size.get() as usize;
+    let header_size = ota_header.header_size.get() as usize;
 
-    if let Ok(ota_header) = common::parse(ota_data, &ota_structure, "little") {
-        let total_size: usize = ota_header["total_size"];
-        let header_size: usize = ota_header["header_size"];
+    // Header starts after the magic, total size and header size fields
+    let header_start = std::mem::size_of::<OtaHeaderBytes>();
+    let header_end = header_start + header_size;
+    let header_data = ota_data
+        .get(header_start..header_end)
+        .ok_or(StructureError)?;
 
-        // Header starts after the magic, total size and header size fields
-        let header_start = common::size(&ota_structure);
-        let header_end = header_start + header_size;
-        let header_data = ota_data
-            .get(header_start..header_end)
-            .ok_or(StructureError)?;
+    let header = parse_tlv_header(header_data)?;
 
-        let header = parse_tlv_header(header_data)?;
+    let mut result = MatterOTAHeader {
+        total_size,
+        header_size,
+        ..Default::default()
+    };
 
-        let mut result = MatterOTAHeader {
-            total_size,
-            header_size,
-            ..Default::default()
-        };
-
-        for (key, value) in header.into_iter() {
-            match (key.as_ref(), value) {
-                ("VendorID", Value::Unsigned(vendor_id)) => result.vendor_id = vendor_id,
-                ("ProductID", Value::Unsigned(product_id)) => result.product_id = product_id,
-                ("SoftwareVersionString", Value::String(version)) => result.version = version,
-                ("PayloadSize", Value::Unsigned(payload_size)) => {
-                    result.payload_size = payload_size
-                }
-                ("ImageDigestType", Value::Unsigned(image_digest_type)) => {
-                    result.image_digest_type = image_digest_type
-                }
-                ("ImageDigest", Value::OctetString(image_digest)) => {
-                    result.image_digest = image_digest.iter().map(|b| format!("{b:02x}")).collect();
-                }
-                // Ignore other fields
-                _ => {}
+    for (key, value) in header.into_iter() {
+        match (key.as_ref(), value) {
+            ("VendorID", Value::Unsigned(vendor_id)) => result.vendor_id = vendor_id,
+            ("ProductID", Value::Unsigned(product_id)) => result.product_id = product_id,
+            ("SoftwareVersionString", Value::String(version)) => result.version = version,
+            ("PayloadSize", Value::Unsigned(payload_size)) => result.payload_size = payload_size,
+            ("ImageDigestType", Value::Unsigned(image_digest_type)) => {
+                result.image_digest_type = image_digest_type
             }
-        }
-
-        // Sanity check
-        if (result.payload_size + header_start + header_size) == total_size {
-            return Ok(result);
+            ("ImageDigest", Value::OctetString(image_digest)) => {
+                result.image_digest = image_digest.iter().map(|b| format!("{b:02x}")).collect();
+            }
+            // Ignore other fields
+            _ => {}
         }
     }
+
+    // Sanity check
+    if (result.payload_size + header_start + header_size) == total_size {
+        return Ok(result);
+    }
+
     Err(StructureError)
 }
 

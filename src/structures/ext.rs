@@ -1,5 +1,6 @@
-use crate::structures::common::{self, StructureError};
+use crate::structures::common::StructureError;
 use std::collections::HashMap;
+use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
 /// Expected size of an EXT superblock
 pub const SUPERBLOCK_SIZE: usize = 1024;
@@ -19,44 +20,46 @@ pub struct EXTHeader {
     pub reserved_blocks_count: usize,
 }
 
+// Partial superblock structure, just enough for validation and size calculation
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct EXTSuprtBlockBytes {
+    inodes_count: zerocopy::U32<LE>,
+    blocks_count: zerocopy::U32<LE>,
+    reserved_blocks_count: zerocopy::U32<LE>,
+    free_blocks_count: zerocopy::U32<LE>,
+    free_inodes_count: zerocopy::U32<LE>,
+    first_data_block: zerocopy::U32<LE>,
+    log_block_size: zerocopy::U32<LE>,
+    log_frag_size: zerocopy::U32<LE>,
+    blocks_per_group: zerocopy::U32<LE>,
+    frags_per_group: zerocopy::U32<LE>,
+    inodes_per_group: zerocopy::U32<LE>,
+    modification_time: zerocopy::U32<LE>,
+    write_time: zerocopy::U32<LE>,
+    mount_count: zerocopy::U16<LE>,
+    max_mount_count: zerocopy::U16<LE>,
+    magic: zerocopy::U16<LE>,
+    state: zerocopy::U16<LE>,
+    errors: zerocopy::U16<LE>,
+    s_minor_rev_level: zerocopy::U16<LE>,
+    last_check: zerocopy::U32<LE>,
+    check_interval: zerocopy::U32<LE>,
+    creator_os: zerocopy::U32<LE>,
+    s_rev_level: zerocopy::U32<LE>,
+    resuid: zerocopy::U16<LE>,
+    resgid: zerocopy::U16<LE>,
+}
+
 /// Partially parses an EXT superblock structure
 pub fn parse_ext_header(ext_data: &[u8]) -> Result<EXTHeader, StructureError> {
     // Max value of the EXT log block size
-    const MAX_BLOCK_LOG: usize = 2;
+    const MAX_BLOCK_LOG: u32 = 2;
 
-    // Parital superblock structure, just enough for validation and size calculation
-    let ext_superblock_structure = vec![
-        ("inodes_count", "u32"),
-        ("blocks_count", "u32"),
-        ("reserved_blocks_count", "u32"),
-        ("free_blocks_count", "u32"),
-        ("free_inodes_count", "u32"),
-        ("first_data_block", "u32"),
-        ("log_block_size", "u32"),
-        ("log_frag_size", "u32"),
-        ("blocks_per_group", "u32"),
-        ("frags_per_group", "u32"),
-        ("inodes_per_group", "u32"),
-        ("modification_time", "u32"),
-        ("write_time", "u32"),
-        ("mount_count", "u16"),
-        ("max_mount_count", "u16"),
-        ("magic", "u16"),
-        ("state", "u16"),
-        ("errors", "u16"),
-        ("s_minor_rev_level", "u16"),
-        ("last_check", "u32"),
-        ("check_interval", "u32"),
-        ("creator_os", "u32"),
-        ("s_rev_level", "u32"),
-        ("resuid", "u16"),
-        ("resgid", "u16"),
-    ];
+    let allowed_rev_levels = [0, 1];
+    let allowed_first_data_blocks = [0, 1];
 
-    let allowed_rev_levels: Vec<usize> = vec![0, 1];
-    let allowed_first_data_blocks: Vec<usize> = vec![0, 1];
-
-    let supported_os: HashMap<usize, &str> = HashMap::from([
+    let supported_os = HashMap::from([
         (0, "Linux"),
         (1, "GNU HURD"),
         (2, "MASIX"),
@@ -71,32 +74,31 @@ pub fn parse_ext_header(ext_data: &[u8]) -> Result<EXTHeader, StructureError> {
     // Sanity check the available data
     if ext_data.len() >= (SUPERBLOCK_OFFSET + SUPERBLOCK_SIZE) {
         // Parse the EXT superblock structure
-        if let Ok(ext_superblock) = common::parse(
-            &ext_data[SUPERBLOCK_OFFSET..],
-            &ext_superblock_structure,
-            "little",
-        ) {
-            // Sanity check the reported OS this EXT image was created on
-            if supported_os.contains_key(&ext_superblock["creator_os"]) {
-                // Sanity check the s_rev_level field
-                if allowed_rev_levels.contains(&ext_superblock["s_rev_level"]) {
-                    // Sanity check the first_data_block field, which must be either 0 or 1
-                    if allowed_first_data_blocks.contains(&ext_superblock["first_data_block"]) {
-                        // Santiy check the log_block_size
-                        if ext_superblock["log_block_size"] <= MAX_BLOCK_LOG {
-                            // Update the reported image info
-                            ext_header.blocks_count = ext_superblock["blocks_count"];
-                            ext_header.inodes_count = ext_superblock["inodes_count"];
-                            ext_header.block_size = 1024 << ext_superblock["log_block_size"];
-                            ext_header.free_blocks_count = ext_superblock["free_blocks_count"];
-                            ext_header.os = supported_os[&ext_superblock["creator_os"]].to_string();
-                            ext_header.reserved_blocks_count =
-                                ext_superblock["reserved_blocks_count"];
-                            ext_header.image_size =
-                                ext_header.block_size * ext_superblock["blocks_count"];
+        let (ext_superblock, _) =
+            EXTSuprtBlockBytes::ref_from_prefix(&ext_data[SUPERBLOCK_OFFSET..])
+                .map_err(|_| StructureError)?;
 
-                            return Ok(ext_header);
-                        }
+        // Sanity check the reported OS this EXT image was created on
+        if let Some(creator_os) = supported_os.get(&ext_superblock.creator_os.get()) {
+            // Sanity check the s_rev_level field
+            if allowed_rev_levels.contains(&ext_superblock.s_rev_level.get()) {
+                // Sanity check the first_data_block field, which must be either 0 or 1
+                if allowed_first_data_blocks.contains(&ext_superblock.first_data_block.get()) {
+                    // Santiy check the log_block_size
+                    if ext_superblock.log_block_size.get() <= MAX_BLOCK_LOG {
+                        // Update the reported image info
+                        ext_header.blocks_count = ext_superblock.blocks_count.get() as usize;
+                        ext_header.inodes_count = ext_superblock.inodes_count.get() as usize;
+                        ext_header.block_size = 1024 << ext_superblock.log_block_size.get();
+                        ext_header.free_blocks_count =
+                            ext_superblock.free_blocks_count.get() as usize;
+                        ext_header.os = creator_os.to_string();
+                        ext_header.reserved_blocks_count =
+                            ext_superblock.reserved_blocks_count.get() as usize;
+                        ext_header.image_size =
+                            ext_header.block_size * (ext_superblock.blocks_count.get() as usize);
+
+                        return Ok(ext_header);
                     }
                 }
             }
