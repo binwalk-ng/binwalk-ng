@@ -44,7 +44,7 @@ pub fn parse_lzop_file_header(lzop_data: &[u8]) -> Result<LZOPFileHeader, Struct
         ("file_name_length", "u8"),
     ];
 
-    let allowed_methods: Vec<usize> = vec![1, 2, 3];
+    let allowed_methods = [1, 2, 3];
 
     let mut lzop_info = LZOPFileHeader {
         ..Default::default()
