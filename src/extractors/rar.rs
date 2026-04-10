@@ -18,12 +18,7 @@ pub fn extract_rar(
     };
 
     if let Ok(archive) = rar_stream::MemoryArchive::new(&file_data[offset..]) {
-        result.size = Some(
-            archive
-                .entries_iter()
-                .map(|x| x.unpacked_size as usize)
-                .sum(),
-        );
+        result.size = Some(file_data.len() - offset);
         result.success = true;
 
         if let Some(output_directory) = output_directory {
