@@ -276,9 +276,7 @@ pub fn parse_elf_header(elf_data: &[u8]) -> Result<ELFHeader, StructureError> {
         (259, "ChipON KungFu32"),
     ]);
 
-    let mut elf_hdr_info = ELFHeader {
-        ..Default::default()
-    };
+    let mut elf_hdr_info = ELFHeader::default();
 
     // Endianness doesn't matter here, and we don't know what the ELF's endianness is yet
 

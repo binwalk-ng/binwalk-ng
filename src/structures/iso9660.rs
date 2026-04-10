@@ -30,9 +30,7 @@ pub fn parse_iso_header(iso_data: &[u8]) -> Result<ISOHeader, StructureError> {
     // Offset from the beginning of the ISO image to the start of iso_structure
     const ISO_STRUCT_START: usize = 32840;
 
-    let mut iso_info = ISOHeader {
-        ..Default::default()
-    };
+    let mut iso_info = ISOHeader::default();
 
     if let Some(iso_header_data) = iso_data.get(ISO_STRUCT_START..) {
         // Parse the ISO header

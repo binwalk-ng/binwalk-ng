@@ -27,9 +27,7 @@ pub fn parse_lzma_header(lzma_data: &[u8]) -> Result<LZMAHeader, StructureError>
     const MIN_SUPPORTED_DECOMPRESSED_SIZE: u64 = 256;
     const MAX_SUPPORTED_DECOMPRESSED_SIZE: u64 = 0xFFFFFFFF;
 
-    let mut lzma_hdr_info = LZMAHeader {
-        ..Default::default()
-    };
+    let mut lzma_hdr_info = LZMAHeader::default();
 
     // Parse the lzma header
     let (lzma_header, _) =

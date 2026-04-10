@@ -138,9 +138,7 @@ impl Binwalk {
         signatures: Option<Vec<signatures::common::Signature>>,
         full_search: bool,
     ) -> Result<Binwalk, BinwalkError> {
-        let mut new_instance = Binwalk {
-            ..Default::default()
-        };
+        let mut new_instance = Binwalk::default();
 
         // Target file is optional, especially if being called via the library
         if let Some(target_file) = target_file_name {

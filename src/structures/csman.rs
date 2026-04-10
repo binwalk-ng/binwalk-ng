@@ -22,9 +22,7 @@ pub fn parse_csman_header(csman_data: &[u8]) -> Result<CSManHeader, StructureErr
         ("decompressed_size", "u32"),
     ];
 
-    let mut result = CSManHeader {
-        ..Default::default()
-    };
+    let mut result = CSManHeader::default();
 
     // Parse the header
     if let Ok(mut csman_header) = common::parse(csman_data, &csman_header_structure, "big") {
@@ -90,9 +88,7 @@ pub fn parse_csman_entry(
         // value of size bytes immediately follows
     ];
 
-    let mut entry = CSManEntry {
-        ..Default::default()
-    };
+    let mut entry = CSManEntry::default();
 
     if let Ok(entry_header) = common::parse(entry_data, &csman_entry_structure, endianness) {
         let value_start: usize = common::size(&csman_entry_structure);

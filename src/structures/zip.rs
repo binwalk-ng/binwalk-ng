@@ -59,9 +59,7 @@ pub fn parse_zip_header(zip_data: &[u8]) -> Result<ZipFileHeader, StructureError
         COMPRESSION_ENCRYPTED,
     ];
 
-    let mut result = ZipFileHeader {
-        ..Default::default()
-    };
+    let mut result = ZipFileHeader::default();
 
     // Parse the ZIP local file structure
     let (zip_local_file_header, _) =

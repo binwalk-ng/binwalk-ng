@@ -112,9 +112,7 @@ pub fn parse_jboot_stag_header(jboot_data: &[u8]) -> Result<JBOOTStagHeader, Str
         ("header_checksum", "u16"),
     ];
 
-    let mut result = JBOOTStagHeader {
-        ..Default::default()
-    };
+    let mut result = JBOOTStagHeader::default();
 
     // Parse the header structure
     if let Ok(stag_header) = common::parse(jboot_data, &stag_structure, "little") {

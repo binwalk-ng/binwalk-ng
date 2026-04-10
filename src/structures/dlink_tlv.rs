@@ -29,9 +29,7 @@ pub fn parse_dlink_tlv_header(tlv_data: &[u8]) -> Result<DlinkTLVHeader, Structu
         // value immediately follows
     ];
 
-    let mut header = DlinkTLVHeader {
-        ..Default::default()
-    };
+    let mut header = DlinkTLVHeader::default();
 
     // Get the header data
     if let Some(header_data) = tlv_data.get(0..HEADER_SIZE) {

@@ -22,9 +22,7 @@ pub fn parse_rtk_header(rtk_data: &[u8]) -> Result<RTKHeader, StructureError> {
         ("identifier", "u32"),
     ];
 
-    let mut result = RTKHeader {
-        ..Default::default()
-    };
+    let mut result = RTKHeader::default();
 
     // Parse the header
     if let Ok(rtk_header) = common::parse(rtk_data, &rtk_structure, "little") {

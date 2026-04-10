@@ -41,9 +41,7 @@ pub fn extract_android_sparse(
 ) -> ExtractionResult {
     const OUTFILE_NAME: &str = "unsparsed.img";
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     // Parse the sparse file header
     if let Ok(sparse_header) = androidsparse::parse_android_sparse_header(&file_data[offset..]) {

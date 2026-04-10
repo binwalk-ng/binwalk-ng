@@ -29,9 +29,7 @@ pub fn parse_lz4_file_header(lz4_data: &[u8]) -> Result<LZ4FileHeader, Structure
     // Basic LZ4 header; optional fields and header CRC byte follow
     let lz4_structure = vec![("magic", "u32"), ("flags", "u8"), ("bd", "u8")];
 
-    let mut lz4_hdr_info = LZ4FileHeader {
-        ..Default::default()
-    };
+    let mut lz4_hdr_info = LZ4FileHeader::default();
 
     // Parse the header
     if let Ok(lz4_header) = common::parse(lz4_data, &lz4_structure, "little") {
@@ -107,9 +105,7 @@ pub fn parse_lz4_block_header(
     // Block headers are just a u32 size field
     let block_structure = vec![("block_size", "u32")];
 
-    let mut lz4_block = LZ4BlockHeader {
-        ..Default::default()
-    };
+    let mut lz4_block = LZ4BlockHeader::default();
 
     // Parse the block header
     if let Ok(block_header) = common::parse(lz4_block_data, &block_structure, "little") {

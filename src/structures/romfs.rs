@@ -108,9 +108,7 @@ pub fn parse_romfs_file_entry(romfs_data: &[u8]) -> Result<RomFSFileHeader, Stru
             // A file should have a name
             if !file_name.is_empty() {
                 // Instantiate a new RomFSEntry structure
-                let mut file_header = RomFSFileHeader {
-                    ..Default::default()
-                };
+                let mut file_header = RomFSFileHeader::default();
 
                 // Populate basic info
                 file_header.size = file_entry_header["size"];

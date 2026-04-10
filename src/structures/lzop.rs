@@ -46,9 +46,7 @@ pub fn parse_lzop_file_header(lzop_data: &[u8]) -> Result<LZOPFileHeader, Struct
 
     let allowed_methods = [1, 2, 3];
 
-    let mut lzop_info = LZOPFileHeader {
-        ..Default::default()
-    };
+    let mut lzop_info = LZOPFileHeader::default();
 
     // Parse the first part of the header
     if let Ok(lzo_header_p1) = common::parse(lzop_data, &lzo_structure_p1, "big") {
@@ -100,7 +98,6 @@ pub fn parse_lzop_file_header(lzop_data: &[u8]) -> Result<LZOPFileHeader, Struct
 pub struct LZOPBlockHeader {
     pub header_size: usize,
     pub compressed_size: usize,
-    pub uncompressed_size: usize,
     pub checksum_size: usize,
 }
 
@@ -128,12 +125,10 @@ pub fn parse_lzop_block_header(
             && block_header["uncompressed_size"] <= MAX_UNCOMPRESSED_BLOCK_SIZE
         {
             let mut block_hdr_info = LZOPBlockHeader {
+                header_size: BLOCK_HEADER_SIZE,
+                compressed_size: block_header["compressed_size"],
                 ..Default::default()
             };
-
-            block_hdr_info.header_size = BLOCK_HEADER_SIZE;
-            block_hdr_info.compressed_size = block_header["compressed_size"];
-            block_hdr_info.uncompressed_size = block_header["uncompressed_size"];
 
             // Checksum field is optional
             if compressed_checksum_present {

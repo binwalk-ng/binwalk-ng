@@ -20,9 +20,7 @@ pub fn parse_pcapng_block(
 
     let block_footer_structure = vec![("block_size", "u32")];
 
-    let mut result = PcapBlock {
-        ..Default::default()
-    };
+    let mut result = PcapBlock::default();
 
     let footer_size = common::size(&block_footer_structure);
 
@@ -75,9 +73,7 @@ pub fn parse_pcapng_section_block(block_data: &[u8]) -> Result<PcapSectionBlock,
     let endian_magics: HashMap<usize, &str> =
         HashMap::from([(0x1A2B3C4D, "little"), (0x4D3C2B1A, "big")]);
 
-    let mut result = PcapSectionBlock {
-        ..Default::default()
-    };
+    let mut result = PcapSectionBlock::default();
 
     // Parse the section header structure; endianness doesn't matter (yet)
     if let Ok(section_header) = common::parse(block_data, &section_header_structure, "little") {

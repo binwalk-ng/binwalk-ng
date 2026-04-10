@@ -35,9 +35,7 @@ struct EFIGPTHeaderBytes {
 pub fn parse_efigpt_header(efi_data: &[u8]) -> Result<EFIGPTHeader, StructureError> {
     const EXPECTED_REVISION: u32 = 0x00010000;
 
-    let mut result = EFIGPTHeader {
-        ..Default::default()
-    };
+    let mut result = EFIGPTHeader::default();
 
     // EFI GPT structure starts at the second block (first block is MBR)
     if let Some(gpt_data) = efi_data.get(BLOCK_SIZE..) {

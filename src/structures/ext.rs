@@ -67,9 +67,7 @@ pub fn parse_ext_header(ext_data: &[u8]) -> Result<EXTHeader, StructureError> {
         (4, "Lites"),
     ]);
 
-    let mut ext_header = EXTHeader {
-        ..Default::default()
-    };
+    let mut ext_header = EXTHeader::default();
 
     // Sanity check the available data
     if ext_data.len() >= (SUPERBLOCK_OFFSET + SUPERBLOCK_SIZE) {

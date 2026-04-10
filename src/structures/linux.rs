@@ -72,9 +72,7 @@ pub fn parse_linux_arm64_boot_image_header(
     const FLAGS_ENDIAN_MASK: u64 = 1;
     const BIG_ENDIAN: u64 = 1;
 
-    let mut result = LinuxARM64BootHeader {
-        ..Default::default()
-    };
+    let mut result = LinuxARM64BootHeader::default();
 
     let (boot_image_header, _) =
         BootImageHeader::ref_from_prefix(img_data).map_err(|_| StructureError)?;
