@@ -2,7 +2,6 @@ use std::path::Path;
 
 use crate::common::is_offset_safe;
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
-use crate::structures::common::StructureError;
 use crate::structures::gif::{parse_gif_extension, parse_gif_header, parse_gif_image_descriptor};
 
 /// Defines the internal extractor function for carving out GIF images
