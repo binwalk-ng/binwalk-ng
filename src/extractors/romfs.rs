@@ -13,7 +13,7 @@ struct RomFSEntry {
     size: usize,
     name: String,
     offset: usize,
-    file_type: usize,
+    file_type: u32,
     executable: bool,
     directory: bool,
     regular: bool,
