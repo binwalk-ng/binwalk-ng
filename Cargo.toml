@@ -44,8 +44,8 @@ plotly = { version = "0.14", features = [
 ], optional = true }
 jiff = "0.2.20"
 zerocopy = { version = "0.8.28", features = ["derive"] }
-rar-stream = "5.5.0"
 u24 = "0.6.0"
+rar-stream = "5.7.1"
 [dependencies.uuid]
 version = "1.17.0"
 features = [
