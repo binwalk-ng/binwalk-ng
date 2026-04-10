@@ -83,21 +83,15 @@ fn get_gif_data_size(gif_data: &[u8]) -> Option<usize> {
 
     // Loop through all GIF data blocks
     while is_offset_safe(available_data, next_offset, previous_offset) {
-        let block_size: Result<usize, StructureError>;
-
-        match gif_data.get(next_offset) {
-            Some(&IMAGE_DESCRIPTOR) => {
-                block_size = parse_gif_image_descriptor(&gif_data[next_offset..]);
-            }
-            Some(&EXTENSION) => {
-                block_size = parse_gif_extension(&gif_data[next_offset..]);
-            }
+        let block_size = match gif_data.get(next_offset) {
+            Some(&IMAGE_DESCRIPTOR) => parse_gif_image_descriptor(&gif_data[next_offset..]),
+            Some(&EXTENSION) => parse_gif_extension(&gif_data[next_offset..]),
             Some(&TERMINATOR) => {
                 return Some(next_offset + 1);
             }
             // This covers both None and any byte that doesn't match our constants
             _ => break,
-        }
+        };
 
         // Check if the block was parsed successfully
         match block_size {
