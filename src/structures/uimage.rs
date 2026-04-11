@@ -1,6 +1,7 @@
 use crate::common::{crc32, get_cstring};
-use crate::structures::common::{self, StructureError};
+use crate::structures::common::StructureError;
 use std::collections::HashMap;
+use zerocopy::{BE, FromBytes, Immutable, KnownLayout, Unaligned};
 
 /// Stores info about a uImage header
 #[derive(Debug, Default, Clone)]
@@ -8,7 +9,7 @@ pub struct UImageHeader {
     pub header_size: usize,
     pub name: String,
     pub data_size: usize,
-    pub data_checksum: usize,
+    pub data_checksum: u32,
     pub load_address: usize,
     pub entry_point_address: usize,
     pub timestamp: usize,
@@ -19,24 +20,26 @@ pub struct UImageHeader {
     pub header_crc_valid: bool,
 }
 
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct UImageHeaderBytes {
+    magic: zerocopy::U32<BE>,
+    header_crc: zerocopy::U32<BE>,
+    creation_timestamp: zerocopy::U32<BE>,
+    data_size: zerocopy::U32<BE>,
+    load_address: zerocopy::U32<BE>,
+    entry_point_address: zerocopy::U32<BE>,
+    data_crc: zerocopy::U32<BE>,
+    os_type: u8,
+    cpu_type: u8,
+    image_type: u8,
+    compression_type: u8,
+}
+
 /// Pase a uImage header
 pub fn parse_uimage_header(uimage_data: &[u8]) -> Result<UImageHeader, StructureError> {
     const UIMAGE_HEADER_SIZE: usize = 64;
     const UIMAGE_NAME_OFFSET: usize = 32;
-
-    let uimage_structure = vec![
-        ("magic", "u32"),
-        ("header_crc", "u32"),
-        ("creation_timestamp", "u32"),
-        ("data_size", "u32"),
-        ("load_address", "u32"),
-        ("entry_point_address", "u32"),
-        ("data_crc", "u32"),
-        ("os_type", "u8"),
-        ("cpu_type", "u8"),
-        ("image_type", "u8"),
-        ("compression_type", "u8"),
-    ];
 
     let valid_os_types = HashMap::from([
         (1, "OpenBSD"),
@@ -157,21 +160,21 @@ pub fn parse_uimage_header(uimage_data: &[u8]) -> Result<UImageHeader, Structure
     ]);
 
     // Parse the first half of the header
-    let uimage_header =
-        common::parse(uimage_data, &uimage_structure, "big").map_err(|_| StructureError)?;
+    let (uimage_header, _) =
+        UImageHeaderBytes::ref_from_prefix(uimage_data).map_err(|_| StructureError)?;
 
     // Sanity check header fields (None becomes Err(StructureError) and returns)
     let os_type = valid_os_types
-        .get(&uimage_header["os_type"])
+        .get(&uimage_header.os_type)
         .ok_or(StructureError)?;
     let cpu_type = valid_cpu_types
-        .get(&uimage_header["cpu_type"])
+        .get(&uimage_header.cpu_type)
         .ok_or(StructureError)?;
     let image_type = valid_image_types
-        .get(&uimage_header["image_type"])
+        .get(&uimage_header.image_type)
         .ok_or(StructureError)?;
     let compression_type = valid_compression_types
-        .get(&uimage_header["compression_type"])
+        .get(&uimage_header.compression_type)
         .ok_or(StructureError)?;
 
     // Get the header bytes to validate the CRC
@@ -182,32 +185,27 @@ pub fn parse_uimage_header(uimage_data: &[u8]) -> Result<UImageHeader, Structure
     Ok(UImageHeader {
         header_size: UIMAGE_HEADER_SIZE,
         name: get_cstring(&uimage_data[UIMAGE_NAME_OFFSET..]),
-        data_size: uimage_header["data_size"],
-        data_checksum: uimage_header["data_crc"],
-        timestamp: uimage_header["creation_timestamp"],
-        load_address: uimage_header["load_address"],
-        entry_point_address: uimage_header["entry_point_address"],
+        data_size: uimage_header.data_size.get() as usize,
+        data_checksum: uimage_header.data_crc.get(),
+        timestamp: uimage_header.creation_timestamp.get() as usize,
+        load_address: uimage_header.load_address.get() as usize,
+        entry_point_address: uimage_header.entry_point_address.get() as usize,
         compression_type: compression_type.to_string(),
         cpu_type: cpu_type.to_string(),
         os_type: os_type.to_string(),
         image_type: image_type.to_string(),
-        header_crc_valid: calculate_uimage_header_checksum(crc_data) == uimage_header["header_crc"],
+        header_crc_valid: uimage_header.header_crc == calculate_uimage_header_checksum(crc_data),
     })
 }
 
 /// uImage checksum calculator
-fn calculate_uimage_header_checksum(hdr: &[u8]) -> usize {
+fn calculate_uimage_header_checksum(hdr: &[u8]) -> u32 {
     const HEADER_CRC_START: usize = 4;
     const HEADER_CRC_END: usize = 8;
 
     // Header checksum has to be nulled out to calculate the CRC
-    let mut uimage_header: Vec<u8> = hdr.to_vec();
+    let mut uimage_header = hdr.to_vec();
+    uimage_header[HEADER_CRC_START..HEADER_CRC_END].fill(0);
 
-    uimage_header
-        .iter_mut()
-        .take(HEADER_CRC_END)
-        .skip(HEADER_CRC_START)
-        .for_each(|crc_byte| *crc_byte = 0);
-
-    crc32(&uimage_header) as usize
+    crc32(&uimage_header)
 }
