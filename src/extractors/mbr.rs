@@ -39,9 +39,7 @@ pub fn extract_mbr_partitions(
     output_directory: Option<&Path>,
 ) -> ExtractionResult {
     // Return value
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     let available_data = file_data.len() - offset;
 

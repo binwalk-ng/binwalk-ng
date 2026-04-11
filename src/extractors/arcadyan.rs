@@ -42,9 +42,6 @@ pub fn extract_obfuscated_lzma(
     const MIN_DATA_SIZE: usize = 0x100;
     const MAX_DATA_SIZE: usize = 0x1B0000;
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
     let available_data: usize = file_data.len() - offset;
 
     // Sanity check data size
@@ -53,10 +50,10 @@ pub fn extract_obfuscated_lzma(
         let deobfuscated_data = arcadyan_deobfuscator(&file_data[offset..]);
 
         // Do a decompression on the LZMA data (actual LZMA data starts 4 bytes into the deobfuscated data)
-        result = lzma_decompress(&deobfuscated_data, LZMA_DATA_OFFSET, output_directory);
+        return lzma_decompress(&deobfuscated_data, LZMA_DATA_OFFSET, output_directory);
     }
 
-    result
+    ExtractionResult::default()
 }
 
 fn arcadyan_deobfuscator(obfuscated_data: &[u8]) -> Vec<u8> {

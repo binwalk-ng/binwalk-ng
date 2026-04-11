@@ -44,9 +44,7 @@ pub fn bzip2_decompressor(
     // Output file for decompressed data
     const OUTPUT_FILE_NAME: &str = "decompressed.bin";
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     let mut bytes_written: usize = 0;
     let mut stream_offset: usize = 0;

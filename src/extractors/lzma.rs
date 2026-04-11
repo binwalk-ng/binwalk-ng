@@ -45,9 +45,7 @@ pub fn lzma_decompress(
     // Maximum memory limit: 4GB
     const MEM_LIMIT: u64 = 4 * 1024 * 1024 * 1024;
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     // Output buffer
     let mut output_buf = [0; BLOCK_SIZE];

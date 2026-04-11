@@ -43,9 +43,7 @@ pub fn extract_riff_image(
     const WAV_OUTFILE_NAME: &str = "video.wav";
     const WAV_TYPE: &str = "WAVE";
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     if let Ok(riff_header) = parse_riff_header(&file_data[offset..]) {
         result.size = Some(riff_header.size);

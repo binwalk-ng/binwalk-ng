@@ -47,9 +47,7 @@ pub fn pcapng_carver(
     const MIN_BLOCK_COUNT: usize = 2;
 
     // Return value
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     // All pcap-ng files start with a section header; parse it
     if let Ok(section_header) = parse_pcapng_section_block(&file_data[offset..]) {

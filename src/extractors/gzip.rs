@@ -39,9 +39,7 @@ pub fn gzip_decompress(
     offset: usize,
     output_directory: Option<&Path>,
 ) -> ExtractionResult {
-    let mut exresult = ExtractionResult {
-        ..Default::default()
-    };
+    let mut exresult = ExtractionResult::default();
 
     // Parse the gzip header
     if let Ok(gzip_header) = parse_gzip_header(&file_data[offset..]) {

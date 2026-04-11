@@ -50,9 +50,7 @@ fn extract_swapped(
 ) -> ExtractionResult {
     const OUTPUT_FILE_NAME: &str = "swapped.bin";
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     if let Some(data) = file_data.get(offset..) {
         let swapped_data = byte_swap(data, n);

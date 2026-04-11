@@ -43,9 +43,7 @@ pub fn extract_csman_dat(
     const COMPRESSED_HEADER_SIZE: usize = 2;
 
     // Return value
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     let mut csman_entries: Vec<CSManEntry> = Vec::new();
 

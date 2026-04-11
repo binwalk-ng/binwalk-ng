@@ -92,9 +92,7 @@ pub fn pem_carver(
     output_directory: Option<&Path>,
     fname: Option<&str>,
 ) -> ExtractionResult {
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     if let Some(pem_size) = get_pem_size(file_data, offset) {
         result.size = Some(pem_size);

@@ -42,9 +42,7 @@ pub fn extract_uimage(
     const DEFAULT_OUTPUT_FILE_NAME: &str = "uimage_data";
     const OUTPUT_FILE_EXT: &str = "bin";
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     // Get the uImage data and parse the header
     if let Some(uimage_header_data) = file_data.get(offset..)

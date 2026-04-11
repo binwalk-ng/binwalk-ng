@@ -42,9 +42,7 @@ pub fn extract_dtb(
 ) -> ExtractionResult {
     let mut hierarchy: Vec<String> = Vec::new();
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     // Parse the DTB file header
     if let Ok(dtb_header) = parse_dtb_header(&file_data[offset..]) {

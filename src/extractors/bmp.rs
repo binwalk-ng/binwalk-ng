@@ -40,10 +40,7 @@ pub fn extract_bmp_image(
 ) -> ExtractionResult {
     const OUTFILE_NAME: &str = "image.bmp";
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
-    result.success = false;
+    let mut result = ExtractionResult::default();
 
     // Parse the bmp_file_header
     if let Ok(bmp_file_header) = parse_bmp_file_header(&file_data[offset..]) {

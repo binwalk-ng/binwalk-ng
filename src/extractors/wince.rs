@@ -39,9 +39,7 @@ pub fn wince_dump(
     offset: usize,
     output_directory: Option<&Path>,
 ) -> ExtractionResult {
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     // Parse the file header
     if let Some(wince_data) = file_data.get(offset..)
@@ -104,9 +102,7 @@ fn process_wince_blocks(blocks_data: &[u8]) -> Option<BlockData> {
     // Arbitrarily chosen, just to make sure more than one or two blocks were processed and sane
     const MIN_ENTRIES_COUNT: usize = 5;
 
-    let mut blocks = BlockData {
-        ..Default::default()
-    };
+    let mut blocks = BlockData::default();
 
     let mut next_offset: usize = 0;
     let mut previous_offset = None;

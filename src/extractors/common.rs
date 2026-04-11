@@ -104,9 +104,7 @@ impl Chroot {
     /// assert_eq!(std::path::Path::new(&chroot_dir).exists(), true);
     /// ```
     pub fn new(chroot_directory: impl AsRef<Path>) -> Chroot {
-        let mut chroot_instance = Chroot {
-            ..Default::default()
-        };
+        let mut chroot_instance = Chroot::default();
 
         let chroot_directory = chroot_directory.as_ref();
 
@@ -868,9 +866,7 @@ pub fn execute(
     signature: &SignatureResult,
     extractor: &Option<Extractor>,
 ) -> ExtractionResult {
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     // Create an output directory for the extraction
     if let Ok(output_directory) = create_output_directory(&file_path, signature.offset) {

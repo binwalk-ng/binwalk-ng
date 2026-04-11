@@ -40,9 +40,7 @@ pub fn extract_dxbc_file(
 ) -> ExtractionResult {
     const OUTFILE_NAME: &str = "shader.dxbc";
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     if let Ok(header) = parse_dxbc_header(&file_data[offset..]) {
         // Report success

@@ -39,16 +39,10 @@ pub fn cramfs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult,
                  * Create a copy of the cramfs image; we have to NULL out the checksum field to calculate the CRC.
                  * This typically shouldn't be too bad on performance, CramFS images are usually relatively small.
                  */
-                let mut cramfs_image: Vec<u8> = cramfs_image_data.to_vec();
+                let mut cramfs_image = cramfs_image_data.to_vec();
 
                 // Null out the checksum field
-                for crc_byte in cramfs_image
-                    .iter_mut()
-                    .take(CRC_END_OFFSET)
-                    .skip(CRC_START_OFFSET)
-                {
-                    *crc_byte = 0;
-                }
+                cramfs_image[CRC_START_OFFSET..CRC_END_OFFSET].fill(0);
 
                 // For displaying an error message in the description
                 let mut error_message: &str = "";

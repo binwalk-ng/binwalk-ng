@@ -41,9 +41,7 @@ pub fn extract_dahua_zip(
     const OUTFILE_NAME: &str = "dahua.zip";
     const ZIP_HEADER: &[u8] = b"PK";
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     // Locate the end of the zip archive
     if let Ok(zip_info) = find_zip_eof(file_data, offset) {

@@ -42,9 +42,7 @@ pub fn extract_jboot_sch2_kernel(
     // Output file name
     const OUTFILE_NAME: &str = "kernel.bin";
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     // Get the SCH2 data
     if let Some(sch2_header_data) = file_data.get(offset..) {

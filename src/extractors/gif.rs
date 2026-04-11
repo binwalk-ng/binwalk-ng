@@ -42,9 +42,7 @@ pub fn extract_gif_image(
 ) -> ExtractionResult {
     const OUTFILE_NAME: &str = "image.gif";
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     // Parse the GIF header
     if let Ok(gif_header) = parse_gif_header(&file_data[offset..]) {
