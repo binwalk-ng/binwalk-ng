@@ -43,9 +43,7 @@ pub fn autel_deobfuscate(
 ) -> ExtractionResult {
     const OUTPUT_FILE_NAME: &str = "autel.decoded";
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     let data = &file_data[offset..];
     let Ok(autel_header) = parse_autel_header(data) else {

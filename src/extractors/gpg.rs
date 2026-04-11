@@ -41,9 +41,7 @@ pub fn gpg_decompress(
     // Size of the GPG header
     const HEADER_SIZE: usize = 2;
 
-    let mut exresult = ExtractionResult {
-        ..Default::default()
-    };
+    let mut exresult = ExtractionResult::default();
 
     // Do the decompression, ignoring the GPG header
     let inflate_result =

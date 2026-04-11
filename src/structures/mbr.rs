@@ -61,9 +61,7 @@ pub fn parse_mbr_image(mbr_data: &[u8]) -> Result<MBRHeader, StructureError> {
     let partition_table_end: usize =
         partition_table_start + (partition_structure_size * PARTITION_COUNT);
 
-    let mut mbr_header = MBRHeader {
-        ..Default::default()
-    };
+    let mut mbr_header = MBRHeader::default();
 
     // Get the partition table raw bytes
     if let Some(partition_table) = mbr_data.get(partition_table_start..partition_table_end) {

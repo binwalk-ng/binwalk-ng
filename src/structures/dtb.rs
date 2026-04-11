@@ -115,9 +115,7 @@ pub fn parse_dtb_node(
     const FDT_NOP: u32 = 4;
     const FDT_END: u32 = 9;
 
-    let mut node = DTBNode {
-        ..Default::default()
-    };
+    let mut node = DTBNode::default();
 
     if let Some(node_data) = dtb_data.get(node_offset..) {
         let (token, _) = NodeToken::ref_from_prefix(node_data).map_err(|_| StructureError)?;

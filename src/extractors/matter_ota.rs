@@ -40,9 +40,7 @@ pub fn extract_matter_ota(
 ) -> ExtractionResult {
     const OUTFILE_NAME: &str = "matter_payload.bin";
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     if let Ok(ota_header) = parse_matter_ota_header(&file_data[offset..]) {
         const MAGIC_SIZE: usize = 4;

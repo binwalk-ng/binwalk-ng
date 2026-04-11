@@ -41,9 +41,7 @@ pub fn parse_fat_header(fat_data: &[u8]) -> Result<FATHeader, StructureError> {
     let valid_media_types = [0xF0, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE];
 
     // Return value
-    let mut result = FATHeader {
-        ..Default::default()
-    };
+    let mut result = FATHeader::default();
 
     // Parse the boot sector header
 

@@ -28,11 +28,9 @@ pub fn parse_jffs2_node_header(node_data: &[u8]) -> Result<JFFS2Node, StructureE
     ];
 
     let mut node = JFFS2Node {
+        endianness: "little".to_string(), // Try little endian first
         ..Default::default()
     };
-
-    // Try little endian first
-    node.endianness = "little".to_string();
 
     // Parse the node header
     if let Ok(mut node_header) = common::parse(node_data, &jffs2_node_structure, &node.endianness) {

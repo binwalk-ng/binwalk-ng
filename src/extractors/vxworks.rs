@@ -47,9 +47,7 @@ pub fn extract_symbol_table(
     const MIN_VALID_ENTRIES: usize = 250;
     const OUTFILE_NAME: &str = "symtab.json";
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     let available_data = file_data.len();
     let mut previous_entry_offset = None;

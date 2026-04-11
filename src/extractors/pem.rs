@@ -92,9 +92,7 @@ pub fn pem_carver(
     output_directory: Option<&Path>,
     fname: Option<&str>,
 ) -> ExtractionResult {
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     if let Some(pem_size) = get_pem_size(file_data, offset) {
         result.size = Some(pem_size);
@@ -122,7 +120,7 @@ fn get_pem_size(file_data: &[u8], start_of_pem_offset: usize) -> Option<usize> {
         b"-----END OPENSSH PRIVATE KEY-----".to_vec(),
     ];
 
-    let newline_chars: Vec<u8> = vec![0x0D, 0x0A];
+    let newline_chars = [0x0D, 0x0A];
 
     let grep = AhoCorasick::new(eof_markers.clone()).unwrap();
 

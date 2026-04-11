@@ -37,9 +37,7 @@ struct MH01HeaderBytes {
 pub fn parse_mh01_header(mh01_data: &[u8]) -> Result<MH01Header, StructureError> {
     const HEADER_SIZE: usize = 16;
 
-    let mut result = MH01Header {
-        ..Default::default()
-    };
+    let mut result = MH01Header::default();
 
     // Parse the header
     let (header, _) = MH01HeaderBytes::ref_from_prefix(mh01_data).map_err(|_| StructureError)?;

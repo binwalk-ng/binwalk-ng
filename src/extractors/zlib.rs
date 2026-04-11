@@ -44,9 +44,7 @@ pub fn zlib_decompress(
     // Size of the zlib header
     const HEADER_SIZE: usize = 2;
 
-    let mut exresult = ExtractionResult {
-        ..Default::default()
-    };
+    let mut exresult = ExtractionResult::default();
 
     // Do the decompression, ignoring the ZLIB header
     let inflate_result =

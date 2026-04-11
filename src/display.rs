@@ -229,14 +229,13 @@ pub fn print_signature_list(quiet: bool, signatures: &Vec<signatures::common::Si
     // Loop through all signatures
     for signature in signatures {
         // Convenience struct for storing some basic info about each signature
+        // Keep track of signature name, description, and if the signature is a "short" signature
         let mut signature_info = SignatureInfo {
+            name: signature.name.clone(),
+            is_short: signature.short,
+            description: signature.description.clone(),
             ..Default::default()
         };
-
-        // Keep track of signature name, description, and if the signature is a "short" signature
-        signature_info.name = signature.name.clone();
-        signature_info.is_short = signature.short;
-        signature_info.description = signature.description.clone();
 
         // Keep track of which signatures have associated extractors, and if so, what type of extractor
         match &signature.extractor {

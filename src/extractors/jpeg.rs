@@ -40,9 +40,7 @@ pub fn extract_jpeg_image(
 ) -> ExtractionResult {
     const OUTFILE_NAME: &str = "image.jpg";
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     // Find the JPEG EOF to identify the total JPEG size
     if let Some(jpeg_data_size) = get_jpeg_data_size(&file_data[offset..]) {

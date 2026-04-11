@@ -207,9 +207,7 @@ fn rsa_key_parser(
     const SIGN_AND_ENCRYPT: u8 = 1;
     const VALID_BYTES_SIZE: usize = 2;
 
-    let mut result = RSAKeyInfo {
-        ..Default::default()
-    };
+    let mut result = RSAKeyInfo::default();
 
     // This is the farthest offset we'll need to index into the key data
     let key_data_len: usize = key_definition.terminator_offset + std::mem::size_of::<u8>();

@@ -37,9 +37,7 @@ pub fn parse_luks_header(luks_data: &[u8]) -> Result<LUKSHeader, StructureError>
         ("header_size", "u64"), // Only available in LUKS2
     ];
 
-    let mut luks_hdr_info = LUKSHeader {
-        ..Default::default()
-    };
+    let mut luks_hdr_info = LUKSHeader::default();
 
     if let Ok(luks_base) = common::parse(luks_data, &luks_base_structure, "big") {
         luks_hdr_info.version = luks_base["version"];

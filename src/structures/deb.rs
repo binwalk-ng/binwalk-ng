@@ -14,9 +14,7 @@ pub fn parse_deb_header(deb_data: &[u8]) -> Result<DebHeader, StructureError> {
     const CONTROL_FILE_SIZE_END: usize = 130;
     const CONTROL_FILE_SIZE_START: usize = 120;
 
-    let mut deb_header = DebHeader {
-        ..Default::default()
-    };
+    let mut deb_header = DebHeader::default();
 
     // Index into the header to get the raw bytes of the decimal ASCII string that contains the control file size
     if let Some(control_file_size_data) =

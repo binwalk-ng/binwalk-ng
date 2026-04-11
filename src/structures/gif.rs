@@ -47,9 +47,7 @@ fn parse_gif_flags(flags: u8) -> GIFFlags {
     const HAS_COLOR_TABLE: u8 = 0x80;
     const COLOR_TABLE_SIZE_MASK: u8 = 0b111;
 
-    let mut retval = GIFFlags {
-        ..Default::default()
-    };
+    let mut retval = GIFFlags::default();
 
     if (flags & HAS_COLOR_TABLE) != 0 {
         let encoded_table_size = ((flags & COLOR_TABLE_SIZE_MASK) + 1) as u32;

@@ -2,7 +2,6 @@ use std::path::Path;
 
 use crate::common::is_offset_safe;
 use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
-use crate::structures::common::StructureError;
 use crate::structures::gif::{parse_gif_extension, parse_gif_header, parse_gif_image_descriptor};
 
 /// Defines the internal extractor function for carving out GIF images
@@ -43,9 +42,7 @@ pub fn extract_gif_image(
 ) -> ExtractionResult {
     const OUTFILE_NAME: &str = "image.gif";
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     // Parse the GIF header
     if let Ok(gif_header) = parse_gif_header(&file_data[offset..]) {
@@ -83,26 +80,15 @@ fn get_gif_data_size(gif_data: &[u8]) -> Option<usize> {
 
     // Loop through all GIF data blocks
     while is_offset_safe(available_data, next_offset, previous_offset) {
-        let block_size: Result<usize, StructureError>;
-
-        // Get the block type of the next block
-        match gif_data.get(next_offset) {
-            None => break,
-            Some(block_type) => {
-                // Parse the block type accordingly
-                if *block_type == IMAGE_DESCRIPTOR {
-                    block_size = parse_gif_image_descriptor(&gif_data[next_offset..]);
-                } else if *block_type == EXTENSION {
-                    block_size = parse_gif_extension(&gif_data[next_offset..]);
-                } else if *block_type == TERMINATOR {
-                    // Only return the GIF size if we've found a termination block.
-                    // The +1 is for the size of the block_type u8.
-                    return Some(next_offset + 1);
-                } else {
-                    break;
-                }
+        let block_size = match gif_data.get(next_offset) {
+            Some(&IMAGE_DESCRIPTOR) => parse_gif_image_descriptor(&gif_data[next_offset..]),
+            Some(&EXTENSION) => parse_gif_extension(&gif_data[next_offset..]),
+            Some(&TERMINATOR) => {
+                return Some(next_offset + 1);
             }
-        }
+            // This covers both None and any byte that doesn't match our constants
+            _ => break,
+        };
 
         // Check if the block was parsed successfully
         match block_size {

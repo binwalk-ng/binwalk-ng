@@ -41,9 +41,7 @@ pub fn extract_trx_partitions(
 ) -> ExtractionResult {
     const CRC_DATA_START_OFFSET: usize = 12;
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     // Get the TRX data and parse the header
     if let Some(trx_header_data) = file_data.get(offset..)

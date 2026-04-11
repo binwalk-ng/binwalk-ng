@@ -63,11 +63,9 @@ pub fn parse_gzip_header(header_data: &[u8]) -> Result<GzipHeader, StructureErro
     ]);
 
     let mut header_info = GzipHeader {
+        size: std::mem::size_of::<GzipHeaderBytes>(), // End of the fixed-size portion of the gzip header
         ..Default::default()
     };
-
-    // End of the fixed-size portion of the gzip header
-    header_info.size = std::mem::size_of::<GzipHeaderBytes>();
 
     // Parse the gzip header
     let (gzip_header, _) =

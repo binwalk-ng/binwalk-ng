@@ -40,9 +40,7 @@ fn blocks(data: &[u8]) -> Vec<BlockEntropy> {
         match chunker.next() {
             None => break,
             Some(block_data) => {
-                let mut block = BlockEntropy {
-                    ..Default::default()
-                };
+                let mut block = BlockEntropy::default();
 
                 block.start = offset;
                 block.entropy = shannon_entropy(block_data);

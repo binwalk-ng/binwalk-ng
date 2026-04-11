@@ -44,9 +44,7 @@ pub fn extract_mh01_image(
     const ENCRYPTED_DATA_FILE_NAME: &str = "encrypted.bin";
     const DECRYPTED_DATA_FILE_NAME: &str = "decrypted.bin";
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     // Get the MH01 image data
     if let Some(mh01_data) = file_data.get(offset..) {

@@ -99,7 +99,7 @@
 //! pub fn extract_foobar_file(file_data: Vec<u8>, offset: usize, output_directory: Option<&Path>) -> ExtractionResult {
 //!
 //!     // This will be the return value
-//!     let mut result = ExtractionResult{..Default::default()};
+//!     let mut result = ExtractionResult::default();
 //!
 //!     // Get the FooBar file data, which starts at the specified offset
 //!     if let Some(foobar_data) = file_data.get(offset..) {

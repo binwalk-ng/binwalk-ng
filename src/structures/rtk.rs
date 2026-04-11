@@ -1,4 +1,5 @@
-use crate::structures::common::{self, StructureError};
+use crate::structures::common::StructureError;
+use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
 /// Struct to store RTK firmware header info
 #[derive(Debug, Default, Clone)]
@@ -7,31 +8,27 @@ pub struct RTKHeader {
     pub header_size: usize,
 }
 
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct RTKHeaderBytes {
+    magic: zerocopy::U32<LE>,
+    image_size: zerocopy::U32<LE>,
+    checksum: zerocopy::U32<LE>,
+    unknown1: [u8; 4],
+    header_size: zerocopy::U32<LE>,
+    unknown2: [u8; 8],
+    identifier: zerocopy::U32<LE>,
+}
+
 /// Parses a RTK header
 pub fn parse_rtk_header(rtk_data: &[u8]) -> Result<RTKHeader, StructureError> {
     const MAGIC_SIZE: usize = 4;
 
-    let rtk_structure = vec![
-        ("magic", "u32"),
-        ("image_size", "u32"),
-        ("checksum", "u32"),
-        ("unknown1", "u32"),
-        ("header_size", "u32"),
-        ("unknown2", "u32"),
-        ("unknown3", "u32"),
-        ("identifier", "u32"),
-    ];
-
-    let mut result = RTKHeader {
-        ..Default::default()
-    };
-
     // Parse the header
-    if let Ok(rtk_header) = common::parse(rtk_data, &rtk_structure, "little") {
-        result.image_size = rtk_header["image_size"];
-        result.header_size = rtk_header["header_size"] + MAGIC_SIZE;
-        return Ok(result);
-    }
+    let (rtk_header, _) = RTKHeaderBytes::ref_from_prefix(rtk_data).map_err(|_| StructureError)?;
 
-    Err(StructureError)
+    Ok(RTKHeader {
+        image_size: rtk_header.image_size.get() as usize,
+        header_size: rtk_header.header_size.get() as usize + MAGIC_SIZE,
+    })
 }

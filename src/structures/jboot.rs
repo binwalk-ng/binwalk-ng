@@ -1,6 +1,7 @@
 use crate::common::{crc32, get_cstring};
-use crate::structures::common::{self, StructureError};
+use crate::structures::common::StructureError;
 use std::collections::HashMap;
+use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
 /// Struct to store JBOOT ARM firmware image info
 #[derive(Debug, Default, Clone)]
@@ -13,74 +14,72 @@ pub struct JBOOTArmHeader {
     pub rom_id: String,
 }
 
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct ARMImageHeader {
+    drange: zerocopy::U16<LE>,
+    image_checksum: zerocopy::U16<LE>,
+    block_size: zerocopy::U32<LE>,
+    reserved1: [u8; 6],
+    lpvs: u8,
+    mbz: u8,
+    timestamp: zerocopy::U32<LE>,
+    erase_start: zerocopy::U32<LE>,
+    erase_size: zerocopy::U32<LE>,
+    data_start: zerocopy::U32<LE>,
+    data_size: zerocopy::U32<LE>,
+    reserved2: [u8; 16],
+    header_id: zerocopy::U16<LE>,
+    header_version: zerocopy::U16<LE>,
+    reserved3: [u8; 2],
+    section_id: u8,
+    image_info_type: u8,
+    image_info_offset: zerocopy::U32<LE>,
+    family: zerocopy::U16<LE>,
+    header_checksum: zerocopy::U16<LE>,
+}
+
 /// Parses a JBOOT ARM image header
 pub fn parse_jboot_arm_header(jboot_data: &[u8]) -> Result<JBOOTArmHeader, StructureError> {
     // Structure starts after 12-byte ROM ID
     const STRUCTURE_OFFSET: usize = 12;
 
     // Some expected header values
-    const LPVS_VALUE: usize = 1;
-    const MBZ_VALUE: usize = 0;
-    const HEADER_ID_VALUE: usize = 0x4842;
-    const HEADER_MAX_VERSION_VALUE: usize = 4;
+    const LPVS_VALUE: u8 = 1;
+    const MBZ_VALUE: u8 = 0;
+    const HEADER_ID_VALUE: u16 = 0x4842;
+    const HEADER_MAX_VERSION_VALUE: u16 = 4;
 
-    let arm_structure = vec![
-        ("drange", "u16"),
-        ("image_checksum", "u16"),
-        ("block_size", "u32"),
-        ("reserved2", "u32"),
-        ("reserved3", "u16"),
-        ("lpvs", "u8"),
-        ("mbz", "u8"),
-        ("timestamp", "u32"),
-        ("erase_start", "u32"),
-        ("erase_size", "u32"),
-        ("data_start", "u32"),
-        ("data_size", "u32"),
-        ("reserved4", "u32"),
-        ("reserved5", "u32"),
-        ("reserved6", "u32"),
-        ("reserved7", "u32"),
-        ("header_id", "u16"),
-        ("header_version", "u16"),
-        ("reserved8", "u16"),
-        ("section_id", "u8"),
-        ("image_info_type", "u8"),
-        ("image_info_offset", "u32"),
-        ("family", "u16"),
-        ("header_checksum", "u16"),
-    ];
-
-    let structure_size: usize = common::size(&arm_structure);
+    let structure_size: usize = std::mem::size_of::<ARMImageHeader>();
     let header_size: usize = structure_size + STRUCTURE_OFFSET;
 
     if let Some(header_data) = jboot_data.get(STRUCTURE_OFFSET..) {
         // Parse the header structure
-        if let Ok(arm_header) = common::parse(header_data, &arm_structure, "little") {
-            // Make sure the reserved fields are NULL
-            if arm_header["reserved2"] == 0
-                && arm_header["reserved3"] == 0
-                && arm_header["reserved4"] == 0
-                && arm_header["reserved5"] == 0
-                && arm_header["reserved6"] == 0
-                && arm_header["reserved7"] == 0
-                && arm_header["reserved8"] == 0
+        let (arm_header, _) =
+            ARMImageHeader::ref_from_prefix(header_data).map_err(|_| StructureError)?;
+
+        // Make sure the reserved fields are NULL
+        if arm_header
+            .reserved1
+            .iter()
+            .chain(&arm_header.reserved2)
+            .chain(&arm_header.reserved3)
+            .all(|&b| b == 0)
+        {
+            // Sanity check expected header values
+            if arm_header.lpvs == LPVS_VALUE
+                && arm_header.mbz == MBZ_VALUE
+                && arm_header.header_id == HEADER_ID_VALUE
+                && arm_header.header_version <= HEADER_MAX_VERSION_VALUE
             {
-                // Sanity check expected header values
-                if arm_header["lpvs"] == LPVS_VALUE
-                    && arm_header["mbz"] == MBZ_VALUE
-                    && arm_header["header_id"] == HEADER_ID_VALUE
-                    && arm_header["header_version"] <= HEADER_MAX_VERSION_VALUE
-                {
-                    return Ok(JBOOTArmHeader {
-                        header_size,
-                        rom_id: get_cstring(&jboot_data[0..STRUCTURE_OFFSET]),
-                        data_size: arm_header["data_size"],
-                        data_offset: arm_header["data_start"],
-                        erase_offset: arm_header["erase_start"],
-                        erase_size: arm_header["erase_size"],
-                    });
-                }
+                return Ok(JBOOTArmHeader {
+                    header_size,
+                    rom_id: get_cstring(&jboot_data[0..STRUCTURE_OFFSET]),
+                    data_size: arm_header.data_size.get() as usize,
+                    data_offset: arm_header.data_start.get() as usize,
+                    erase_offset: arm_header.erase_start.get() as usize,
+                    erase_size: arm_header.erase_size.get() as usize,
+                });
             }
         }
     }
@@ -97,37 +96,36 @@ pub struct JBOOTStagHeader {
     pub is_sysupgrade_image: bool,
 }
 
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct STag {
+    cmark: u8,
+    id: u8,
+    magic: zerocopy::U16<LE>,
+    timestamp: zerocopy::U32<LE>,
+    image_size: zerocopy::U32<LE>,
+    image_checksum: zerocopy::U16<LE>,
+    header_checksum: zerocopy::U16<LE>,
+}
+
 /// Parses a JBOOT STAG header
 pub fn parse_jboot_stag_header(jboot_data: &[u8]) -> Result<JBOOTStagHeader, StructureError> {
     // cmark value for factory images; for system upgrade images, cmark must equal id
-    const FACTORY_IMAGE_TYPE: usize = 0xFF;
+    const FACTORY_IMAGE_TYPE: u8 = 0xFF;
 
-    let stag_structure = vec![
-        ("cmark", "u8"),
-        ("id", "u8"),
-        ("magic", "u16"),
-        ("timestamp", "u32"),
-        ("image_size", "u32"),
-        ("image_checksum", "u16"),
-        ("header_checksum", "u16"),
-    ];
-
-    let mut result = JBOOTStagHeader {
-        ..Default::default()
-    };
+    let mut result = JBOOTStagHeader::default();
 
     // Parse the header structure
-    if let Ok(stag_header) = common::parse(jboot_data, &stag_structure, "little") {
-        result.header_size = common::size(&stag_structure);
-        result.image_size = stag_header["image_size"];
+    let (stag_header, _) = STag::ref_from_prefix(jboot_data).map_err(|_| StructureError)?;
+    result.header_size = std::mem::size_of::<STag>();
+    result.image_size = stag_header.image_size.get() as usize;
 
-        if result.image_size > result.header_size {
-            result.is_factory_image = stag_header["cmark"] == FACTORY_IMAGE_TYPE;
-            result.is_sysupgrade_image = stag_header["cmark"] == stag_header["id"];
+    if result.image_size > result.header_size {
+        result.is_factory_image = stag_header.cmark == FACTORY_IMAGE_TYPE;
+        result.is_sysupgrade_image = stag_header.cmark == stag_header.id;
 
-            if result.is_factory_image || result.is_sysupgrade_image {
-                return Ok(result);
-            }
+        if result.is_factory_image || result.is_sysupgrade_image {
+            return Ok(result);
         }
     }
 
@@ -139,54 +137,55 @@ pub struct JBOOTSchHeader {
     pub header_size: usize,
     pub compression: String,
     pub kernel_size: usize,
-    pub kernel_entry_point: usize,
-    pub kernel_checksum: usize,
+    pub kernel_entry_point: u32,
+    pub kernel_checksum: u32,
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct SCH2Header {
+    magic: zerocopy::U16<LE>,
+    compression_type: u8,
+    version: u8,
+    ram_entry_address: zerocopy::U32<LE>,
+    kernel_image_size: zerocopy::U32<LE>,
+    kernel_image_crc: zerocopy::U32<LE>,
+    ram_start_address: zerocopy::U32<LE>,
+    rootfs_flash_address: zerocopy::U32<LE>,
+    rootfs_size: zerocopy::U32<LE>,
+    rootfs_crc: zerocopy::U32<LE>,
+    header_crc: zerocopy::U32<LE>,
+    header_size: zerocopy::U16<LE>,
+    cmd_line_size: zerocopy::U16<LE>,
 }
 
 /// Parses a JBOOT SCH2 header
 pub fn parse_jboot_sch2_header(jboot_data: &[u8]) -> Result<JBOOTSchHeader, StructureError> {
-    const VERSION_VALUE: usize = 2;
+    const VERSION_VALUE: u8 = 2;
 
-    let sch2_structure = vec![
-        ("magic", "u16"),
-        ("compression_type", "u8"),
-        ("version", "u8"),
-        ("ram_entry_address", "u32"),
-        ("kernel_image_size", "u32"),
-        ("kernel_image_crc", "u32"),
-        ("ram_start_address", "u32"),
-        ("rootfs_flash_address", "u32"),
-        ("rootfs_size", "u32"),
-        ("rootfs_crc", "u32"),
-        ("header_crc", "u32"),
-        ("header_size", "u16"),
-        ("cmd_line_size", "u16"),
-    ];
-
-    let compression_types: HashMap<usize, &str> =
-        HashMap::from([(0, "none"), (1, "jz"), (2, "gzip"), (3, "lzma")]);
+    let compression_types = HashMap::from([(0, "none"), (1, "jz"), (2, "gzip"), (3, "lzma")]);
 
     let mut result = JBOOTSchHeader {
-        header_size: common::size(&sch2_structure),
+        header_size: std::mem::size_of::<SCH2Header>(),
         ..Default::default()
     };
 
-    if let Ok(sch2_header) = common::parse(jboot_data, &sch2_structure, "little") {
-        // Sanity check some header fields
-        if sch2_header["version"] == VERSION_VALUE
-            && sch2_header["header_size"] == result.header_size
-            && let Some(compression_type) = compression_types.get(&sch2_header["compression_type"])
+    let (sch2_header, _) = SCH2Header::ref_from_prefix(jboot_data).map_err(|_| StructureError)?;
+
+    // Sanity check some header fields
+    if sch2_header.version == VERSION_VALUE
+        && sch2_header.header_size.get() as usize == result.header_size
+        && let Some(compression_type) = compression_types.get(&sch2_header.compression_type)
+    {
+        // Validate the header checksum
+        if let Some(header_bytes) = jboot_data.get(0..sch2_header.header_size.get() as usize)
+            && sch2_header.header_crc == sch2_header_crc(header_bytes)?
         {
-            // Validate the header checksum
-            if let Some(header_bytes) = jboot_data.get(0..sch2_header["header_size"])
-                && sch2_header_crc(header_bytes) == sch2_header["header_crc"]
-            {
-                result.compression = compression_type.to_string();
-                result.kernel_checksum = sch2_header["kernel_image_crc"];
-                result.kernel_size = sch2_header["kernel_image_size"];
-                result.kernel_entry_point = sch2_header["ram_entry_address"];
-                return Ok(result);
-            }
+            result.compression = compression_type.to_string();
+            result.kernel_checksum = sch2_header.kernel_image_crc.get();
+            result.kernel_size = sch2_header.kernel_image_size.get() as usize;
+            result.kernel_entry_point = sch2_header.ram_entry_address.get();
+            return Ok(result);
         }
     }
 
@@ -194,27 +193,19 @@ pub fn parse_jboot_sch2_header(jboot_data: &[u8]) -> Result<JBOOTSchHeader, Stru
 }
 
 /// Calculate a JBOOT SCH2 header CRC
-fn sch2_header_crc(sch2_header_bytes: &[u8]) -> usize {
+fn sch2_header_crc(sch2_header_bytes: &[u8]) -> Result<u32, StructureError> {
     // Start and end offsets of the header CRC field
     const HEADER_CRC_START: usize = 32;
     const HEADER_CRC_END: usize = 36;
 
-    let mut crc: usize = 0;
-
     if sch2_header_bytes.len() > HEADER_CRC_END {
-        let mut crc_data: Vec<u8> = sch2_header_bytes.to_vec();
+        let mut crc_data = sch2_header_bytes.to_vec();
 
         // Header CRC field has to be NULL'd out
-        for crc_byte in crc_data
-            .iter_mut()
-            .take(HEADER_CRC_END)
-            .skip(HEADER_CRC_START)
-        {
-            *crc_byte = 0;
-        }
+        crc_data[HEADER_CRC_START..HEADER_CRC_END].fill(0);
 
-        crc = crc32(&crc_data) as usize;
+        return Ok(crc32(&crc_data));
     }
 
-    crc
+    Err(StructureError)
 }

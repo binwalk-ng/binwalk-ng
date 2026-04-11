@@ -30,9 +30,7 @@ pub fn parse_cramfs_header(cramfs_data: &[u8]) -> Result<CramFSHeader, Structure
         ("file_count", "u32"),
     ];
 
-    let mut cramfs_info = CramFSHeader {
-        ..Default::default()
-    };
+    let mut cramfs_info = CramFSHeader::default();
 
     let cramfs_structure_size = common::size(&cramfs_header_structure);
 

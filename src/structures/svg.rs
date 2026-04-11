@@ -72,9 +72,7 @@ struct SVGTag {
 fn parse_svg_tag(tag_data: &[u8]) -> Result<SVGTag, StructureError> {
     const END_TAG: u8 = 0x3E;
 
-    let mut result = SVGTag {
-        ..Default::default()
-    };
+    let mut result = SVGTag::default();
 
     let svg_open_tag = String::from_utf8(SVG_OPEN_TAG.to_vec()).unwrap();
     let svg_close_tag = String::from_utf8(SVG_CLOSE_TAG.to_vec()).unwrap();

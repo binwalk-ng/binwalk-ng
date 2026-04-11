@@ -42,9 +42,7 @@ pub fn extract_png_image(
     const PNG_HEADER_LEN: usize = 8;
     const OUTFILE_NAME: &str = "image.png";
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     // Parse all the PNG chunks to determine the size of PNG data; first chunk starts immediately after the 8-byte PNG header
     if let Some(png_data) = file_data.get(offset + PNG_HEADER_LEN..)

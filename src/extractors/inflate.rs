@@ -22,9 +22,7 @@ pub fn inflate_decompressor(
     // Output file for decompressed data
     const OUTPUT_FILE_NAME: &str = "decompressed.bin";
 
-    let mut result = DeflateResult {
-        ..Default::default()
-    };
+    let mut result = DeflateResult::default();
 
     let mut adler32_checksum = RollingAdler32::new();
     let mut decompressed_buffer = [0; BLOCK_SIZE];

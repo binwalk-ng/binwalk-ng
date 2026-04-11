@@ -13,7 +13,6 @@ struct RomFSEntry {
     size: usize,
     name: String,
     offset: usize,
-    file_type: usize,
     executable: bool,
     directory: bool,
     regular: bool,
@@ -63,9 +62,7 @@ pub fn extract_romfs(
     offset: usize,
     output_directory: Option<&Path>,
 ) -> ExtractionResult {
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     // Parse the RomFS header
     if let Ok(romfs_header) = parse_romfs_header(&file_data[offset..]) {
@@ -147,27 +144,22 @@ fn process_romfs_entries(
 
         // Parse the next file entry
         if let Ok(file_header) = parse_romfs_file_entry(&romfs_data[file_offset..]) {
-            // Instantiate a new RomFSEntry structure
+            // Instantiate a new RomFSEntry structure and populate basic info
             let mut file_entry = RomFSEntry {
+                size: file_header.size,
+                info: file_header.info,
+                name: file_header.name.clone(),
+                symlink: file_header.symlink,
+                regular: file_header.regular,
+                directory: file_header.directory,
+                executable: file_header.executable,
+                block_device: file_header.block_device,
+                character_device: file_header.character_device,
+                fifo: file_header.fifo,
+                socket: file_header.socket,
+                offset: file_offset + file_header.data_offset, //            Make file_entry.offset an offset relative to the beginning of the RomFS image
                 ..Default::default()
             };
-
-            // Populate basic info
-            file_entry.size = file_header.size;
-            file_entry.info = file_header.info;
-            file_entry.name = file_header.name.clone();
-            file_entry.symlink = file_header.symlink;
-            file_entry.regular = file_header.regular;
-            file_entry.directory = file_header.directory;
-            file_entry.file_type = file_header.file_type;
-            file_entry.executable = file_header.executable;
-            file_entry.block_device = file_header.block_device;
-            file_entry.character_device = file_header.character_device;
-            file_entry.fifo = file_header.fifo;
-            file_entry.socket = file_header.socket;
-
-            // Make file_entry.offset an offset relative to the beginning of the RomFS image
-            file_entry.offset = file_offset + file_header.data_offset;
 
             // Sanity check the file data offset and size fields
             if (file_entry.offset + file_entry.size) > romfs_data.len() {

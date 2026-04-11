@@ -42,9 +42,7 @@ pub fn extract_uimage(
     const DEFAULT_OUTPUT_FILE_NAME: &str = "uimage_data";
     const OUTPUT_FILE_EXT: &str = "bin";
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     // Get the uImage data and parse the header
     if let Some(uimage_header_data) = file_data.get(offset..)
@@ -59,7 +57,7 @@ pub fn extract_uimage(
             result.size = Some(uimage_header.header_size);
 
             // Check the data CRC
-            let data_crc_valid: bool = crc32(image_data) == (uimage_header.data_checksum as u32);
+            let data_crc_valid: bool = crc32(image_data) == uimage_header.data_checksum;
 
             // If the data CRC is valid, include the size of the data in the reported size
             if data_crc_valid {

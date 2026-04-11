@@ -7,25 +7,26 @@ pub const DESCRIPTION: &str = "LZMA compressed data";
 
 /// Builds a list of common LZMA magic bytes (properties + dictionary sizes)
 pub fn lzma_magic() -> Vec<Vec<u8>> {
-    let mut magic_signatures: Vec<Vec<u8>> = vec![];
-
     // Common LZMA properties
-    let supported_properties: Vec<u8> = vec![0x5D, 0x6E, 0x6D, 0x6C];
+    let supported_properties = [0x5D, 0x6E, 0x6D, 0x6C];
 
-    let supported_dictionary_sizes: Vec<u32> = vec![
-        0x10_00_00_00,
-        0x20_00_00_00,
-        0x01_00_00_00,
-        0x02_00_00_00,
-        0x04_00_00_00,
-        0x00_80_00_00,
-        0x00_40_00_00,
-        0x00_20_00_00,
-        0x00_10_00_00,
-        0x00_08_00_00,
-        0x00_02_00_00,
-        0x00_01_00_00,
+    let supported_dictionary_sizes = [
+        0x10_00_00_00u32,
+        0x20_00_00_00u32,
+        0x01_00_00_00u32,
+        0x02_00_00_00u32,
+        0x04_00_00_00u32,
+        0x00_80_00_00u32,
+        0x00_40_00_00u32,
+        0x00_20_00_00u32,
+        0x00_10_00_00u32,
+        0x00_08_00_00u32,
+        0x00_02_00_00u32,
+        0x00_01_00_00u32,
     ];
+
+    let mut magic_signatures: Vec<Vec<u8>> =
+        Vec::with_capacity(supported_properties.len() * supported_dictionary_sizes.len());
 
     /*
      * Build a list of magic signatures to search for based on the supported property and dictionary values.
@@ -35,9 +36,10 @@ pub fn lzma_magic() -> Vec<Vec<u8>> {
      */
     for property in supported_properties {
         for dictionary_size in &supported_dictionary_sizes {
-            let mut magic: Vec<u8> = vec![property];
+            let mut magic: Vec<u8> = Vec::with_capacity(5);
+            magic.push(property);
             magic.extend(dictionary_size.to_le_bytes().to_vec());
-            magic_signatures.push(magic.to_vec());
+            magic_signatures.push(magic);
         }
     }
 

@@ -41,9 +41,7 @@ pub fn extract_svg_image(
 ) -> ExtractionResult {
     const OUTFILE_NAME: &str = "image.svg";
 
-    let mut result = ExtractionResult {
-        ..Default::default()
-    };
+    let mut result = ExtractionResult::default();
 
     // Parse the SVG image to determine its total size
     if let Ok(svg_image) = parse_svg_image(&file_data[offset..]) {
