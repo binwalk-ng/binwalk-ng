@@ -145,7 +145,7 @@ fn parse_tlv_element(data: &[u8]) -> Result<(Element, usize), StructureError> {
             // UTF-8 String
             let structure = &[("string_length", field_width_type)];
             let result = common::parse(field_data, structure, "little")?;
-            let string_length = result["string_length"] as usize;
+            let string_length = result["string_length"];
             let string_data = field_data
                 .get(common::size(structure)..)
                 .ok_or(StructureError)?;
@@ -166,7 +166,7 @@ fn parse_tlv_element(data: &[u8]) -> Result<(Element, usize), StructureError> {
             // Octet string
             let structure = &[("octet_string_length", field_width_type)];
             let result = common::parse(field_data, structure, "little")?;
-            let octet_string_length = result["octet_string_length"] as usize;
+            let octet_string_length = result["octet_string_length"];
             let octet_string_data = field_data
                 .get(common::size(structure)..)
                 .ok_or(StructureError)?;
