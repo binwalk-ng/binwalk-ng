@@ -872,7 +872,7 @@ fn include_signature(
 ) -> bool {
     if !include.is_empty() {
         for include_str in include {
-            if signature.name.to_lowercase() == include_str.to_lowercase() {
+            if signature.name.eq_ignore_ascii_case(include_str) {
                 return true;
             }
         }
@@ -882,7 +882,7 @@ fn include_signature(
 
     if !exclude.is_empty() {
         for exclude_str in exclude {
-            if signature.name.to_lowercase() == exclude_str.to_lowercase() {
+            if signature.name.eq_ignore_ascii_case(exclude_str) {
                 return false;
             }
         }
