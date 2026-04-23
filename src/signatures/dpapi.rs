@@ -34,7 +34,7 @@ pub fn dpapi_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
              data_len: {}, sign_len: {}", 
              result.description, header.header_size, header.blob_size, header.version, header.provider_id,
              header.master_key_version, header.master_key_id, header.flags, header.description_len,
-             header.crypto_algorithm, header.crypti_alg_len, header.salt_len, header.hmac_key_len,
+             header.crypto_algorithm, header.crypto_alg_len, header.salt_len, header.hmac_key_len,
              header.hash_algorithm, header.hash_alg_len, header.hmac2_key_len, header.data_len, header.sign_len
             );
     }
