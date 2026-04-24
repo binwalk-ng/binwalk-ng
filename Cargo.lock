@@ -484,7 +484,7 @@ checksum = "ac6b926516df9c60bfa16e107b21086399f8285a44ca9711344b9e553c5146e2"
 [[package]]
 name = "delink"
 version = "0.1.0"
-source = "git+https://github.com/binwalk-ng/delink#3886301357bf29c3fce078b612ad0192320dbefc"
+source = "git+https://github.com/binwalk-ng/delink#5edc5fad27101caac2bf06cfc2b1edffb8c27d16"
 dependencies = [
  "aes",
  "cbc",
