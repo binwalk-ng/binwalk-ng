@@ -83,7 +83,7 @@ pub fn parse_lzop_file_header(lzop_data: &[u8]) -> Result<LZOPFileHeader, Struct
 
                 // Check if block headers include an optional compressed data checksum field
                 lzop_info.block_checksum_present =
-                    (lzo_header_p1.flags & FLAG_ADLER32_C & FLAG_CRC32_C) != 0;
+                    (lzo_header_p1.flags & (FLAG_ADLER32_C | FLAG_CRC32_C)) != 0;
 
                 // Sanity check on the calculated header size
                 if lzop_info.header_size <= lzop_data.len() {
