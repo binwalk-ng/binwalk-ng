@@ -45,11 +45,6 @@ pub fn parse_tplink_header(tplink_data: &[u8]) -> Result<TPLinkFirmwareHeader, S
     // Total size of the firmware header
     const HEADER_SIZE: usize = 0x200;
 
-    let mut result = TPLinkFirmwareHeader {
-        header_size: HEADER_SIZE,
-        ..Default::default()
-    };
-
     // Sanity check available data
     if tplink_data.len() >= HEADER_SIZE
         && let Some(structure_data) = tplink_data.get(STRUCTURE_OFFSET..)
@@ -59,15 +54,17 @@ pub fn parse_tplink_header(tplink_data: &[u8]) -> Result<TPLinkFirmwareHeader, S
             TPLinkHeader::ref_from_prefix(structure_data).map_err(|_| StructureError)?;
 
         // Make sure the reserved fields are NULL
-        if tplink_header.reserved1.get() == 0
-            && tplink_header.reserved2.get() == 0
-            && tplink_header.reserved3.get() == 0
-            && tplink_header.reserved4.get() == 0
+        if tplink_header.reserved1 == 0
+            && tplink_header.reserved2 == 0
+            && tplink_header.reserved3 == 0
+            && tplink_header.reserved4 == 0
         {
             // Unfortunately, most header fields aren't reliably used; these seem to be, so report them
-            result.kernel_entry_point = tplink_header.kernel_entry_point.get();
-            result.kernel_load_address = tplink_header.kernel_load_address.get();
-            return Ok(result);
+            return Ok(TPLinkFirmwareHeader {
+                header_size: HEADER_SIZE,
+                kernel_entry_point: tplink_header.kernel_entry_point.get(),
+                kernel_load_address: tplink_header.kernel_load_address.get(),
+            });
         }
     }
 

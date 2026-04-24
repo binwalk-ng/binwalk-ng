@@ -72,8 +72,6 @@ struct SVGTag {
 fn parse_svg_tag(tag_data: &[u8]) -> Result<SVGTag, StructureError> {
     const END_TAG: u8 = 0x3E;
 
-    let mut result = SVGTag::default();
-
     let svg_open_tag = String::from_utf8(SVG_OPEN_TAG.to_vec()).unwrap();
     let svg_close_tag = String::from_utf8(SVG_CLOSE_TAG.to_vec()).unwrap();
     let svg_head_string = SVG_HEAD_MAGIC.to_string();
@@ -84,10 +82,11 @@ fn parse_svg_tag(tag_data: &[u8]) -> Result<SVGTag, StructureError> {
             && let Some(tag_bytes) = tag_data.get(0..i + 1)
             && let Ok(tag_string) = String::from_utf8(tag_bytes.to_vec())
         {
-            result.is_open = tag_string.starts_with(&svg_open_tag);
-            result.is_close = tag_string.starts_with(&svg_close_tag);
-            result.is_head = tag_string.contains(&svg_head_string);
-            return Ok(result);
+            return Ok(SVGTag {
+                is_head: tag_string.contains(&svg_head_string),
+                is_open: tag_string.starts_with(&svg_open_tag),
+                is_close: tag_string.starts_with(&svg_close_tag),
+            });
         }
     }
 
