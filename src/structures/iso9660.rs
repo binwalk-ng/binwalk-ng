@@ -30,8 +30,6 @@ pub fn parse_iso_header(iso_data: &[u8]) -> Result<ISOHeader, StructureError> {
     // Offset from the beginning of the ISO image to the start of iso_structure
     const ISO_STRUCT_START: usize = 32840;
 
-    let mut iso_info = ISOHeader::default();
-
     if let Some(iso_header_data) = iso_data.get(ISO_STRUCT_START..) {
         // Parse the ISO header
         let (iso_header, _) =
@@ -51,9 +49,10 @@ pub fn parse_iso_header(iso_data: &[u8]) -> Result<ISOHeader, StructureError> {
                 && iso_header.sequence_number_1 == iso_header.sequence_number_2.get()
                 && iso_header.path_table_size_1 == iso_header.path_table_size_2.get()
             {
-                iso_info.image_size = iso_header.volume_size_1.get() as usize
-                    * iso_header.block_size_1.get() as usize;
-                return Ok(iso_info);
+                return Ok(ISOHeader {
+                    image_size: iso_header.volume_size_1.get() as usize
+                        * iso_header.block_size_1.get() as usize,
+                });
             }
         }
     }

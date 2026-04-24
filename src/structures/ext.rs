@@ -1,5 +1,4 @@
 use crate::structures::common::StructureError;
-use std::collections::HashMap;
 use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
 /// Expected size of an EXT superblock
@@ -56,18 +55,8 @@ pub fn parse_ext_header(ext_data: &[u8]) -> Result<EXTHeader, StructureError> {
     // Max value of the EXT log block size
     const MAX_BLOCK_LOG: u32 = 2;
 
-    let allowed_rev_levels = [0, 1];
-    let allowed_first_data_blocks = [0, 1];
-
-    let supported_os = HashMap::from([
-        (0, "Linux"),
-        (1, "GNU HURD"),
-        (2, "MASIX"),
-        (3, "FreeBSD"),
-        (4, "Lites"),
-    ]);
-
-    let mut ext_header = EXTHeader::default();
+    const ALLOWED_REV_LEVELS: [u32; 2] = [0, 1];
+    const ALLOWED_FIRST_DATA_BLOCKS: [u32; 2] = [0, 1];
 
     // Sanity check the available data
     if ext_data.len() >= (SUPERBLOCK_OFFSET + SUPERBLOCK_SIZE) {
@@ -77,27 +66,30 @@ pub fn parse_ext_header(ext_data: &[u8]) -> Result<EXTHeader, StructureError> {
                 .map_err(|_| StructureError)?;
 
         // Sanity check the reported OS this EXT image was created on
-        if let Some(creator_os) = supported_os.get(&ext_superblock.creator_os.get()) {
-            // Sanity check the s_rev_level field
-            if allowed_rev_levels.contains(&ext_superblock.s_rev_level.get()) {
-                // Sanity check the first_data_block field, which must be either 0 or 1
-                if allowed_first_data_blocks.contains(&ext_superblock.first_data_block.get()) {
-                    // Santiy check the log_block_size
-                    if ext_superblock.log_block_size.get() <= MAX_BLOCK_LOG {
-                        // Update the reported image info
-                        ext_header.blocks_count = ext_superblock.blocks_count.get() as usize;
-                        ext_header.inodes_count = ext_superblock.inodes_count.get() as usize;
-                        ext_header.block_size = 1024 << ext_superblock.log_block_size.get();
-                        ext_header.free_blocks_count =
-                            ext_superblock.free_blocks_count.get() as usize;
-                        ext_header.os = creator_os.to_string();
-                        ext_header.reserved_blocks_count =
-                            ext_superblock.reserved_blocks_count.get() as usize;
-                        ext_header.image_size =
-                            ext_header.block_size * (ext_superblock.blocks_count.get() as usize);
-
-                        return Ok(ext_header);
-                    }
+        let creator_os = match ext_superblock.creator_os.get() {
+            0 => "Linux",
+            1 => "GNU HURD",
+            2 => "MASIX",
+            3 => "FreeBSD",
+            4 => "Lites",
+            _ => return Err(StructureError),
+        };
+        // Sanity check the s_rev_level field
+        if ALLOWED_REV_LEVELS.contains(&ext_superblock.s_rev_level.get()) {
+            // Sanity check the first_data_block field, which must be either 0 or 1
+            if ALLOWED_FIRST_DATA_BLOCKS.contains(&ext_superblock.first_data_block.get()) {
+                // Santiy check the log_block_size
+                if ext_superblock.log_block_size.get() <= MAX_BLOCK_LOG {
+                    let block_size = 1024 << ext_superblock.log_block_size.get();
+                    return Ok(EXTHeader {
+                        os: creator_os.to_string(),
+                        block_size,
+                        image_size: block_size * (ext_superblock.blocks_count.get() as usize),
+                        blocks_count: ext_superblock.blocks_count.get() as usize,
+                        inodes_count: ext_superblock.inodes_count.get() as usize,
+                        free_blocks_count: ext_superblock.free_blocks_count.get() as usize,
+                        reserved_blocks_count: ext_superblock.reserved_blocks_count.get() as usize,
+                    });
                 }
             }
         }

@@ -1,6 +1,5 @@
 use crate::common::{crc32, get_cstring};
 use crate::structures::common::StructureError;
-use std::collections::HashMap;
 use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
 /// Struct to store JBOOT ARM firmware image info
@@ -163,8 +162,6 @@ struct SCH2Header {
 pub fn parse_jboot_sch2_header(jboot_data: &[u8]) -> Result<JBOOTSchHeader, StructureError> {
     const VERSION_VALUE: u8 = 2;
 
-    let compression_types = HashMap::from([(0, "none"), (1, "jz"), (2, "gzip"), (3, "lzma")]);
-
     let mut result = JBOOTSchHeader {
         header_size: std::mem::size_of::<SCH2Header>(),
         ..Default::default()
@@ -175,8 +172,14 @@ pub fn parse_jboot_sch2_header(jboot_data: &[u8]) -> Result<JBOOTSchHeader, Stru
     // Sanity check some header fields
     if sch2_header.version == VERSION_VALUE
         && sch2_header.header_size.get() as usize == result.header_size
-        && let Some(compression_type) = compression_types.get(&sch2_header.compression_type)
     {
+        let compression_type = match sch2_header.compression_type {
+            0 => "none",
+            1 => "jz",
+            2 => "gzip",
+            3 => "lzma",
+            _ => return Err(StructureError),
+        };
         // Validate the header checksum
         if let Some(header_bytes) = jboot_data.get(0..sch2_header.header_size.get() as usize)
             && sch2_header.header_crc == sch2_header_crc(header_bytes)?
