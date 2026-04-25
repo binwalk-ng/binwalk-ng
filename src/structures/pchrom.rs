@@ -83,29 +83,26 @@ fn get_pch_regions_size(pch_data: &[u8], offset: usize, fcba: u8) -> Result<u32,
         let region_entry_end = region_entry_start + FLASH_REGION_ENTRY_SIZE;
 
         // Get the next region's 32-bit value, in raw bytes
-        match pch_data.get(region_entry_start..region_entry_end) {
-            None => {
-                return Err(StructureError);
-            }
-            Some(pch_region_data) => {
-                // Parse the 32-bit entry value for this region
-                let (region_entry, _) = RegionEntryBytes::ref_from_prefix(pch_region_data)
-                    .map_err(|_| StructureError)?;
+        let Some(pch_region_data) = pch_data.get(region_entry_start..region_entry_end) else {
+            return Err(StructureError);
+        };
 
-                let region_value = region_entry.region_value.get();
+        // Parse the 32-bit entry value for this region
+        let (region_entry, _) =
+            RegionEntryBytes::ref_from_prefix(pch_region_data).map_err(|_| StructureError)?;
 
-                // The base (starting offset) and limit (ending offset) of the region is encoded into the 32-bit entry value
-                let region_base = (region_value & 0x1FFF) << 12;
-                let region_limit = (((region_value & 0x1FFF0000) >> 4) | 0xFFFF) + 1;
+        let region_value = region_entry.region_value.get();
 
-                // Size can be inferred from the base and limit values
-                let region_size = region_limit - region_base;
+        // The base (starting offset) and limit (ending offset) of the region is encoded into the 32-bit entry value
+        let region_base = (region_value & 0x1FFF) << 12;
+        let region_limit = (((region_value & 0x1FFF0000) >> 4) | 0xFFFF) + 1;
 
-                // If size is 0, this region is not used in this image
-                if region_size > 0 && region_limit > image_size {
-                    image_size = region_limit;
-                }
-            }
+        // Size can be inferred from the base and limit values
+        let region_size = region_limit - region_base;
+
+        // If size is 0, this region is not used in this image
+        if region_size > 0 && region_limit > image_size {
+            image_size = region_limit;
         }
     }
 

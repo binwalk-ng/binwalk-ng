@@ -1,5 +1,4 @@
 use crate::structures::common::{self, StructureError};
-use std::collections::HashMap;
 
 /// Storage struct for Pcap block info
 #[derive(Debug, Clone, Default)]
@@ -70,24 +69,22 @@ pub fn parse_pcapng_section_block(block_data: &[u8]) -> Result<PcapSectionBlock,
         ("section_length", "u32"),
     ];
 
-    let endian_magics: HashMap<usize, &str> =
-        HashMap::from([(0x1A2B3C4D, "little"), (0x4D3C2B1A, "big")]);
-
-    let mut result = PcapSectionBlock::default();
-
     // Parse the section header structure; endianness doesn't matter (yet)
     if let Ok(section_header) = common::parse(block_data, &section_header_structure, "little") {
         // Determine the endianness based on the endian magic bytes
-        if let Some(endianness) = endian_magics.get(&section_header["endian_magic"]) {
-            result.endianness = endianness.to_string();
-
-            // Parse the section header block as a generic block to ensure it is valid
-            if let Ok(block_header) = parse_pcapng_block(block_data, &result.endianness) {
-                // Make sure the section header block type is the expected value
-                if block_header.block_type == SECTION_HEADER_BLOCK_TYPE {
-                    result.block_size = block_header.block_size;
-                    return Ok(result);
-                }
+        let endianness = match section_header["endian_magic"] {
+            0x1A2B3C4D => "little",
+            0x4D3C2B1A => "big",
+            _ => return Err(StructureError),
+        };
+        // Parse the section header block as a generic block to ensure it is valid
+        if let Ok(block_header) = parse_pcapng_block(block_data, endianness) {
+            // Make sure the section header block type is the expected value
+            if block_header.block_type == SECTION_HEADER_BLOCK_TYPE {
+                return Ok(PcapSectionBlock {
+                    block_size: block_header.block_size,
+                    endianness: endianness.to_string(),
+                });
             }
         }
     }

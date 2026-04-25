@@ -1,5 +1,5 @@
-use crate::structures::common::{self, StructureError};
-use std::collections::HashMap;
+use crate::structures::common::StructureError;
+use zerocopy::{FromBytes, Immutable, KnownLayout, Unaligned};
 
 /// Stores info on a RAR archive
 #[derive(Debug, Default, Clone)]
@@ -7,23 +7,24 @@ pub struct RarArchiveHeader {
     pub version: usize,
 }
 
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct RarHeaderBytes {
+    magic: [u8; 6],
+    version: u8,
+}
+
 /// Parse a RAR archive header
 pub fn parse_rar_archive_header(rar_data: &[u8]) -> Result<RarArchiveHeader, StructureError> {
-    let archive_header_structure =
-        vec![("magic_p1", "u32"), ("magic_p2", "u16"), ("version", "u8")];
+    let (archive_header, _) =
+        RarHeaderBytes::ref_from_prefix(rar_data).map_err(|_| StructureError)?;
 
-    // Version field of 0 indicates RARv4; version field of 1 indicates RARv5
-    let version_map: HashMap<usize, usize> = HashMap::from([(0, 4), (1, 5)]);
+    // Make sure the version number is one of the known versions, version field of 0 indicates RARv4; version field of 1 indicates RARv5
+    let version = match archive_header.version {
+        0 => 4,
+        1 => 5,
+        _ => return Err(StructureError),
+    };
 
-    // Parse the header
-    if let Ok(archive_header) = common::parse(rar_data, &archive_header_structure, "little") {
-        // Make sure the version number is one of the known versions
-        if let Some(header_version) = version_map.get(&archive_header["version"]).copied() {
-            return Ok(RarArchiveHeader {
-                version: header_version,
-            });
-        }
-    }
-
-    Err(StructureError)
+    Ok(RarArchiveHeader { version })
 }

@@ -1,4 +1,5 @@
-use crate::structures::common::{self, StructureError};
+use crate::structures::common::StructureError;
+use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
 /*
  Blob structure: from mimikatz repository.
@@ -38,39 +39,77 @@ use crate::structures::common::{self, StructureError};
 pub struct DPAPIBlobHeader {
     pub header_size: usize,
     pub blob_size: usize,
-    pub version: usize,
-    pub provider_id: usize,
-    pub master_key_version: usize,
-    pub master_key_id: usize,
-    pub flags: usize,
+    pub version: u32,
+    pub provider_id: u128,
+    pub master_key_version: u32,
+    pub master_key_id: u128,
+    pub flags: u32,
     pub description_len: usize,
-    pub crypto_algorithm: usize,
-    pub crypti_alg_len: usize,
+    pub crypto_algorithm: u32,
+    pub crypto_alg_len: usize,
     pub salt_len: usize,
     pub hmac_key_len: usize,
-    pub hash_algorithm: usize,
+    pub hash_algorithm: u32,
     pub hash_alg_len: usize,
     pub hmac2_key_len: usize,
     pub data_len: usize,
     pub sign_len: usize,
 }
 
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct DPAPIHeaderP1 {
+    version: zerocopy::U32<LE>,
+    provider_id: zerocopy::U128<LE>,
+    master_key_version: zerocopy::U32<LE>,
+    master_key_id: zerocopy::U128<LE>,
+    flags: zerocopy::U32<LE>,
+    description_len: zerocopy::U32<LE>,
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct DPAPIHeaderP2 {
+    crypto_algorithm: zerocopy::U32<LE>,
+    crypto_alg_len: zerocopy::U32<LE>,
+    salt_len: zerocopy::U32<LE>,
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct DPAPIHeaderP3 {
+    hmac_key_len: zerocopy::U32<LE>,
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct DPAPIHeaderP4 {
+    hash_algorithm: zerocopy::U32<LE>,
+    hash_alg_len: zerocopy::U32<LE>,
+    hmac2_key_len: zerocopy::U32<LE>,
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct DPAPIHeaderP5 {
+    data_len: zerocopy::U32<LE>,
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct DPAPIHeaderP6 {
+    sign_len: zerocopy::U32<LE>,
+}
+
 /// Parse a DPAPI BLOB
 pub fn parse_dpapi_blob_header(dpapi_blob_data: &[u8]) -> Result<DPAPIBlobHeader, StructureError> {
-    let initial_dpapi_structure = vec![
-        ("version", "u32"),
-        ("provider_id", "u128"),
-        ("master_key_version", "u32"),
-        ("master_key_id", "u128"),
-        ("flags", "u32"),
-        ("description_len", "u32"),
-    ];
     let mut offset: usize = (32 + 128 + 32 + 128 + 32 + 32) / 8;
 
-    let mut dpapi_header = common::parse(dpapi_blob_data, &initial_dpapi_structure, "little")?;
-    let description_len = dpapi_header["description_len"];
+    let (dpapi_header, _) =
+        DPAPIHeaderP1::ref_from_prefix(dpapi_blob_data).map_err(|_| StructureError)?;
+    let description_len = dpapi_header.description_len.get() as usize;
 
-    if description_len % 2 != 0 {
+    if !description_len.is_multiple_of(2) {
         return Err(StructureError);
     }
 
@@ -85,74 +124,49 @@ pub fn parse_dpapi_blob_header(dpapi_blob_data: &[u8]) -> Result<DPAPIBlobHeader
 
     offset += description_len;
 
-    let next_dpapi_structure = vec![
-        ("crypto_algorithm", "u32"),
-        ("crypti_alg_len", "u32"),
-        ("salt_len", "u32"),
-    ];
-    dpapi_header.extend(common::parse(
-        &dpapi_blob_data[offset..],
-        &next_dpapi_structure,
-        "little",
-    )?);
-    let salt_len = dpapi_header["salt_len"];
+    let (dpapi_header_p2, _) =
+        DPAPIHeaderP2::ref_from_prefix(&dpapi_blob_data[offset..]).map_err(|_| StructureError)?;
+    let salt_len = dpapi_header_p2.salt_len.get() as usize;
     offset += (32 + 32 + 32) / 8 + salt_len;
 
-    let next_dpapi_structure = vec![("hmac_key_len", "u32")];
-    dpapi_header.extend(common::parse(
-        &dpapi_blob_data[offset..],
-        &next_dpapi_structure,
-        "little",
-    )?);
-    let hmac_key_len = dpapi_header["hmac_key_len"];
+    let (dpapi_header_p3, _) =
+        DPAPIHeaderP3::ref_from_prefix(&dpapi_blob_data[offset..]).map_err(|_| StructureError)?;
+
+    let hmac_key_len = dpapi_header_p3.hmac_key_len.get() as usize;
     offset += 32 / 8 + hmac_key_len;
 
-    let next_dpapi_structure = vec![
-        ("hash_algorithm", "u32"),
-        ("hash_alg_len", "u32"),
-        ("hmac2_key_len", "u32"),
-    ];
-    dpapi_header.extend(common::parse(
-        &dpapi_blob_data[offset..],
-        &next_dpapi_structure,
-        "little",
-    )?);
-    let hmac2_key_len = dpapi_header["hmac2_key_len"];
+    let (dpapi_header_p4, _) =
+        DPAPIHeaderP4::ref_from_prefix(&dpapi_blob_data[offset..]).map_err(|_| StructureError)?;
+    let hmac2_key_len = dpapi_header_p4.hmac2_key_len.get() as usize;
     offset += (32 + 32 + 32) / 8 + hmac2_key_len;
 
-    let next_dpapi_structure = vec![("data_len", "u32")];
-    dpapi_header.extend(common::parse(
-        &dpapi_blob_data[offset..],
-        &next_dpapi_structure,
-        "little",
-    )?);
-    let data_len = dpapi_header["data_len"];
+    let (dpapi_header_p5, _) =
+        DPAPIHeaderP5::ref_from_prefix(&dpapi_blob_data[offset..]).map_err(|_| StructureError)?;
+
+    let data_len = dpapi_header_p5.data_len.get() as usize;
     offset += 32 / 8 + data_len;
 
-    let next_dpapi_structure = vec![("sign_len", "u32")];
-    dpapi_header.extend(common::parse(
-        &dpapi_blob_data[offset..],
-        &next_dpapi_structure,
-        "little",
-    )?);
-    let sign_len = dpapi_header["sign_len"];
+    let (dpapi_header_p6, _) =
+        DPAPIHeaderP6::ref_from_prefix(&dpapi_blob_data[offset..]).map_err(|_| StructureError)?;
+
+    let sign_len = dpapi_header_p6.sign_len.get() as usize;
     offset += 32 / 8 + sign_len;
 
     Ok(DPAPIBlobHeader {
         header_size: (32 * 13 + 128 * 2) / 8,
         blob_size: offset,
-        version: dpapi_header["version"],
-        provider_id: dpapi_header["provider_id"],
-        master_key_version: dpapi_header["master_key_version"],
-        master_key_id: dpapi_header["master_key_id"],
-        flags: dpapi_header["flags"],
+        version: dpapi_header.version.get(),
+        provider_id: dpapi_header.provider_id.get(),
+        master_key_version: dpapi_header.master_key_version.get(),
+        master_key_id: dpapi_header.master_key_id.get(),
+        flags: dpapi_header.flags.get(),
         description_len,
-        crypto_algorithm: dpapi_header["crypto_algorithm"],
-        crypti_alg_len: dpapi_header["crypti_alg_len"],
+        crypto_algorithm: dpapi_header_p2.crypto_algorithm.get(),
+        crypto_alg_len: dpapi_header_p2.crypto_alg_len.get() as usize,
         salt_len,
         hmac_key_len,
-        hash_algorithm: dpapi_header["hash_algorithm"],
-        hash_alg_len: dpapi_header["hash_alg_len"],
+        hash_algorithm: dpapi_header_p4.hash_algorithm.get(),
+        hash_alg_len: dpapi_header_p4.hash_alg_len.get() as usize,
         hmac2_key_len,
         data_len,
         sign_len,

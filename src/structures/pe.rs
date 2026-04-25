@@ -1,5 +1,4 @@
 use crate::structures::common::StructureError;
-use std::collections::HashMap;
 use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
 /// Stores info about the PE file
@@ -48,40 +47,6 @@ struct PEHeaderBytes {
 pub fn parse_pe_header(pe_data: &[u8]) -> Result<PEHeader, StructureError> {
     const PE_MAGIC: u32 = 0x00004550;
 
-    let known_machine_types = HashMap::from([
-        (0, "Unknown"),
-        (0x184, "Alpha32"),
-        (0x284, "Alpha64"),
-        (0x1D3, "Matsushita AM33"),
-        (0x8664, "Intel x86-64"),
-        (0x1C0, "ARM"),
-        (0xAA64, "ARM-64"),
-        (0x1C4, "ARM Thumb2"),
-        (0xEBC, "EFI"),
-        (0x14C, "Intel x86"),
-        (0x200, "Intel Itanium"),
-        (0x6232, "LoongArch 32-bit"),
-        (0x6264, "LoongArch 64-bit"),
-        (0x9041, "Mitsubishi M32R"),
-        (0x266, "MIPS16"),
-        (0x366, "MIPS with FPU"),
-        (0x466, "MIPS16 with FPU"),
-        (0x1F0, "PowerPC"),
-        (0x1F1, "PowerPC with FPU"),
-        (0x5032, "RISC-V 32-bit"),
-        (0x5064, "RISC-V 64-bit"),
-        (0x5128, "RISC-V 128-bit"),
-        (0x1A2, "Hitachi SH3"),
-        (0x1A3, "Hitachi SH3 DSP"),
-        (0x1A6, "Hitachi SH4"),
-        (0x1A8, "Hitachi SH5"),
-        (0x1C2, "Thumb"),
-        (0x169, "MIPS WCEv2"),
-    ]);
-
-    // Size of PE header structure
-    let pe_header_size = std::mem::size_of::<PEHeaderBytes>();
-
     // Parse the DOS header
     let (dos_header, _) = DOSHeaderBytes::ref_from_prefix(pe_data).map_err(|_| StructureError)?;
     // Sanity check the reserved header fields; they should all be 0
@@ -93,7 +58,7 @@ pub fn parse_pe_header(pe_data: &[u8]) -> Result<PEHeader, StructureError> {
     {
         // Start and end offsets of the PE header
         let pe_header_start: usize = dos_header.e_lfanew.get() as usize;
-        let pe_header_end: usize = pe_header_start + pe_header_size;
+        let pe_header_end: usize = pe_header_start + std::mem::size_of::<PEHeaderBytes>();
 
         // Sanity check the PE header offsets
         if let Some(pe_header_data) = pe_data.get(pe_header_start..pe_header_end) {
@@ -104,11 +69,40 @@ pub fn parse_pe_header(pe_data: &[u8]) -> Result<PEHeader, StructureError> {
             // Check the PE magic bytes
             if pe_header.magic == PE_MAGIC {
                 // Check the reported machine type
-                if let Some(machine) = known_machine_types.get(&pe_header.machine.get()) {
-                    return Ok(PEHeader {
-                        machine: machine.to_string(),
-                    });
+                let machine = match pe_header.machine.get() {
+                    0 => "Unknown",
+                    0x184 => "Alpha32",
+                    0x284 => "Alpha64",
+                    0x1D3 => "Matsushita AM33",
+                    0x8664 => "Intel x86-64",
+                    0x1C0 => "ARM",
+                    0xAA64 => "ARM-64",
+                    0x1C4 => "ARM Thumb2",
+                    0xEBC => "EFI",
+                    0x14C => "Intel x86",
+                    0x200 => "Intel Itanium",
+                    0x6232 => "LoongArch 32-bit",
+                    0x6264 => "LoongArch 64-bit",
+                    0x9041 => "Mitsubishi M32R",
+                    0x266 => "MIPS16",
+                    0x366 => "MIPS with FPU",
+                    0x466 => "MIPS16 with FPU",
+                    0x1F0 => "PowerPC",
+                    0x1F1 => "PowerPC with FPU",
+                    0x5032 => "RISC-V 32-bit",
+                    0x5064 => "RISC-V 64-bit",
+                    0x5128 => "RISC-V 128-bit",
+                    0x1A2 => "Hitachi SH3",
+                    0x1A3 => "Hitachi SH3 DSP",
+                    0x1A6 => "Hitachi SH4",
+                    0x1A8 => "Hitachi SH5",
+                    0x1C2 => "Thumb",
+                    0x169 => "MIPS WCEv2",
+                    _ => return Err(StructureError),
                 }
+                .to_string();
+
+                return Ok(PEHeader { machine });
             }
         }
     }

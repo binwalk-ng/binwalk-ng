@@ -1,6 +1,5 @@
 use crate::structures::common::{self, StructureError};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Stores info about a single VxWorks symbol table entry
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -24,27 +23,25 @@ pub fn parse_symtab_entry(
         ("group", "u32"),
     ];
 
-    // There may be more types; these are the only ones I've found in the wild
-    let allowed_symbol_types: HashMap<usize, String> = HashMap::from([
-        (0x500, "function".to_string()),
-        (0x700, "initialized data".to_string()),
-        (0x900, "uninitialized data".to_string()),
-    ]);
-
     let symtab_structure_size: usize = common::size(&symtab_structure);
 
     // Parse the symbol table entry
     if let Ok(symbol_entry) = common::parse(symbol_data, &symtab_structure, endianness) {
         // Sanity check expected values in the symbol table entry
-        if let Some(symbol_type) = allowed_symbol_types.get(&symbol_entry["type"])
-            && symbol_entry["name_ptr"] != 0
-            && symbol_entry["value_ptr"] != 0
-        {
+        if symbol_entry["name_ptr"] != 0 && symbol_entry["value_ptr"] != 0 {
+            // There may be more types; these are the only ones I've found in the wild
+            let symbol_type = match symbol_entry["type"] {
+                0x500 => "function",
+                0x700 => "initialized data",
+                0x900 => "uninitialized data",
+                _ => return Err(StructureError),
+            };
+
             return Ok(VxWorksSymbolTableEntry {
                 size: symtab_structure_size,
                 name: symbol_entry["name_ptr"],
                 value: symbol_entry["value_ptr"],
-                symtype: symbol_type.clone(),
+                symtype: symbol_type.to_string(),
             });
         }
     }

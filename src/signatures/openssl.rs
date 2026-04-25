@@ -44,8 +44,8 @@ pub fn openssl_crypt_parser(
 }
 
 // Returns true if the salt is entirely comprised of NULL and/or ASCII bytes
-fn is_salt_invalid(salt: usize) -> bool {
-    const SALT_LEN: usize = 8;
+fn is_salt_invalid(salt: u64) -> bool {
+    const SALT_LEN: usize = std::mem::size_of::<u64>();
 
     (0..SALT_LEN).all(|i| {
         let byte = ((salt >> (8 * i)) & 0xFF) as u8;

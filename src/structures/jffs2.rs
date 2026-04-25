@@ -36,12 +36,12 @@ pub fn parse_jffs2_node_header(node_data: &[u8]) -> Result<JFFS2Node, StructureE
     if let Ok(mut node_header) = common::parse(node_data, &jffs2_node_structure, &node.endianness) {
         // If the node header magic isn't correct, try parsing the header as big endian
         if node_header["magic"] != JFFS2_CORRECT_MAGIC {
-            node.endianness = "big".to_string();
             match common::parse(node_data, &jffs2_node_structure, &node.endianness) {
                 Err(_) => {
                     return Err(StructureError);
                 }
                 Ok(node_header_be) => {
+                    node.endianness = "big".to_string();
                     node_header = node_header_be.clone();
                 }
             }
@@ -53,7 +53,7 @@ pub fn parse_jffs2_node_header(node_data: &[u8]) -> Result<JFFS2Node, StructureE
             let node_calculated_crc = jffs2_node_crc(&node_data[0..JFFS2_HEADER_CRC_SIZE]);
 
             // Validate the node header CRC
-            if node_calculated_crc == node_header["crc"] {
+            if node_calculated_crc == node_header["crc"] as u32 {
                 node.size = node_header["size"];
                 node.node_type = node_header["type"] as u16;
                 return Ok(node);
@@ -65,6 +65,6 @@ pub fn parse_jffs2_node_header(node_data: &[u8]) -> Result<JFFS2Node, StructureE
 }
 
 /// CRC calculation for JFFS
-fn jffs2_node_crc(file_data: &[u8]) -> usize {
-    (crc32_v2::crc32(0xFFFFFFFF, file_data) ^ 0xFFFFFFFF) as usize
+fn jffs2_node_crc(file_data: &[u8]) -> u32 {
+    crc32_v2::crc32(0xFFFFFFFF, file_data) ^ 0xFFFFFFFF
 }

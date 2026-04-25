@@ -106,7 +106,7 @@ fn get_spare_size(
     endianness: &str,
 ) -> Result<usize, SignatureError> {
     // Valid spare sizes
-    let spare_sizes: Vec<usize> = vec![16, 32, 64, 128, 256, 512];
+    let spare_sizes = [16, 32, 64, 128, 256, 512];
 
     // Loop through all spare sizes until a valid object header is found
     // This is only for YAFFS2! It will fail for YAFFS1 images.

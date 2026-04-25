@@ -1,6 +1,5 @@
 use crate::common::get_cstring;
 use crate::structures::common::StructureError;
-use std::collections::HashMap;
 use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
 /// Struct to store useful Gzip header info
@@ -44,43 +43,38 @@ pub fn parse_gzip_header(header_data: &[u8]) -> Result<GzipHeader, StructureErro
     const FLAG_COMMENT: u8 = 0b0001_0000;
     const FLAG_RESERVED: u8 = 0b1110_0000;
 
-    let known_os_ids = HashMap::from([
-        (0, "FAT filesystem (MS-DOS, OS/2, NT/Win32"),
-        (1, "Amiga"),
-        (2, "VMS (or OpenVMS)"),
-        (3, "Unix"),
-        (4, "VM/CMS"),
-        (5, "Atari TOS"),
-        (6, "HPFS filesystem (OS/2, NT)"),
-        (7, "Macintosh"),
-        (8, "Z-System"),
-        (9, "CP/M"),
-        (10, "TOPS-20"),
-        (11, "NTFS filesystem (NT)"),
-        (12, "QDOS"),
-        (13, "Acorn RISCOS"),
-        (255, "unknown"),
-    ]);
-
-    let mut header_info = GzipHeader {
-        size: std::mem::size_of::<GzipHeaderBytes>(), // End of the fixed-size portion of the gzip header
-        ..Default::default()
-    };
-
     // Parse the gzip header
     let (gzip_header, _) =
         GzipHeaderBytes::ref_from_prefix(header_data).map_err(|_| StructureError)?;
 
-    // Report the timestamp
-    header_info.timestamp = gzip_header.timestamp.get();
-
     // Sanity check; compression type should be deflate, reserved flag bits should not be set, OS ID should be a known value
     if (gzip_header.flags & FLAG_RESERVED) == 0
         && gzip_header.compression_method == DEFLATE_COMPRESSION
-        && let Some(os) = known_os_ids.get(&gzip_header.osid)
     {
-        // Set the operating system string
-        header_info.os = os.to_string();
+        let os = match gzip_header.osid {
+            0 => "FAT filesystem (MS-DOS, OS/2, NT/Win32",
+            1 => "Amiga",
+            2 => "VMS (or OpenVMS)",
+            3 => "Unix",
+            4 => "VM/CMS",
+            5 => "Atari TOS",
+            6 => "HPFS filesystem (OS/2, NT)",
+            7 => "Macintosh",
+            8 => "Z-System",
+            9 => "CP/M",
+            10 => "TOPS-20",
+            11 => "NTFS filesystem (NT)",
+            12 => "QDOS",
+            13 => "Acorn RISCOS",
+            255 => "unknown",
+            _ => return Err(StructureError),
+        };
+        let mut header_info = GzipHeader {
+            size: std::mem::size_of::<GzipHeaderBytes>(),
+            timestamp: gzip_header.timestamp.get(),
+            os: os.to_string(),
+            ..Default::default()
+        };
 
         // Check if the optional "extra" data follows the standard Gzip header
         if (gzip_header.flags & FLAG_EXTRA) != 0 {

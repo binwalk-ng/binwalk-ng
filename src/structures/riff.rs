@@ -24,20 +24,16 @@ pub fn parse_riff_header(riff_data: &[u8]) -> Result<RIFFHeader, StructureError>
 
     const FILE_SIZE_OFFSET: usize = 8;
 
-    // Parse the riff header
     let (riff_header, _) =
         RIFFHeaderBytes::ref_from_prefix(riff_data).map_err(|_| StructureError)?;
-    // Sanity check expected magic bytes
-    if riff_header.magic == MAGIC {
-        // Get the RIFF type string (e.g., "WAVE")
-        if let Ok(type_string) =
+    if riff_header.magic == MAGIC
+        && let Ok(type_string) = // Get the RIFF type string (e.g., "WAVE")
             String::from_utf8(riff_data[CHUNK_TYPE_START..CHUNK_TYPE_END].to_vec())
-        {
-            return Ok(RIFFHeader {
-                size: riff_header.file_size.get() as usize + FILE_SIZE_OFFSET,
-                chunk_type: type_string.trim().to_string(),
-            });
-        }
+    {
+        return Ok(RIFFHeader {
+            size: riff_header.file_size.get() as usize + FILE_SIZE_OFFSET,
+            chunk_type: type_string.trim().to_string(),
+        });
     }
 
     Err(StructureError)

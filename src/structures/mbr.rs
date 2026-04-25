@@ -1,5 +1,4 @@
 use crate::structures::common::StructureError;
-use std::collections::HashMap;
 use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
 /// Struct to store MBR partition info
@@ -35,31 +34,12 @@ pub fn parse_mbr_image(mbr_data: &[u8]) -> Result<MBRHeader, StructureError> {
 
     const PARTITION_COUNT: usize = 4;
     const PARTITION_TABLE_OFFSET: usize = 446;
+    const ALLOWED_STATUS_VALUES: [u8; 2] = [0, 0x80];
 
-    let known_os_types = HashMap::from([
-        (0x07, "NTFS_IFS_HPFS_exFAT"),
-        (0x0B, "FAT32"),
-        (0x0C, "FAT32"),
-        (0x43, "Linux"),
-        (0x4D, "QNX Primary Volume"),
-        (0x4E, "QNX Secondary Volume"),
-        (0x81, "Minix"),
-        (0x83, "Linux"),
-        (0x8E, "Linux LVM"),
-        (0x96, "ISO-9660"),
-        (0xB1, "QNXv6 File System"),
-        (0xB2, "QNXv6 File System"),
-        (0xB3, "QNXv6 File System"),
-        (0xEE, "EFI GPT Protective"),
-        (0xEF, "EFI System Partition"),
-    ]);
-
-    let allowed_status_values: Vec<u8> = vec![0, 0x80];
     let partition_structure_size = std::mem::size_of::<PartitionEntryBytes>();
 
-    let partition_table_start: usize = PARTITION_TABLE_OFFSET;
-    let partition_table_end: usize =
-        partition_table_start + (partition_structure_size * PARTITION_COUNT);
+    let partition_table_start = PARTITION_TABLE_OFFSET;
+    let partition_table_end = partition_table_start + (partition_structure_size * PARTITION_COUNT);
 
     let mut mbr_header = MBRHeader::default();
 
@@ -78,12 +58,26 @@ pub fn parse_mbr_image(mbr_data: &[u8]) -> Result<MBRHeader, StructureError> {
             // OS type of zero or LBA size of 0 can be ignored
             if partition_entry.os_type != 0 || partition_entry.lba_size.get() != 0 {
                 // Validate the reported MBR status value
-                if allowed_status_values.contains(&partition_entry.status) {
+                if ALLOWED_STATUS_VALUES.contains(&partition_entry.status) {
                     // Default to unknown partition type
-                    let this_partition_name = known_os_types
-                        .get(&partition_entry.os_type)
-                        .copied()
-                        .unwrap_or("Unknown");
+                    let this_partition_name = match partition_entry.os_type {
+                        0x07 => "NTFS_IFS_HPFS_exFAT",
+                        0x0B => "FAT32",
+                        0x0C => "FAT32",
+                        0x43 => "Linux",
+                        0x4D => "QNX Primary Volume",
+                        0x4E => "QNX Secondary Volume",
+                        0x81 => "Minix",
+                        0x83 => "Linux",
+                        0x8E => "Linux LVM",
+                        0x96 => "ISO-9660",
+                        0xB1 => "QNXv6 File System",
+                        0xB2 => "QNXv6 File System",
+                        0xB3 => "QNXv6 File System",
+                        0xEE => "EFI GPT Protective",
+                        0xEF => "EFI System Partition",
+                        _ => "Unknown",
+                    };
 
                     // Create an MBRPartition structure for this entry
                     let this_partition = MBRPartition {

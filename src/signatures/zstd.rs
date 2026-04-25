@@ -42,27 +42,24 @@ pub fn zstd_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
         }
 
         // If the dictionary ID flag is non-zero, its value represents the size of the dictionary ID field; else, this field does not exist
-        if zstd_header.dictionary_id_flag == 1 {
-            next_block_header_start += 1;
-        } else if zstd_header.dictionary_id_flag == 2 {
-            next_block_header_start += 2;
-        } else if zstd_header.dictionary_id_flag == 3 {
-            next_block_header_start += 4;
-        }
+        next_block_header_start += match zstd_header.dictionary_id_flag {
+            1 => 1,
+            2 => 2,
+            3 => 4,
+            _ => 0,
+        };
 
         /*
          * If the frame content flag is 0 and the single segment flag is set, then the frame content header field is 1 byte in length;
          * else, the frame content flag indicates the size of the grame content header field.
          */
-        if zstd_header.frame_content_flag == 0 && zstd_header.single_segment_flag {
-            next_block_header_start += 1;
-        } else if zstd_header.frame_content_flag == 1 {
-            next_block_header_start += 2;
-        } else if zstd_header.frame_content_flag == 2 {
-            next_block_header_start += 4;
-        } else if zstd_header.frame_content_flag == 3 {
-            next_block_header_start += 8;
-        }
+        next_block_header_start += match zstd_header.frame_content_flag {
+            0 if zstd_header.single_segment_flag => 1,
+            1 => 2,
+            2 => 4,
+            3 => 8,
+            _ => 0,
+        };
 
         // Keep a count of how many blocks we've processed
         let mut block_count: usize = 0;

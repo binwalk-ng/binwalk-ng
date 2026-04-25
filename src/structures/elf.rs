@@ -276,8 +276,6 @@ pub fn parse_elf_header(elf_data: &[u8]) -> Result<ELFHeader, StructureError> {
         (259, "ChipON KungFu32"),
     ]);
 
-    let mut elf_hdr_info = ELFHeader::default();
-
     // Endianness doesn't matter here, and we don't know what the ELF's endianness is yet
 
     // Sanity check the e_ident fields
@@ -288,9 +286,6 @@ pub fn parse_elf_header(elf_data: &[u8]) -> Result<ELFHeader, StructureError> {
         && let Some(endianness) = elf_endianness.get(&elf_header.endianness)
     {
         // Set the ident info
-        elf_hdr_info.class = elf_class.to_string();
-        elf_hdr_info.osabi = osabi.to_string();
-        elf_hdr_info.endianness = endianness.to_string();
 
         // The rest of the ELF info comes immediately after the ident structure
         let elf_info_start: usize = ELF_IDENT_STRUCT_SIZE;
@@ -322,15 +317,17 @@ pub fn parse_elf_header(elf_data: &[u8]) -> Result<ELFHeader, StructureError> {
 
             // Sanity check the remaining ELF header fields
             if let Some(elf_type_str) = elf_types.get(&elf_type) {
-                // Set the ELF info fields
-                elf_hdr_info.exe_type = elf_type_str.to_string();
-                elf_hdr_info.machine = elf_machines
-                    .get(&elf_machine)
-                    // Use 'Unknown' as a fallback for the machine type
-                    .unwrap_or(&"Unknown")
-                    .to_string();
-
-                return Ok(elf_hdr_info);
+                return Ok(ELFHeader {
+                    class: elf_class.to_string(),
+                    osabi: osabi.to_string(),
+                    machine: elf_machines
+                        .get(&elf_machine)
+                        // Use 'Unknown' as a fallback for the machine type
+                        .unwrap_or(&"Unknown")
+                        .to_string(),
+                    exe_type: elf_type_str.to_string(),
+                    endianness: endianness.to_string(),
+                });
             }
         }
     }
