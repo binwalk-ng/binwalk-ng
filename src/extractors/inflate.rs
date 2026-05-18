@@ -1,4 +1,4 @@
-use crate::extractors::common::Chroot;
+use crate::extractors::Chroot;
 use adler32::RollingAdler32;
 use flate2::bufread::DeflateDecoder;
 use std::{io::Read, path::Path};

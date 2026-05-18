@@ -1,13 +1,13 @@
 use std::path::Path;
 
-use crate::extractors::common::{Chroot, ExtractionResult, Extractor, ExtractorType};
+use crate::extractors::{Chroot, ExtractionResult, Extractor, ExtractorType};
 
 /// Defines the internal extractor function for u16 swapped firmware images
 ///
 /// ```
 /// use std::io::ErrorKind;
 /// use std::process::Command;
-/// use binwalk_ng::extractors::common::ExtractorType;
+/// use binwalk_ng::extractors::ExtractorType;
 /// use binwalk_ng::extractors::swapped::swapped_extractor_u16;
 ///
 /// match swapped_extractor_u16().utility {

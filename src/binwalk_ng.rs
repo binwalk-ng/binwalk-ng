@@ -41,10 +41,10 @@ pub struct AnalysisResults {
     /// Path to the file that was analyzed
     pub file_path: PathBuf,
     /// File signature results, as returned by Binwalk::scan
-    pub file_map: Vec<signatures::common::SignatureResult>,
+    pub file_map: Vec<signatures::SignatureResult>,
     /// File extraction results, as returned by Binwalk::extract.
     /// HashMap key is the corresponding SignatureResult.id value in `file_map`.
-    pub extractions: HashMap<String, extractors::common::ExtractionResult>,
+    pub extractions: HashMap<String, extractors::ExtractionResult>,
 }
 
 /// Analyze files / memory for file signatures
@@ -76,13 +76,13 @@ pub struct Binwalk {
     /// The base output directory for extracted files
     pub base_output_directory: PathBuf,
     /// A list of signatures that must start at offset 0
-    pub short_signatures: Vec<signatures::common::Signature>,
+    pub short_signatures: Vec<signatures::Signature>,
     /// A list of magic bytes to search for throughout the entire file
     pub patterns: Vec<Vec<u8>>,
     /// Maps patterns to their corresponding signature
-    pub pattern_signature_table: HashMap<usize, signatures::common::Signature>,
+    pub pattern_signature_table: HashMap<usize, signatures::Signature>,
     /// Maps signatures to their corresponding extractors
-    pub extractor_lookup_table: HashMap<String, Option<extractors::common::Extractor>>,
+    pub extractor_lookup_table: HashMap<String, Option<extractors::Extractor>>,
 }
 
 impl Binwalk {
@@ -135,7 +135,7 @@ impl Binwalk {
         output_directory: Option<&Path>,
         include: Vec<String>,
         exclude: Vec<String>,
-        signatures: Option<Vec<signatures::common::Signature>>,
+        signatures: Option<Vec<signatures::Signature>>,
         full_search: bool,
     ) -> Result<Binwalk, BinwalkError> {
         let mut new_instance = Binwalk::default();
@@ -262,7 +262,7 @@ impl Binwalk {
     ///
     /// assert!(signature_results.len() > 0);
     /// ```
-    pub fn scan(&self, file_data: &[u8]) -> Vec<signatures::common::SignatureResult> {
+    pub fn scan(&self, file_data: &[u8]) -> Vec<signatures::SignatureResult> {
         const FILE_START_OFFSET: usize = 0;
 
         let mut index_adjustment: usize = 0;
@@ -272,7 +272,7 @@ impl Binwalk {
         let available_data = file_data.len();
 
         // A list of identified signatures, representing a "map" of the file data
-        let mut file_map: Vec<signatures::common::SignatureResult> = vec![];
+        let mut file_map: Vec<signatures::SignatureResult> = vec![];
 
         /*
          * Check beginning of file for short signatures.
@@ -304,7 +304,7 @@ impl Binwalk {
                         );
 
                         // Only update the next_valid_offset if confidence is high; these are, after all, short signatures
-                        if signature_result.confidence >= signatures::common::CONFIDENCE_HIGH {
+                        if signature_result.confidence >= signatures::CONFIDENCE_HIGH {
                             next_valid_offset = signature_result.offset + signature_result.size;
                         }
 
@@ -357,7 +357,7 @@ impl Binwalk {
 
                 // Get the signature associated with this magic signature
                 let magic_pattern_index: usize = magic_match.pattern().as_usize();
-                let signature: signatures::common::Signature = self
+                let signature: signatures::Signature = self
                     .pattern_signature_table
                     .get(&magic_pattern_index)
                     .unwrap()
@@ -395,7 +395,7 @@ impl Binwalk {
                     );
 
                     // Only update the next_valid_offset if confidence is at least medium
-                    if signature_result.confidence >= signatures::common::CONFIDENCE_MEDIUM {
+                    if signature_result.confidence >= signatures::CONFIDENCE_MEDIUM {
                         // Only update the next_valid offset if the end of the signature reported the size of its contents
                         if signature_result.size > 0 {
                             // This file's signature has a known size, so there's no need to scan inside this file's data.
@@ -502,7 +502,7 @@ impl Binwalk {
             }
 
             // This signature looks OK, update the next_valid_offset to be the end of this signature's data, only if we're fairly confident in the signature
-            if this_signature.confidence >= signatures::common::CONFIDENCE_MEDIUM {
+            if this_signature.confidence >= signatures::CONFIDENCE_MEDIUM {
                 next_valid_offset = this_signature.offset + this_signature.size;
             }
         }
@@ -534,7 +534,7 @@ impl Binwalk {
                 if next_index < file_map.len() {
                     // Look through all remaining file map entries for one with medium to high confidence
                     for file_map_entry in file_map.iter().skip(next_index) {
-                        if file_map_entry.confidence >= signatures::common::CONFIDENCE_MEDIUM {
+                        if file_map_entry.confidence >= signatures::CONFIDENCE_MEDIUM {
                             // If a signature of at least medium confidence is found, assume that *this* signature ends there
                             next_offset = file_map_entry.offset;
                             break;
@@ -602,11 +602,10 @@ impl Binwalk {
         &self,
         file_data: &[u8],
         file_name: impl AsRef<Path>,
-        file_map: &Vec<signatures::common::SignatureResult>,
-    ) -> HashMap<String, extractors::common::ExtractionResult> {
+        file_map: &Vec<signatures::SignatureResult>,
+    ) -> HashMap<String, extractors::ExtractionResult> {
         let file_path = file_name.as_ref();
-        let mut extraction_results: HashMap<String, extractors::common::ExtractionResult> =
-            HashMap::new();
+        let mut extraction_results: HashMap<String, extractors::ExtractionResult> = HashMap::new();
 
         // Spawn extractors for each extractable signature
         for signature in file_map {
@@ -623,7 +622,7 @@ impl Binwalk {
                 Some(_) => {
                     // Run an extraction for this signature
                     let mut extraction_result =
-                        extractors::common::execute(file_data, file_path, signature, &extractor);
+                        extractors::execute(file_data, file_path, signature, &extractor);
 
                     if !extraction_result.success {
                         debug!(
@@ -652,7 +651,7 @@ impl Binwalk {
                             );
 
                             // Re-run the extraction
-                            extraction_result = extractors::common::execute(
+                            extraction_result = extractors::execute(
                                 file_data,
                                 file_path,
                                 &new_signature,
@@ -866,7 +865,7 @@ fn init_extraction_directory(
 
 /// Returns true if the signature should be included for file analysis, else returns false.
 fn include_signature(
-    signature: &signatures::common::Signature,
+    signature: &signatures::Signature,
     include: &Vec<String>,
     exclude: &Vec<String>,
 ) -> bool {
@@ -895,8 +894,8 @@ fn include_signature(
 
 /// Some SignatureResult fields need to be auto-populated.
 fn signature_result_auto_populate(
-    signature_result: &mut signatures::common::SignatureResult,
-    signature: &signatures::common::Signature,
+    signature_result: &mut signatures::SignatureResult,
+    signature: &signatures::Signature,
 ) {
     signature_result.id = Uuid::new_v4().to_string();
     signature_result.name = signature.name.clone();

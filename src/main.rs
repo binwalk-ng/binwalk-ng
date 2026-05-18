@@ -19,6 +19,7 @@ mod display;
 #[cfg(feature = "entropy-plot")]
 mod entropy;
 mod extractors;
+mod formats;
 mod json;
 mod magic;
 mod signatures;
@@ -219,9 +220,9 @@ fn main() -> ExitCode {
             if cli_args.matryoshka {
                 for (_signature_id, extraction_result) in results.extractions.into_iter() {
                     if !extraction_result.do_not_recurse {
-                        for file_path in extractors::common::get_extracted_files(
-                            &extraction_result.output_directory,
-                        ) {
+                        for file_path in
+                            extractors::get_extracted_files(&extraction_result.output_directory)
+                        {
                             debug!("Queuing {} for analysis", file_path.display());
                             target_files.push_back(file_path);
                         }
@@ -385,7 +386,7 @@ fn carve_file_data_to_disk(
     offset: usize,
     size: usize,
 ) -> bool {
-    let chroot = extractors::common::Chroot::default();
+    let chroot = extractors::Chroot::default();
 
     // Carved file path will be: <source file path>_<offset>_<name>.raw
     let carved_file_path = format!(

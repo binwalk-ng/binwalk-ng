@@ -7,7 +7,7 @@
 //!
 //! There are some definitions and helper functions in `structures::common` that are generally helpful for processing data structures.
 //!
-//! The `structures::common::parse` function provides a way to parse basic data structures by defining the data structure format,
+//! The `structures::parse` function provides a way to parse basic data structures by defining the data structure format,
 //! the endianness to use, and the data to cast the structure over. It is heavily used by most structure parsers.
 //! It supports the following data types:
 //!
@@ -18,11 +18,11 @@
 //! - u64
 //!
 //! Regardless of the data type specified, all values are returned as `usize` types.
-//! If an error occurs (typically due to not enough data available to process the specified data structure), `Err(structures::common::StructureError)` is returned.
+//! If an error occurs (typically due to not enough data available to process the specified data structure), `Err(structures::StructureError)` is returned.
 //!
-//! The `structures::common::size` function is a convenience function that returns the number of bytes required to parse a defined data structure.
+//! The `structures::size` function is a convenience function that returns the number of bytes required to parse a defined data structure.
 //!
-//! The `structures::common::StructureError` struct is typically used by structure parsers to return an error.
+//! The `structures::StructureError` struct is typically used by structure parsers to return an error.
 //!
 //! ## Writing a Structure Parser
 //!
@@ -40,7 +40,7 @@
 //!
 //! ```no_run
 //! use binwalk_ng::common::{crc32, get_cstring};
-//! use binwalk_ng::structures::common::{self, StructureError};
+//! use binwalk_ng::structures::{self, StructureError};
 //!
 //! #[derive(Debug, Default, Clone)]
 //! pub struct FooBarHeader {
@@ -66,10 +66,10 @@
 //!         // NULL-terminated original file name immediately follows the header structure
 //!     ];
 //!
-//!     let struct_size: usize = common::size(&foobar_struct);
+//!     let struct_size: usize = structures::size(&foobar_struct);
 //!
 //!     // Parse the provided data in accordance with the layout defined in foobar_struct, interpret fields as little endian
-//!     if let Ok(foobar_header) = common::parse(foobar_data, &foobar_struct, "little") {
+//!     if let Ok(foobar_header) = structures::parse(foobar_data, &foobar_struct, "little") {
 //!         
 //!         if let Some(crc_data) = foobar_data.get(0..HEADER_CRC_LEN) {
 //!             // Validate the header CRC
@@ -96,76 +96,163 @@
 //! }
 //! ```
 
-pub mod android_bootimg;
-pub mod androidsparse;
-pub mod apfs;
-pub mod arj;
-pub mod autel;
-pub mod binhdr;
-pub mod bmp;
-pub mod btrfs;
-pub mod cab;
-pub mod chk;
-pub mod common;
-pub mod cpio;
-pub mod cramfs;
-pub mod csman;
-pub mod deb;
-pub mod dkbs;
-pub mod dlink_tlv;
-pub mod dlob;
-pub mod dmg;
-pub mod dms;
-pub mod dpapi;
-pub mod dtb;
-pub mod dxbc;
-pub mod efigpt;
-pub mod elf;
-pub mod eva;
-pub mod ext;
-pub mod fat;
-pub mod gif;
-pub mod gzip;
-pub mod iso9660;
-pub mod jboot;
-pub mod jffs2;
-pub mod linux;
-pub mod logfs;
-pub mod luks;
-pub mod lz4;
-pub mod lzfse;
-pub mod lzma;
-pub mod lzop;
-pub mod matter_ota;
-pub mod mbr;
-pub mod mh01;
-pub mod ntfs;
-pub mod openssl;
-pub mod packimg;
-pub mod pcap;
-pub mod pchrom;
-pub mod pe;
-pub mod png;
-pub mod program_store;
-pub mod qcow;
-pub mod qnx;
-pub mod rar;
-pub mod riff;
-pub mod romfs;
-pub mod rtk;
-pub mod seama;
-pub mod sevenzip;
-pub mod shrs;
-pub mod squashfs;
-pub mod svg;
-pub mod tplink;
-pub mod trx;
-pub mod ubi;
-pub mod uefi;
-pub mod uimage;
-pub mod vxworks;
-pub mod wince;
-pub mod xz;
-pub mod yaffs;
-pub mod zip;
-pub mod zstd;
+use log::error;
+use std::collections::HashMap;
+
+/*
+ * Note that all values returned by the parse() function are of type usize; this is a concious decision.
+ * Returning usize types makes the calling code much cleaner, but that means that u64 fields won't fit into the return value on 32-bit systems.
+ * Thus, only 64-bit systems are supported. This requirement is enforced here.
+ */
+#[cfg(not(target_pointer_width = "64"))]
+compile_error!("compilation is only allowed for 64-bit targets");
+
+/// Error return value of structure parsers
+#[derive(Debug, Clone)]
+pub struct StructureError;
+
+/// Function to parse basic C-style data structures.
+///
+/// ## Supported Data Types
+///
+/// The following data types are supported:
+/// - u8
+/// - u16
+/// - u24
+/// - u32
+/// - u64
+///
+/// ## Arguments
+///
+/// - `data`: The raw data to apply the structure over
+/// - `structure`: A vector of tuples describing the data structure
+/// - `endianness`: One of: "big", "little"
+///
+/// ## Example:
+///
+/// ```
+/// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_structures_common_rs_34_0() -> Result<bool, binwalk_ng::structures::StructureError> {
+/// use binwalk_ng::structures;
+///
+/// let my_structure = vec![
+///     ("magic", "u32"),
+///     ("size", "u64"),
+///     ("flags", "u8"),
+///     ("packed_bytes", "u24"),
+///     ("checksum", "u16"),
+/// ];
+///
+/// let some_data = b"AAAA\x01\x00\x00\x00\x00\x00\x00\x00\x08\x0A\x0B\x0C\x01\x02";
+/// let header = structures::parse(some_data, &my_structure, "little")?;
+///
+/// assert_eq!(header["magic"], 0x41414141);
+/// assert_eq!(header["checksum"], 0x0201);
+/// # Ok(true)
+/// # } _doctest_main_src_structures_common_rs_34_0(); }
+/// ```
+pub fn parse(
+    data: &[u8],
+    structure: &[(&str, &str)],
+    endianness: &str,
+) -> Result<HashMap<String, usize>, StructureError> {
+    const U8_SIZE: usize = std::mem::size_of::<u8>();
+    const U16_SIZE: usize = std::mem::size_of::<u16>();
+    const U32_SIZE: usize = std::mem::size_of::<u32>();
+    const U64_SIZE: usize = std::mem::size_of::<u64>();
+    const U24_SIZE: usize = 3;
+
+    let mut parsed_structure = HashMap::with_capacity(structure.len());
+
+    let mut remaining_data = data;
+    for &(name, ctype) in structure {
+        let csize = type_to_size(ctype).ok_or(StructureError)?;
+        let raw_bytes = remaining_data.split_off(..csize).ok_or(StructureError)?;
+        let value = match csize {
+            // u8, endianness doesn't matter
+            U8_SIZE => usize::from(raw_bytes[0]),
+            U16_SIZE => {
+                let f = if endianness == "big" {
+                    u16::from_be_bytes
+                } else {
+                    u16::from_le_bytes
+                };
+                usize::from(f(raw_bytes.try_into().unwrap()))
+            }
+            U32_SIZE => {
+                let f = if endianness == "big" {
+                    u32::from_be_bytes
+                } else {
+                    u32::from_le_bytes
+                };
+                f(raw_bytes.try_into().unwrap()) as usize
+            }
+            U64_SIZE => {
+                let f = if endianness == "big" {
+                    u64::from_be_bytes
+                } else {
+                    u64::from_le_bytes
+                };
+                f(raw_bytes.try_into().unwrap()) as usize
+            }
+            // Yes Virginia, u24's are real
+            U24_SIZE => {
+                if endianness == "big" {
+                    usize::from(raw_bytes[0]) << 16
+                        | usize::from(raw_bytes[1]) << 8
+                        | usize::from(raw_bytes[2])
+                } else {
+                    usize::from(raw_bytes[2]) << 16
+                        | usize::from(raw_bytes[1]) << 8
+                        | usize::from(raw_bytes[0])
+                }
+            }
+            _ => {
+                error!("Cannot parse structure element with unknown data type '{ctype}'");
+                return Err(StructureError);
+            }
+        };
+
+        parsed_structure.insert(name.to_string(), value);
+    }
+
+    Ok(parsed_structure)
+}
+
+/// Returns the size of a given structure definition.
+///
+/// ## Example:
+///
+/// ```
+/// use binwalk_ng::structures;
+///
+/// let my_structure = vec![
+///     ("magic", "u32"),
+///     ("size", "u64"),
+///     ("flags", "u8"),
+///     ("checksum", "u32"),
+/// ];
+///
+/// let struct_size = structures::size(&my_structure);
+///
+/// assert_eq!(struct_size, 17);
+/// ```
+pub fn size(structure: &[(&str, &str)]) -> usize {
+    structure
+        .iter()
+        .filter_map(|(_, ctype)| type_to_size(ctype))
+        .sum()
+}
+
+fn type_to_size(ctype: &str) -> Option<usize> {
+    match ctype {
+        "u8" => Some(1),
+        "u16" => Some(2),
+        "u24" => Some(3),
+        "u32" => Some(4),
+        "u64" => Some(8),
+        _ => {
+            error!("Unknown size for structure type '{ctype}'!");
+            None
+        }
+    }
+}
