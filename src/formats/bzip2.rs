@@ -88,13 +88,9 @@ pub fn bzip2_decompressor(
     // Slice the data starting from the provided offset
     let bzip2_data = &file_data[offset..];
 
-    // Initialize BzDecoder.
-    // BzDecoder::new expects standard bzip2 streams.
-    // If your stream lacks headers (like Decompress::new(false)), use BzDecoder::new_multi(bzip2_data, false)
     let mut decoder = BzDecoder::new(bzip2_data);
 
     if let Some(output_directory) = output_directory {
-        // --- EXTRACTION MODE ---
         // If extraction is requested, we write directly to the chroot file
         let chroot = Chroot::new(output_directory);
 
@@ -103,7 +99,7 @@ pub fn bzip2_decompressor(
         let mut decompressed_output = Vec::new();
 
         if decoder.read_to_end(&mut decompressed_output).is_ok()
-            && chroot.append_to_file(OUTPUT_FILE_NAME, &decompressed_output)
+            && chroot.create_file(OUTPUT_FILE_NAME, &decompressed_output)
         {
             result.success = true;
             // total_in() tells us exactly how many compressed bytes were read from file_data
