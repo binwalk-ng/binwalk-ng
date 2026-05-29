@@ -1,0 +1,329 @@
+use crate::common::{get_cstring, is_offset_safe};
+use crate::extractors::{Chroot, ExtractionResult, Extractor, ExtractorType};
+use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
+use crate::structures::StructureError;
+use std::collections::HashMap;
+use std::path::Path;
+use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
+
+/// Human readable description
+pub const DESCRIPTION: &str = "Matter OTA firmware";
+
+/// Matter OTA firmware images always start with these bytes
+pub fn matter_ota_magic() -> Vec<Vec<u8>> {
+    vec![b"\x1e\xf1\xee\x1b".to_vec()]
+}
+
+/// Validates the Matter OTA header
+pub fn matter_ota_parser(
+    file_data: &[u8],
+    offset: usize,
+) -> Result<SignatureResult, SignatureError> {
+    // Successful return value
+    let mut result = SignatureResult {
+        offset,
+        description: DESCRIPTION.to_string(),
+        ..Default::default()
+    };
+
+    if let Ok(ota_header) = parse_matter_ota_header(&file_data[offset..]) {
+        result.confidence = CONFIDENCE_HIGH;
+        result.size = ota_header.header_size;
+        result.description = format!(
+            "{}, total size: {} bytes, tlv header size: {} bytes, vendor id: 0x{:x}, product id: 0x{:x}, version: {}, payload size: {} bytes, digest type: {}, payload digest: {}",
+            result.description,
+            ota_header.total_size,
+            ota_header.header_size,
+            ota_header.vendor_id,
+            ota_header.product_id,
+            ota_header.version,
+            ota_header.payload_size,
+            ota_header.image_digest_type,
+            ota_header.image_digest,
+        );
+
+        return Ok(result);
+    }
+    Err(SignatureError)
+}
+
+/// Struct to store Matter OTA header info
+#[derive(Debug, Default, Clone)]
+pub struct MatterOTAHeader {
+    pub total_size: usize,
+    pub header_size: usize,
+    pub vendor_id: usize,
+    pub product_id: usize,
+    pub version: String,
+    pub payload_size: usize,
+    pub image_digest_type: usize,
+    pub image_digest: String,
+}
+
+#[derive(Debug)]
+enum Value {
+    Struct,
+    EndOfContainer,
+    Unsigned(usize),
+    String(String),
+    OctetString(Vec<u8>),
+}
+
+#[derive(Debug)]
+struct Element {
+    tag: Option<usize>,
+    value: Value,
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct OtaHeaderBytes {
+    magic: zerocopy::U32<LE>,
+    total_size: zerocopy::U64<LE>,
+    header_size: zerocopy::U32<LE>,
+}
+
+/// Parse a Matter OTA firmware header
+pub fn parse_matter_ota_header(ota_data: &[u8]) -> Result<MatterOTAHeader, StructureError> {
+    let (ota_header, _) = OtaHeaderBytes::ref_from_prefix(ota_data).map_err(|_| StructureError)?;
+    let total_size = ota_header.total_size.get() as usize;
+    let header_size = ota_header.header_size.get() as usize;
+
+    // Header starts after the magic, total size and header size fields
+    let header_start = std::mem::size_of::<OtaHeaderBytes>();
+    let header_end = header_start + header_size;
+    let header_data = ota_data
+        .get(header_start..header_end)
+        .ok_or(StructureError)?;
+
+    let header = parse_tlv_header(header_data)?;
+
+    let mut result = MatterOTAHeader {
+        total_size,
+        header_size,
+        ..Default::default()
+    };
+
+    for (key, value) in header.into_iter() {
+        match (key.as_ref(), value) {
+            ("VendorID", Value::Unsigned(vendor_id)) => result.vendor_id = vendor_id,
+            ("ProductID", Value::Unsigned(product_id)) => result.product_id = product_id,
+            ("SoftwareVersionString", Value::String(version)) => result.version = version,
+            ("PayloadSize", Value::Unsigned(payload_size)) => result.payload_size = payload_size,
+            ("ImageDigestType", Value::Unsigned(image_digest_type)) => {
+                result.image_digest_type = image_digest_type
+            }
+            ("ImageDigest", Value::OctetString(image_digest)) => {
+                result.image_digest = image_digest.iter().map(|b| format!("{b:02x}")).collect();
+            }
+            // Ignore other fields
+            _ => {}
+        }
+    }
+
+    // Sanity check
+    if (result.payload_size + header_start + header_size) == total_size {
+        return Ok(result);
+    }
+
+    Err(StructureError)
+}
+
+/// Parse tlv element, return result and new offset
+fn parse_tlv_element(data: &[u8]) -> Result<(Element, usize), StructureError> {
+    let control_octet = data.first().ok_or(StructureError)?;
+
+    let element_type = control_octet & 0x1f;
+    let tag_control = control_octet >> 5;
+
+    // Lower 2 bits of the control octet determine the field width of integer types
+    // or the width of the length field for string types
+    let field_width_type = match element_type & 0x3 {
+        0 => "u8",
+        1 => "u16",
+        2 => "u32",
+        3 => "u64",
+        _ => return Err(StructureError),
+    };
+
+    // Parse numerical tag. Only supports anonymous fields and fields with a one byte tag
+    let (tag, field_offset) = match tag_control {
+        0 => (None, 1), // Anonymous field
+        1 => (Some(*data.get(1).ok_or(StructureError)? as usize), 2),
+        _ => return Err(StructureError),
+    };
+
+    let field_data = data.get(field_offset..).ok_or(StructureError)?;
+
+    match element_type {
+        0b1_0101 => Ok((
+            // Struct container
+            Element {
+                tag,
+                value: Value::Struct,
+            },
+            field_offset,
+        )),
+        0b1_1000 => Ok((
+            // End of container
+            Element {
+                tag,
+                value: Value::EndOfContainer,
+            },
+            field_offset,
+        )),
+        0b0_0100..=0b0_0111 => {
+            // Unsigned integer
+            let structure = &[("field", field_width_type)];
+            let result = crate::structures::parse(field_data, structure, "little")?;
+            Ok((
+                Element {
+                    tag,
+                    value: Value::Unsigned(result["field"]),
+                },
+                field_offset + crate::structures::size(structure),
+            ))
+        }
+        0b0_1100..=0b0_1111 => {
+            // UTF-8 String
+            let structure = &[("string_length", field_width_type)];
+            let result = crate::structures::parse(field_data, structure, "little")?;
+            let string_length = result["string_length"];
+            let string_data = field_data
+                .get(crate::structures::size(structure)..)
+                .ok_or(StructureError)?;
+            // The string buffer isn't null-terminated, so use the explicit length
+            let string = string_data
+                .get(..string_length)
+                .map(get_cstring)
+                .ok_or(StructureError)?;
+            Ok((
+                Element {
+                    tag,
+                    value: Value::String(string),
+                },
+                field_offset + crate::structures::size(structure) + string_length,
+            ))
+        }
+        0b1_0000..=0b1_0011 => {
+            // Octet string
+            let structure = &[("octet_string_length", field_width_type)];
+            let result = crate::structures::parse(field_data, structure, "little")?;
+            let octet_string_length = result["octet_string_length"];
+            let octet_string_data = field_data
+                .get(crate::structures::size(structure)..)
+                .ok_or(StructureError)?;
+            Ok((
+                Element {
+                    tag,
+                    value: Value::OctetString(
+                        octet_string_data
+                            .get(..octet_string_length)
+                            .ok_or(StructureError)?
+                            .to_vec(),
+                    ),
+                },
+                field_offset + crate::structures::size(structure) + octet_string_length,
+            ))
+        }
+        _ => Err(StructureError), // Other types are not implemented, but not necessary for header parsing
+    }
+}
+
+fn parse_tlv_header(data: &[u8]) -> Result<HashMap<String, Value>, StructureError> {
+    // Field names for the Matter OTA header indexed by the tag number
+    let fields = [
+        "VendorID",
+        "ProductID",
+        "SoftwareVersion",
+        "SoftwareVersionString",
+        "PayloadSize",
+        "MinApplicableSoftwareVersion",
+        "MaxApplicableSoftwareVersion",
+        "ReleaseNotesURL",
+        "ImageDigestType",
+        "ImageDigest",
+    ];
+    let mut header = HashMap::new();
+
+    let available_data: usize = data.len();
+
+    let mut last_tlv_offset: Option<usize> = None;
+    let mut next_tlv_offset: usize = 0;
+
+    while is_offset_safe(available_data, next_tlv_offset, last_tlv_offset) {
+        let (element, new_offset) = parse_tlv_element(&data[next_tlv_offset..])?;
+        last_tlv_offset = Some(next_tlv_offset);
+        next_tlv_offset += new_offset;
+        if let Some(tag) = element.tag {
+            let field_name = *fields.get(tag).ok_or(StructureError)?;
+            header.insert(field_name.to_string(), element.value);
+        }
+    }
+    Ok(header)
+}
+
+/// Defines the internal extractor function for extracting a Matter OTA firmware payload */
+///
+/// ```
+/// use std::io::ErrorKind;
+/// use std::process::Command;
+/// use binwalk_ng::extractors::ExtractorType;
+/// use binwalk_ng::formats::matter_ota::matter_ota_extractor;
+///
+/// match matter_ota_extractor().utility {
+///     ExtractorType::None => panic!("Invalid extractor type of None"),
+///     ExtractorType::Internal(func) => println!("Internal extractor OK: {:?}", func),
+///     ExtractorType::External(cmd) => {
+///         if let Err(e) = Command::new(&cmd).output() {
+///             if e.kind() == ErrorKind::NotFound {
+///                 panic!("External extractor '{}' not found", cmd);
+///             } else {
+///                 panic!("Failed to execute external extractor '{}': {}", cmd, e);
+///             }
+///         }
+///     }
+/// }
+/// ```
+pub fn matter_ota_extractor() -> Extractor {
+    Extractor {
+        utility: ExtractorType::Internal(extract_matter_ota),
+        ..Default::default()
+    }
+}
+
+/// Matter OTA firmware payload extractor
+pub fn extract_matter_ota(
+    file_data: &[u8],
+    offset: usize,
+    output_directory: Option<&Path>,
+) -> ExtractionResult {
+    const OUTFILE_NAME: &str = "matter_payload.bin";
+
+    let mut result = ExtractionResult::default();
+
+    if let Ok(ota_header) = parse_matter_ota_header(&file_data[offset..]) {
+        const MAGIC_SIZE: usize = 4;
+        const TOTAL_SIZE_SIZE: usize = 8;
+        const HEADER_SIZE_SIZE: usize = 4;
+
+        let total_header_size =
+            MAGIC_SIZE + TOTAL_SIZE_SIZE + HEADER_SIZE_SIZE + ota_header.header_size;
+
+        result.success = true;
+        result.size = Some(ota_header.total_size);
+
+        let payload_start = offset + total_header_size;
+        let payload_end = offset + total_header_size + ota_header.payload_size;
+
+        // Sanity check reported payload size and get the payload data
+        if let Some(payload_data) = file_data.get(payload_start..payload_end)
+            && let Some(output_directory) = output_directory
+        {
+            let chroot = Chroot::new(output_directory);
+            result.success = chroot.carve_file(OUTFILE_NAME, payload_data, 0, payload_data.len());
+        }
+    }
+
+    result
+}

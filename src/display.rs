@@ -88,7 +88,7 @@ fn print_footer() {
     println!();
 }
 
-fn print_signature(signature: &signatures::common::SignatureResult) {
+fn print_signature(signature: &signatures::SignatureResult) {
     let decimal_string = format!("{}", signature.offset);
     let hexadecimal_string = format!("{:#X}", signature.offset);
     let display_string = format!(
@@ -98,24 +98,24 @@ fn print_signature(signature: &signatures::common::SignatureResult) {
         line_wrap(&signature.description, COLUMN1_WIDTH + COLUMN2_WIDTH)
     );
 
-    if signature.confidence >= signatures::common::CONFIDENCE_HIGH {
+    if signature.confidence >= signatures::CONFIDENCE_HIGH {
         println!("{}", display_string.green());
-    } else if signature.confidence >= signatures::common::CONFIDENCE_MEDIUM {
+    } else if signature.confidence >= signatures::CONFIDENCE_MEDIUM {
         println!("{}", display_string.yellow());
     } else {
         println!("{}", display_string.red());
     }
 }
 
-fn print_signatures(signatures: &Vec<signatures::common::SignatureResult>) {
+fn print_signatures(signatures: &Vec<signatures::SignatureResult>) {
     for signature in signatures {
         print_signature(signature);
     }
 }
 
 fn print_extraction(
-    signature: &signatures::common::SignatureResult,
-    extraction: Option<&extractors::common::ExtractionResult>,
+    signature: &signatures::SignatureResult,
+    extraction: Option<&extractors::ExtractionResult>,
 ) {
     let extraction_message: ColoredString;
 
@@ -151,14 +151,14 @@ fn print_extraction(
 }
 
 fn print_extractions(
-    signatures: &Vec<signatures::common::SignatureResult>,
-    extraction_results: &HashMap<String, extractors::common::ExtractionResult>,
+    signatures: &Vec<signatures::SignatureResult>,
+    extraction_results: &HashMap<String, extractors::ExtractionResult>,
 ) {
     let mut delimiter_printed: bool = false;
 
     for signature in signatures {
         let mut printable_extraction: bool = false;
-        let mut extraction_result: Option<&extractors::common::ExtractionResult> = None;
+        let mut extraction_result: Option<&extractors::ExtractionResult> = None;
 
         // Only print extraction results if an extraction was attempted or explicitly declined
         if signature.extraction_declined {
@@ -207,7 +207,7 @@ struct SignatureInfo {
     description: String,
 }
 
-pub fn print_signature_list(quiet: bool, signatures: &Vec<signatures::common::Signature>) {
+pub fn print_signature_list(quiet: bool, signatures: &Vec<signatures::Signature>) {
     let mut extractor_count: usize = 0;
     let mut signature_count: usize = 0;
     let mut sorted_descriptions: Vec<String> = vec![];
@@ -247,13 +247,13 @@ pub fn print_signature_list(quiet: bool, signatures: &Vec<signatures::common::Si
                 signature_info.has_extractor = true;
 
                 match &extractor.utility {
-                    extractors::common::ExtractorType::External(command) => {
+                    extractors::ExtractorType::External(command) => {
                         signature_info.extractor = command.to_string();
                     }
-                    extractors::common::ExtractorType::Internal(_) => {
+                    extractors::ExtractorType::Internal(_) => {
                         signature_info.extractor = "Built-in".to_string();
                     }
-                    extractors::common::ExtractorType::None => error!(
+                    extractors::ExtractorType::None => error!(
                         "An invalid extractor type exists for the '{}' signature",
                         signature.description
                     ),

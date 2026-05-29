@@ -1,0 +1,426 @@
+use crate::common::{crc32, get_cstring};
+use crate::extractors::{Chroot, ExtractionResult, Extractor, ExtractorType};
+use crate::signatures::{
+    CONFIDENCE_HIGH, CONFIDENCE_LOW, CONFIDENCE_MEDIUM, SignatureError, SignatureResult,
+};
+use crate::structures::StructureError;
+use std::path::Path;
+use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
+
+/// Human readable descriptions
+pub const JBOOT_ARM_DESCRIPTION: &str = "JBOOT firmware header";
+pub const JBOOT_STAG_DESCRIPTION: &str = "JBOOT STAG header";
+pub const JBOOT_SCH2_DESCRIPTION: &str = "JBOOT SCH2 header";
+
+/// JBOOT firmware header magic bytes
+pub fn jboot_arm_magic() -> Vec<Vec<u8>> {
+    vec![b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x42\x48".to_vec()]
+}
+
+/// JBOOT STAG header magic bytes
+pub fn jboot_stag_magic() -> Vec<Vec<u8>> {
+    vec![b"\x04\x04\x24\x2B".to_vec(), b"\xFF\x04\x24\x2B".to_vec()]
+}
+
+/// JBOOT SCH2 header magic bytes
+pub fn jboot_sch2_magic() -> Vec<Vec<u8>> {
+    vec![
+        b"\x24\x21\x00\x02".to_vec(),
+        b"\x24\x21\x01\x02".to_vec(),
+        b"\x24\x21\x02\x02".to_vec(),
+        b"\x24\x21\x03\x02".to_vec(),
+    ]
+}
+
+/// Parse and validate the JBOOT ARM header
+pub fn jboot_arm_parser(
+    file_data: &[u8],
+    offset: usize,
+) -> Result<SignatureResult, SignatureError> {
+    // Magic bytes start at this offset into the header
+    const MAGIC_OFFSET: usize = 48;
+
+    // Successful return value
+    let mut result = SignatureResult {
+        description: JBOOT_ARM_DESCRIPTION.to_string(),
+        confidence: CONFIDENCE_MEDIUM,
+        ..Default::default()
+    };
+
+    // Actual header starts MAGIC_OFFSET bytes before the magic bytes
+    let header_start = offset - MAGIC_OFFSET;
+
+    if let Some(jboot_data) = file_data.get(header_start..)
+        && let Ok(arm_header) = parse_jboot_arm_header(jboot_data)
+    {
+        result.size = arm_header.header_size;
+        result.offset = header_start;
+        result.description = format!(
+            "{}, header size: {} bytes, ROM ID: {}, erase offset: {:#X}, erase size: {:#X}, data flash offset: {:#X}, data size: {:#X}",
+            result.description,
+            arm_header.header_size,
+            arm_header.rom_id,
+            arm_header.erase_offset,
+            arm_header.erase_size,
+            arm_header.data_offset,
+            arm_header.data_size,
+        );
+        return Ok(result);
+    }
+
+    Err(SignatureError)
+}
+
+/// Parse and validate a JBOOT STAG header
+pub fn jboot_stag_parser(
+    file_data: &[u8],
+    offset: usize,
+) -> Result<SignatureResult, SignatureError> {
+    // Successful return value
+    let mut result = SignatureResult {
+        offset,
+        description: JBOOT_STAG_DESCRIPTION.to_string(),
+        confidence: CONFIDENCE_LOW,
+        ..Default::default()
+    };
+
+    if let Ok(stag_header) = parse_jboot_stag_header(&file_data[offset..]) {
+        // Sanity check on the stag header reported size; it is expected that this
+        // type of header describes a kernel, and should not take up the entire firmware image
+        if (offset + stag_header.header_size + stag_header.image_size) < file_data.len() {
+            // Only report the header size, confidence in this signature is low, don't
+            // want to skip a bunch of data on a false positive
+            result.size = stag_header.header_size;
+
+            let mut image_type: &str = "factory image";
+
+            if stag_header.is_sysupgrade_image {
+                image_type = "system upgrade image";
+            }
+
+            result.description = format!(
+                "{}, {}, header size: {} bytes, kernel data size: {} bytes",
+                result.description, image_type, stag_header.header_size, stag_header.image_size,
+            );
+            return Ok(result);
+        }
+    }
+
+    Err(SignatureError)
+}
+
+/// Parse and validate a JBOOT SCH2 header
+pub fn jboot_sch2_parser(
+    file_data: &[u8],
+    offset: usize,
+) -> Result<SignatureResult, SignatureError> {
+    // Successful return value
+    let mut result = SignatureResult {
+        offset,
+        description: JBOOT_SCH2_DESCRIPTION.to_string(),
+        confidence: CONFIDENCE_HIGH,
+        ..Default::default()
+    };
+
+    let dry_run = extract_jboot_sch2_kernel(file_data, offset, None);
+
+    if dry_run.success
+        && let Some(total_size) = dry_run.size
+        && let Ok(sch2_header) = parse_jboot_sch2_header(&file_data[offset..])
+    {
+        result.size = total_size;
+        result.description = format!(
+            "{}, header size: {} bytes, kernel size: {} bytes, kernel compression: {}, kernel entry point: {:#X}",
+            result.description,
+            sch2_header.header_size,
+            sch2_header.kernel_size,
+            sch2_header.compression,
+            sch2_header.kernel_entry_point,
+        );
+        return Ok(result);
+    }
+
+    Err(SignatureError)
+}
+
+/// Struct to store JBOOT ARM firmware image info
+#[derive(Debug, Default, Clone)]
+pub struct JBOOTArmHeader {
+    pub header_size: usize,
+    pub data_size: usize,
+    pub data_offset: usize,
+    pub erase_offset: usize,
+    pub erase_size: usize,
+    pub rom_id: String,
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct ARMImageHeader {
+    drange: zerocopy::U16<LE>,
+    image_checksum: zerocopy::U16<LE>,
+    block_size: zerocopy::U32<LE>,
+    reserved1: [u8; 6],
+    lpvs: u8,
+    mbz: u8,
+    timestamp: zerocopy::U32<LE>,
+    erase_start: zerocopy::U32<LE>,
+    erase_size: zerocopy::U32<LE>,
+    data_start: zerocopy::U32<LE>,
+    data_size: zerocopy::U32<LE>,
+    reserved2: [u8; 16],
+    header_id: zerocopy::U16<LE>,
+    header_version: zerocopy::U16<LE>,
+    reserved3: [u8; 2],
+    section_id: u8,
+    image_info_type: u8,
+    image_info_offset: zerocopy::U32<LE>,
+    family: zerocopy::U16<LE>,
+    header_checksum: zerocopy::U16<LE>,
+}
+
+/// Parses a JBOOT ARM image header
+pub fn parse_jboot_arm_header(jboot_data: &[u8]) -> Result<JBOOTArmHeader, StructureError> {
+    // Structure starts after 12-byte ROM ID
+    const STRUCTURE_OFFSET: usize = 12;
+
+    // Some expected header values
+    const LPVS_VALUE: u8 = 1;
+    const MBZ_VALUE: u8 = 0;
+    const HEADER_ID_VALUE: u16 = 0x4842;
+    const HEADER_MAX_VERSION_VALUE: u16 = 4;
+
+    let structure_size: usize = std::mem::size_of::<ARMImageHeader>();
+    let header_size: usize = structure_size + STRUCTURE_OFFSET;
+
+    if let Some(header_data) = jboot_data.get(STRUCTURE_OFFSET..) {
+        // Parse the header structure
+        let (arm_header, _) =
+            ARMImageHeader::ref_from_prefix(header_data).map_err(|_| StructureError)?;
+
+        // Make sure the reserved fields are NULL
+        if arm_header
+            .reserved1
+            .iter()
+            .chain(&arm_header.reserved2)
+            .chain(&arm_header.reserved3)
+            .all(|&b| b == 0)
+        {
+            // Sanity check expected header values
+            if arm_header.lpvs == LPVS_VALUE
+                && arm_header.mbz == MBZ_VALUE
+                && arm_header.header_id == HEADER_ID_VALUE
+                && arm_header.header_version <= HEADER_MAX_VERSION_VALUE
+            {
+                return Ok(JBOOTArmHeader {
+                    header_size,
+                    rom_id: get_cstring(&jboot_data[0..STRUCTURE_OFFSET]),
+                    data_size: arm_header.data_size.get() as usize,
+                    data_offset: arm_header.data_start.get() as usize,
+                    erase_offset: arm_header.erase_start.get() as usize,
+                    erase_size: arm_header.erase_size.get() as usize,
+                });
+            }
+        }
+    }
+
+    Err(StructureError)
+}
+
+/// Stores info about JBOOT STAG headers
+#[derive(Debug, Default, Clone)]
+pub struct JBOOTStagHeader {
+    pub header_size: usize,
+    pub image_size: usize,
+    pub is_factory_image: bool,
+    pub is_sysupgrade_image: bool,
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct STag {
+    cmark: u8,
+    id: u8,
+    magic: zerocopy::U16<LE>,
+    timestamp: zerocopy::U32<LE>,
+    image_size: zerocopy::U32<LE>,
+    image_checksum: zerocopy::U16<LE>,
+    header_checksum: zerocopy::U16<LE>,
+}
+
+/// Parses a JBOOT STAG header
+pub fn parse_jboot_stag_header(jboot_data: &[u8]) -> Result<JBOOTStagHeader, StructureError> {
+    // cmark value for factory images; for system upgrade images, cmark must equal id
+    const FACTORY_IMAGE_TYPE: u8 = 0xFF;
+
+    let mut result = JBOOTStagHeader::default();
+
+    // Parse the header structure
+    let (stag_header, _) = STag::ref_from_prefix(jboot_data).map_err(|_| StructureError)?;
+    result.header_size = std::mem::size_of::<STag>();
+    result.image_size = stag_header.image_size.get() as usize;
+
+    if result.image_size > result.header_size {
+        result.is_factory_image = stag_header.cmark == FACTORY_IMAGE_TYPE;
+        result.is_sysupgrade_image = stag_header.cmark == stag_header.id;
+
+        if result.is_factory_image || result.is_sysupgrade_image {
+            return Ok(result);
+        }
+    }
+
+    Err(StructureError)
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct JBOOTSchHeader {
+    pub header_size: usize,
+    pub compression: String,
+    pub kernel_size: usize,
+    pub kernel_entry_point: u32,
+    pub kernel_checksum: u32,
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct SCH2Header {
+    magic: zerocopy::U16<LE>,
+    compression_type: u8,
+    version: u8,
+    ram_entry_address: zerocopy::U32<LE>,
+    kernel_image_size: zerocopy::U32<LE>,
+    kernel_image_crc: zerocopy::U32<LE>,
+    ram_start_address: zerocopy::U32<LE>,
+    rootfs_flash_address: zerocopy::U32<LE>,
+    rootfs_size: zerocopy::U32<LE>,
+    rootfs_crc: zerocopy::U32<LE>,
+    header_crc: zerocopy::U32<LE>,
+    header_size: zerocopy::U16<LE>,
+    cmd_line_size: zerocopy::U16<LE>,
+}
+
+/// Parses a JBOOT SCH2 header
+pub fn parse_jboot_sch2_header(jboot_data: &[u8]) -> Result<JBOOTSchHeader, StructureError> {
+    const VERSION_VALUE: u8 = 2;
+
+    let mut result = JBOOTSchHeader {
+        header_size: std::mem::size_of::<SCH2Header>(),
+        ..Default::default()
+    };
+
+    let (sch2_header, _) = SCH2Header::ref_from_prefix(jboot_data).map_err(|_| StructureError)?;
+
+    // Sanity check some header fields
+    if sch2_header.version == VERSION_VALUE
+        && sch2_header.header_size.get() as usize == result.header_size
+    {
+        let compression_type = match sch2_header.compression_type {
+            0 => "none",
+            1 => "jz",
+            2 => "gzip",
+            3 => "lzma",
+            _ => return Err(StructureError),
+        };
+        // Validate the header checksum
+        if let Some(header_bytes) = jboot_data.get(0..sch2_header.header_size.get() as usize)
+            && sch2_header.header_crc == sch2_header_crc(header_bytes)?
+        {
+            result.compression = compression_type.to_string();
+            result.kernel_checksum = sch2_header.kernel_image_crc.get();
+            result.kernel_size = sch2_header.kernel_image_size.get() as usize;
+            result.kernel_entry_point = sch2_header.ram_entry_address.get();
+            return Ok(result);
+        }
+    }
+
+    Err(StructureError)
+}
+
+/// Calculate a JBOOT SCH2 header CRC
+fn sch2_header_crc(sch2_header_bytes: &[u8]) -> Result<u32, StructureError> {
+    // Start and end offsets of the header CRC field
+    const HEADER_CRC_START: usize = 32;
+    const HEADER_CRC_END: usize = 36;
+
+    if sch2_header_bytes.len() > HEADER_CRC_END {
+        let mut crc_data = sch2_header_bytes.to_vec();
+
+        // Header CRC field has to be NULL'd out
+        crc_data[HEADER_CRC_START..HEADER_CRC_END].fill(0);
+
+        return Ok(crc32(&crc_data));
+    }
+
+    Err(StructureError)
+}
+
+/// Defines the internal extractor function for carving out JBOOT SCH2 kernels
+///
+/// ```
+/// use std::io::ErrorKind;
+/// use std::process::Command;
+/// use binwalk_ng::extractors::ExtractorType;
+/// use binwalk_ng::formats::jboot::sch2_extractor;
+///
+/// match sch2_extractor().utility {
+///     ExtractorType::None => panic!("Invalid extractor type of None"),
+///     ExtractorType::Internal(func) => println!("Internal extractor OK: {:?}", func),
+///     ExtractorType::External(cmd) => {
+///         if let Err(e) = Command::new(&cmd).output() {
+///             if e.kind() == ErrorKind::NotFound {
+///                 panic!("External extractor '{}' not found", cmd);
+///             } else {
+///                 panic!("Failed to execute external extractor '{}': {}", cmd, e);
+///             }
+///         }
+///     }
+/// }
+/// ```
+pub fn sch2_extractor() -> Extractor {
+    Extractor {
+        utility: ExtractorType::Internal(extract_jboot_sch2_kernel),
+        ..Default::default()
+    }
+}
+
+/// Extract the kernel described by a JBOOT SCH2 header
+pub fn extract_jboot_sch2_kernel(
+    file_data: &[u8],
+    offset: usize,
+    output_directory: Option<&Path>,
+) -> ExtractionResult {
+    // Output file name
+    const OUTFILE_NAME: &str = "kernel.bin";
+
+    let mut result = ExtractionResult::default();
+
+    // Get the SCH2 data
+    if let Some(sch2_header_data) = file_data.get(offset..) {
+        // Parse the SCH2 header
+        if let Ok(sch2_header) = parse_jboot_sch2_header(sch2_header_data) {
+            let kernel_start: usize = offset + sch2_header.header_size;
+            let kernel_end: usize = kernel_start + sch2_header.kernel_size;
+
+            // Validate the kernel data checksum
+            if let Some(kernel_data) = file_data.get(kernel_start..kernel_end)
+                && crc32(kernel_data) == sch2_header.kernel_checksum
+            {
+                // Everything checks out ok
+                result.size = Some(sch2_header.header_size + sch2_header.kernel_size);
+                result.success = true;
+
+                if let Some(output_directory) = output_directory {
+                    let chroot = Chroot::new(output_directory);
+                    result.success = chroot.carve_file(
+                        OUTFILE_NAME,
+                        file_data,
+                        kernel_start,
+                        sch2_header.kernel_size,
+                    );
+                }
+            }
+        }
+    }
+
+    result
+}

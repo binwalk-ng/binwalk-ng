@@ -5,7 +5,7 @@ use crate::extractors;
 /// ```
 /// use std::io::ErrorKind;
 /// use std::process::Command;
-/// use binwalk_ng::extractors::common::ExtractorType;
+/// use binwalk_ng::extractors::ExtractorType;
 /// use binwalk_ng::extractors::dumpifs::dumpifs_extractor;
 ///
 /// match dumpifs_extractor().utility {
@@ -22,13 +22,13 @@ use crate::extractors;
 ///     }
 /// }
 /// ```
-pub fn dumpifs_extractor() -> extractors::common::Extractor {
-    extractors::common::Extractor {
-        utility: extractors::common::ExtractorType::External("dumpifs".to_string()),
+pub fn dumpifs_extractor() -> extractors::Extractor {
+    extractors::Extractor {
+        utility: extractors::ExtractorType::External("dumpifs".to_string()),
         extension: "ifs".to_string(),
         arguments: vec![
             "-x".to_string(), // Extract the image
-            extractors::common::SOURCE_FILE_PLACEHOLDER.to_string(),
+            extractors::SOURCE_FILE_PLACEHOLDER.to_string(),
         ],
         exit_codes: vec![0],
         ..Default::default()

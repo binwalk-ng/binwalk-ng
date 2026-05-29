@@ -7,7 +7,7 @@
 //!
 //! ## Defining a Signature
 //!
-//! Signatures are defined using the `signatures::common::Signature` struct. This structure stores critical information
+//! Signatures are defined using the `signatures::Signature` struct. This structure stores critical information
 //! about a signature, such as the signature name, the magic bytes that are associated with the signature, and which extractor
 //! to use (if any) to extract the data associated with the signature.
 //!
@@ -15,7 +15,7 @@
 //!
 //! ```ignore
 //! use binwalk_ng::extractors::foobar::foobar_extractor;
-//! use binwalk_ng::signatures::common::Signature;
+//! use binwalk_ng::signatures::Signature;
 //! use binwalk_ng::signatures::foobar::foobar_parser;
 //!
 //! // FooBar file signature
@@ -46,21 +46,21 @@
 //! Signature parsers are at the heart of each defined signature. They parse and validate magic matches to ensure accuracy and
 //! determine the total size of the file data (if possible).
 //!
-//! Signature parsers must conform to the `signatures::common::SignatureParser` type definition.
+//! Signature parsers must conform to the `signatures::SignatureParser` type definition.
 //! They are provided two arguments: the raw file data, and an offset into the file data where the signature's magic bytes were found.
 //!
-//! Signature parsers must parse and validate the expected signature data, and return either a `signatures::common::SignatureResult`
-//! structure on success, or a `signatures::common::SignatureError` on failure.
+//! Signature parsers must parse and validate the expected signature data, and return either a `signatures::SignatureResult`
+//! structure on success, or a `signatures::SignatureError` on failure.
 //!
 //! ### Example
 //!
 //! ```ignore
 //! use binwalk_ng::extractors::foobar::extract_foobar_file;
-//! use binwalk_ng::signatures::common::{SignatureResult, SignatureError, CONFIDENCE_HIGH};
+//! use binwalk_ng::signatures::{SignatureResult, SignatureError, CONFIDENCE_HIGH};
 //!
 //! /// This function is responsible for parsing and validating the FooBar file system data whenever the "magic bytes"
 //! /// are found inside a file. It is provided access to the entire file data, and an offset into the file data where
-//! /// the magic bytes were found. On success, it will return a signatures::common::SignatureResult structure.
+//! /// the magic bytes were found. On success, it will return a signatures::SignatureResult structure.
 //! ///
 //! pub fn foobar_parser(file_data: &Vec<u8>, offset: usize) -> Result<SignatureResult, SignatureError> {
 //!    /*
@@ -105,99 +105,89 @@
 //!    return Err(SignatureError);
 //! }
 //! ```
-pub mod aes;
-pub mod android_bootimg;
-pub mod androidsparse;
-pub mod apfs;
-pub mod arcadyan;
-pub mod arj;
-pub mod autel;
-pub mod binhdr;
-pub mod bmp;
-pub mod btrfs;
-pub mod bzip2;
-pub mod cab;
-pub mod cfe;
-pub mod chk;
-pub mod common;
-pub mod compressd;
-pub mod copyright;
-pub mod cpio;
-pub mod cramfs;
-pub mod csman;
-pub mod dahua_zip;
-pub mod deb;
-pub mod dkbs;
-pub mod dlink_tlv;
-pub mod dlke;
-pub mod dlob;
-pub mod dmg;
-pub mod dms;
-pub mod dpapi;
-pub mod dtb;
-pub mod dxbc;
-pub mod ecos;
-pub mod efigpt;
-pub mod elf;
-pub mod encfw;
-pub mod encrpted_img;
-pub mod eva;
-pub mod ext;
-pub mod fat;
-pub mod gif;
-pub mod gpg;
-pub mod gzip;
-pub mod hashes;
-pub mod iso9660;
-pub mod jboot;
-pub mod jffs2;
-pub mod jpeg;
-pub mod linux;
-pub mod logfs;
-pub mod luks;
-pub mod lz4;
-pub mod lzfse;
-pub mod lzma;
-pub mod lzop;
-pub mod matter_ota;
-pub mod mbr;
-pub mod mh01;
-pub mod ntfs;
-pub mod openssl;
-pub mod packimg;
-pub mod pcap;
-pub mod pchrom;
-pub mod pdf;
-pub mod pe;
-pub mod pem;
-pub mod pjl;
-pub mod pkcs_der;
-pub mod png;
-pub mod program_store;
-pub mod qcow;
-pub mod qnx;
-pub mod rar;
-pub mod riff;
-pub mod romfs;
-pub mod rsa;
-pub mod rtk;
-pub mod seama;
-pub mod sevenzip;
-pub mod shrs;
-pub mod squashfs;
-pub mod srec;
-pub mod svg;
-pub mod tarball;
-pub mod tplink;
-pub mod trx;
-pub mod ubi;
-pub mod uboot;
-pub mod uefi;
-pub mod uimage;
-pub mod vxworks;
-pub mod wince;
-pub mod xz;
-pub mod yaffs;
-pub mod zip;
-pub mod zlib;
-pub mod zstd;
+
+use crate::extractors;
+use serde::{Deserialize, Serialize};
+
+/// Some pre-defined confidence levels for SignatureResult structures
+pub const CONFIDENCE_LOW: u8 = 0;
+pub const CONFIDENCE_MEDIUM: u8 = 128;
+pub const CONFIDENCE_HIGH: u8 = 250;
+
+/// Return value of SignatureParser upon error
+#[derive(Debug, Clone)]
+pub struct SignatureError;
+
+/// Type definition for signature parser functions
+///
+/// ## Arguments
+///
+/// All signature parsers are passed two arguments: a vector of u8 bytes, and an offset into that vector where the signature's magic bytes were found.
+///
+/// ## Return values
+///
+/// Each signature parser is responsible for parsing and validating signature candidates.
+///
+/// They must return either a SignatureResult struct if validation succeeds, or a SignatureError if validation fails.
+pub type SignatureParser = fn(&[u8], usize) -> Result<SignatureResult, SignatureError>;
+
+/// Describes a valid identified file signature
+///
+/// ## Construction
+///
+/// The SignatureResult struct is returned by all SignatureParser functions upon success.
+///
+/// The `id`, `name`, and `always_display` fields are automatically populated after being returned by a SignatureParser function, and need not be set by the SignatureParser function.
+///
+/// At the very least, SignatureParser functions should define the `offset` and `description` fields.
+///
+/// ## Additional Notes
+///
+/// If a SignatureResult contains a `size` of `0` (the default value), it is assumed to extend to the beginning of the next signature, or EOF, whichever comes first.
+///
+/// SignatureResult structs are sortable by `offset`.
+///
+/// SignatureResult structs can be JSON serialized/deserialized with [serde](https://crates.io/crates/serde).
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct SignatureResult {
+    /// File/data offset where this signature starts
+    pub offset: usize,
+    /// A UUID uniquely identifying this signature result; auto-populated
+    pub id: String,
+    /// Size of the signature data, 0 if unknown
+    pub size: usize,
+    /// A unique name for this signature type, auto-populated from the signature definition in Signature.name
+    pub name: String,
+    /// One of CONFIDENCE_LOW, CONFIDENCE_MEDIUM, CONFIDENCE_HIGH; default is CONFIDENCE_LOW
+    pub confidence: u8,
+    /// Human readable description of this signature
+    pub description: String,
+    /// If true, always display this signature result; auto-populated from the signature definition in Signature.always_display
+    pub always_display: bool,
+    /// Set to true to disable extraction for this particular signature result (default: false)
+    pub extraction_declined: bool,
+    /// Signatures may specify a preferred extractor, which overrides the default extractor specified in the Signature.extractor definition
+    #[serde(skip_deserializing, skip_serializing)]
+    pub preferred_extractor: Option<extractors::Extractor>,
+}
+
+/// Defines a file signature to search for, and how to extract that file type
+#[derive(Debug, Clone)]
+pub struct Signature {
+    /// Unique name for the signature (no whitespace)
+    pub name: String,
+    /// Set to true if this is a short signature; it will only be matched at the beginning of a file
+    pub short: bool,
+    /// List of magic byte patterns associated with this signature
+    pub magic: Vec<Vec<u8>>,
+    /// Offset of magic bytes from the beginning of the file; only relevant for short signatures
+    pub magic_offset: usize,
+    /// Human readable description of this signature
+    pub description: String,
+    /// If true, will always display files that contain this signature, even during recursive extraction
+    pub always_display: bool,
+    /// Specifies the signature parser to invoke for magic match validation
+    pub parser: SignatureParser,
+    /// Specifies the extractor to use when extracting this file type
+    pub extractor: Option<extractors::Extractor>,
+}

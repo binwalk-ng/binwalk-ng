@@ -1,6 +1,6 @@
 mod common;
 
-use binwalk_ng::signatures::common::CONFIDENCE_HIGH;
+use binwalk_ng::signatures::CONFIDENCE_HIGH;
 
 const SIGNATURE_TYPE: &str = "eva";
 const INPUT_FILE_NAME: &str = "eva_secondary_only.bin";
