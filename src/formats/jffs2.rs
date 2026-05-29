@@ -54,10 +54,11 @@ pub fn jffs2_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
             let mut node_count: usize = 1;
 
             // Determine which node magic bytes to search for based on the first node's endianness
-            let mut node_magic = JFFS2_LITTLE_ENDIAN_MAGIC;
-            if first_node_header.endianness == "big" {
-                node_magic = JFFS2_BIG_ENDIAN_MAGIC;
-            }
+            let node_magic = if first_node_header.endianness == "big" {
+                JFFS2_BIG_ENDIAN_MAGIC
+            } else {
+                JFFS2_LITTLE_ENDIAN_MAGIC
+            };
 
             // Need to grep for all JFFS2 nodes to figure out how big this file system really is
             let grep = AhoCorasick::new(vec![node_magic]).unwrap();

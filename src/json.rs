@@ -31,8 +31,8 @@ pub struct JsonLogger {
 }
 
 impl JsonLogger {
-    pub fn new(log_file: Option<&Path>) -> JsonLogger {
-        let mut new_instance = JsonLogger::default();
+    pub fn new(log_file: Option<&Path>) -> Self {
+        let mut new_instance = Self::default();
 
         if let Some(log_file) = log_file {
             new_instance.json_file = Some(log_file.to_path_buf());

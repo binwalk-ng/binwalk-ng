@@ -92,11 +92,11 @@ pub fn jboot_stag_parser(
             // want to skip a bunch of data on a false positive
             result.size = stag_header.header_size;
 
-            let mut image_type = "factory image";
-
-            if stag_header.is_sysupgrade_image {
-                image_type = "system upgrade image";
-            }
+            let image_type = if stag_header.is_sysupgrade_image {
+                "system upgrade image"
+            } else {
+                "factory image"
+            };
 
             result.description = format!(
                 "{}, {}, header size: {} bytes, kernel data size: {} bytes",

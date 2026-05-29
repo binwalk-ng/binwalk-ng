@@ -9,7 +9,7 @@ use zerocopy::{BE, FromBytes, Immutable, KnownLayout, Unaligned};
 
 /// Offset of the magic within the header: the NUL terminator of the 48-byte
 /// `name` field (byte 67) followed by 8 zero `pad` bytes (bytes 68–75).
-pub(crate) const MAGIC_OFFSET: usize = 67;
+pub const MAGIC_OFFSET: usize = 67;
 const MAGIC_SIZE: usize = 8 + 1;
 
 pub const DESCRIPTION: &str = "Broadcom ProgramStore firmware image";
@@ -74,7 +74,7 @@ const _: () = assert!(
     "Magic offset must be the final null terminator for the name before the pad field",
 );
 
-pub(crate) const HEADER_SIZE: usize = size_of::<ProgramStoreHeaderRaw>();
+pub const HEADER_SIZE: usize = size_of::<ProgramStoreHeaderRaw>();
 
 #[derive(Debug, Clone)]
 pub enum Compression {
@@ -89,12 +89,12 @@ pub enum Compression {
 impl fmt::Display for Compression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            Compression::None => "none",
-            Compression::Lz => "LZ",
-            Compression::Lzo => "LZO",
-            Compression::Reserved => "reserved",
-            Compression::Nrv2b => "NRV2B",
-            Compression::Lzma => "LZMA",
+            Self::None => "none",
+            Self::Lz => "LZ",
+            Self::Lzo => "LZO",
+            Self::Reserved => "reserved",
+            Self::Nrv2b => "NRV2B",
+            Self::Lzma => "LZMA",
         };
         f.write_str(s)
     }
@@ -139,7 +139,7 @@ struct ProgramStoreHeaderRaw {
     chk: zerocopy::U32<BE>,
 }
 
-fn parse_compression(ctrl_low: u8) -> Option<Compression> {
+const fn parse_compression(ctrl_low: u8) -> Option<Compression> {
     match ctrl_low {
         0 => Some(Compression::None),
         1 => Some(Compression::Lz),
@@ -167,9 +167,7 @@ fn crc16_genibus(data: &[u8]) -> u16 {
     crc ^ 0xFFFF
 }
 
-pub(crate) fn parse_program_store_header(
-    data: &[u8],
-) -> Result<ProgramStoreHeader, StructureError> {
+pub fn parse_program_store_header(data: &[u8]) -> Result<ProgramStoreHeader, StructureError> {
     // Reject build times before the initial eCos release (1998-09-01)
     const MIN_TIMESTAMP: u32 = 904_608_000;
     const HCS_OFFSET: usize = offset_of!(ProgramStoreHeaderRaw, hcs);

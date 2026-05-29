@@ -1,7 +1,7 @@
-use crate::common::is_offset_safe;
 use crate::extractors::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
-use bzip2::{Decompress, Status};
+use bzip2::read::BzDecoder;
+use std::io::{Read, copy};
 use std::path::Path;
 
 /// Human readable description
@@ -80,73 +80,43 @@ pub fn bzip2_decompressor(
     offset: usize,
     output_directory: Option<&Path>,
 ) -> ExtractionResult {
-    // Size of decompression buffer
-    const BLOCK_SIZE: usize = 900 * 1024;
     // Output file for decompressed data
     const OUTPUT_FILE_NAME: &str = "decompressed.bin";
 
     let mut result = ExtractionResult::default();
 
-    let mut bytes_written: usize = 0;
-    let mut stream_offset: usize = 0;
+    // Slice the data starting from the provided offset
     let bzip2_data = &file_data[offset..];
-    let mut decompressed_buffer = [0; BLOCK_SIZE];
-    let mut decompressor = Decompress::new(false);
-    let available_data = bzip2_data.len();
-    let mut previous_offset = None;
 
-    /*
-     * Loop through all compressed data and decompress it.
-     *
-     * This has a significant performance hit since 1) decompression takes time, and 2) data is
-     * decompressed once during signature validation and a second time during extraction (if extraction
-     * was requested).
-     *
-     * The advantage is that not only are we 100% sure that this data is valid BZIP2 data, but we
-     * can also determine the exact size of the BZIP2 data.
-     */
-    while is_offset_safe(available_data, stream_offset, previous_offset) {
-        previous_offset = Some(stream_offset);
+    // Initialize BzDecoder.
+    // BzDecoder::new expects standard bzip2 streams.
+    // If your stream lacks headers (like Decompress::new(false)), use BzDecoder::new_multi(bzip2_data, false)
+    let mut decoder = BzDecoder::new(bzip2_data);
 
-        // Decompress a block of data
-        match decompressor.decompress(&bzip2_data[stream_offset..], &mut decompressed_buffer) {
-            Err(_) => {
-                // Break on decompression error
-                break;
-            }
-            Ok(status) => {
-                match status {
-                    Status::RunOk => break,
-                    Status::FlushOk => break,
-                    Status::FinishOk => break,
-                    Status::MemNeeded => break,
-                    Status::Ok => {
-                        stream_offset = decompressor.total_in() as usize;
-                    }
-                    Status::StreamEnd => {
-                        result.success = true;
-                        result.size = Some(decompressor.total_in() as usize);
-                    }
-                }
+    if let Some(output_directory) = output_directory {
+        // --- EXTRACTION MODE ---
+        // If extraction is requested, we write directly to the chroot file
+        let chroot = Chroot::new(output_directory);
 
-                // Decompressed a block of data, if extraction was requested write the decompressed block to the output file
-                if let Some(output_directory) = output_directory {
-                    let n: usize = (decompressor.total_out() as usize) - bytes_written;
+        // We need a writer target. Assuming append_to_file doesn't expose a raw writer,
+        // we can decompress into a local vector or file, then append it.
+        let mut decompressed_output = Vec::new();
 
-                    let chroot = Chroot::new(output_directory);
-                    if !chroot.append_to_file(OUTPUT_FILE_NAME, &decompressed_buffer[0..n]) {
-                        // If writing data to file fails, break
-                        break;
-                    }
+        if decoder.read_to_end(&mut decompressed_output).is_ok()
+            && chroot.append_to_file(OUTPUT_FILE_NAME, &decompressed_output)
+        {
+            result.success = true;
+            // total_in() tells us exactly how many compressed bytes were read from file_data
+            result.size = Some(decoder.total_in() as usize);
+        }
+    } else {
+        // If no output directory is provided, we just drain the decoder into a sink (null device)
+        // to validate the stream and calculate its total compressed size.
+        let mut sink = std::io::sink();
 
-                    bytes_written += n;
-                }
-
-                // If everything has been processed successfully, we're done; break.
-                if result.success {
-                    break;
-                }
-            }
+        if copy(&mut decoder, &mut sink).is_ok() {
+            result.success = true;
+            result.size = Some(decoder.total_in() as usize);
         }
     }
 

@@ -257,25 +257,22 @@ fn main() -> ExitCode {
 
 /// Returns true if the specified results should be displayed to screen
 fn should_display(results: &AnalysisResults, file_count: usize, verbose: bool) -> bool {
-    let mut display_results = false;
-
     /*
      * For brevity, when analyzing more than one file only display subsequent files whose results
      * contain signatures that we always want displayed, or which contain extractable signatures.
      * This can be overridden with the --verbose command line flag.
      */
     if file_count == 1 || verbose || !results.extractions.is_empty() {
-        display_results = true;
+        return true;
     } else {
         for signature in &results.file_map {
             if signature.always_display {
-                display_results = true;
-                break;
+                return true;
             }
         }
     }
 
-    display_results
+    false
 }
 
 /// Spawn a worker thread to analyze a file
@@ -290,13 +287,10 @@ fn spawn_worker(
     let target_file = target_file.as_ref().to_path_buf();
     pool.execute(move || {
         // Read in file data
-        let file_data = match common::read_file(&target_file) {
-            Err(_) => {
-                error!("Failed to read {} data", target_file.display());
-                b"".to_vec()
-            }
-            Ok(data) => data,
-        };
+        let file_data = common::read_file(&target_file).unwrap_or_else(|_| {
+            error!("Failed to read {} data", target_file.display());
+            b"".to_vec()
+        });
 
         // Analyze target file, with extraction, if specified
         let results = bw.analyze_buf(&file_data, &target_file, do_extraction);

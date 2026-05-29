@@ -16,12 +16,7 @@ const COLUMN1_WIDTH: usize = 35;
 const COLUMN2_WIDTH: usize = 35;
 
 fn terminal_width() -> usize {
-    let terminal_width: u16 = match termsize::get() {
-        Some(ts) => ts.cols,
-        None => DEFAULT_TERMINAL_WIDTH,
-    };
-
-    terminal_width as usize
+    termsize::get().map_or(DEFAULT_TERMINAL_WIDTH, |ts| ts.cols) as usize
 }
 
 fn line_delimiter() -> String {

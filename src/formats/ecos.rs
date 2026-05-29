@@ -38,12 +38,11 @@ pub fn exception_handler_parser(
         ..Default::default()
     };
 
-    let mut endianness = "big";
-
-    // Detect endianness
-    if file_data[offset] == 0 {
-        endianness = "little";
-    }
+    let endianness = if file_data[offset] == 0 {
+        "little"
+    } else {
+        "big"
+    };
 
     result.description = format!("{}, MIPS {} endian", result.description, endianness);
     Ok(result)

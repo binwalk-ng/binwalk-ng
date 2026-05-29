@@ -199,7 +199,7 @@ pub fn parse_romfs_file_entry(romfs_data: &[u8]) -> Result<RomFSFileHeader, Stru
 }
 
 /// RomFS aligns things to a 16-byte boundary
-fn romfs_align(x: usize) -> usize {
+const fn romfs_align(x: usize) -> usize {
     const ALIGNMENT: usize = 16;
 
     match x % ALIGNMENT {
@@ -245,7 +245,7 @@ struct RomFSEntry {
     symlink_target: String,
     device_major: usize,
     device_minor: usize,
-    children: Vec<RomFSEntry>,
+    children: Vec<Self>,
 }
 
 /// Defines the internal extractor function for extracting RomFS file systems */

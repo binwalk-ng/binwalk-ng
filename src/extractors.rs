@@ -241,8 +241,8 @@ impl Chroot {
     /// assert_eq!(&chroot.chroot_directory, &chroot_dir);
     /// assert_eq!(std::path::Path::new(&chroot_dir).exists(), true);
     /// ```
-    pub fn new(chroot_directory: impl AsRef<Path>) -> Chroot {
-        let mut chroot_instance = Chroot::default();
+    pub fn new(chroot_directory: impl AsRef<Path>) -> Self {
+        let mut chroot_instance = Self::default();
 
         let chroot_directory = chroot_directory.as_ref();
 
@@ -438,18 +438,15 @@ impl Chroot {
         start: usize,
         size: usize,
     ) -> bool {
-        let mut retval = false;
-
         if let Some(file_data) = data.get(start..start + size) {
-            retval = self.create_file(file_path, file_data);
+            self.create_file(file_path, file_data)
         } else {
             error!(
                 "Failed to create file {}: data offset/size are invalid",
                 file_path.as_ref().display()
             );
+            false
         }
-
-        retval
     }
 
     /// Creates a device file in the chroot directory.
@@ -1017,14 +1014,11 @@ pub fn execute(
             }
 
             Some(default_extractor) => {
-                let extractor_definition: Extractor;
-
                 // If the signature result specified a preferred extractor, use that instead of the default signature extractor
-                if let Some(preferred_extractor) = &signature.preferred_extractor {
-                    extractor_definition = preferred_extractor.clone();
-                } else {
-                    extractor_definition = default_extractor.clone();
-                }
+                let extractor_definition = signature.preferred_extractor.as_ref().map_or_else(
+                    || default_extractor.clone(),
+                    |preferred_extractor| preferred_extractor.clone(),
+                );
 
                 // Decide how to execute the extractor depending on the extractor type
                 match &extractor_definition.utility {

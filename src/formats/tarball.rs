@@ -73,13 +73,13 @@ pub fn tarball_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult
 
     // We expect that a tarball should be, at a minimum, one block in size
     if tarball_total_size >= TARBALL_BLOCK_SIZE {
-        // Default confidence is medium
-        let mut confidence = CONFIDENCE_MEDIUM;
-
-        // If more than just a few tarball headers were found and processed successfully, we have pretty high confidence that this isn't a false positive
-        if valid_header_count >= TARBALL_MIN_EXPECTED_HEADERS {
-            confidence = CONFIDENCE_HIGH;
-        }
+        // Default confidence is medium, if more than just a few tarball headers were found and
+        // processed successfully, we have pretty high confidence that this isn't a false positive
+        let confidence = if valid_header_count >= TARBALL_MIN_EXPECTED_HEADERS {
+            CONFIDENCE_HIGH
+        } else {
+            CONFIDENCE_MEDIUM
+        };
 
         return Ok(SignatureResult {
             description: format!("{DESCRIPTION}, file count: {valid_header_count}"),

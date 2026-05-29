@@ -138,11 +138,9 @@ pub fn parse_arj_header(arj_data: &[u8]) -> Result<ARJHeader, StructureError> {
     }
 
     let header_size = arj_header.extra_header_size as usize;
-    let original_name = if let Some(data) = arj_data.get(header_size + 4..) {
-        get_cstring(data)
-    } else {
-        "".to_string()
-    };
+    let original_name = arj_data
+        .get(header_size + 4..)
+        .map_or_else(|| "".to_string(), get_cstring);
 
     Ok(ARJHeader {
         header_size,

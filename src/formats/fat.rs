@@ -35,10 +35,11 @@ pub fn fat_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
             result.size = fat_header.total_size;
 
             // Include FAT type in the description
-            let mut fat_type_desc = "FAT12/16";
-            if fat_header.is_fat32 {
-                fat_type_desc = "FAT32";
-            }
+            let fat_type_desc = if fat_header.is_fat32 {
+                "FAT32"
+            } else {
+                "FAT12/16"
+            };
 
             result.description = format!(
                 "{}, type: {}, total size: {} bytes",
