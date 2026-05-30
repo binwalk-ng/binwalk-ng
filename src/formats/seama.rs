@@ -60,7 +60,7 @@ pub fn parse_seama_header(seama_data: &[u8]) -> Result<SeamaHeader, StructureErr
     ];
 
     let available_data = seama_data.len();
-    let header_size: usize = crate::structures::size(&seama_structure);
+    let header_size = crate::structures::size(&seama_structure);
 
     // Parse the header; try little endian first
     if let Ok(mut seama_header) = crate::structures::parse(seama_data, &seama_structure, "little") {
@@ -71,7 +71,7 @@ pub fn parse_seama_header(seama_data: &[u8]) -> Result<SeamaHeader, StructureErr
                     return Err(StructureError);
                 }
                 Ok(seama_header_be) => {
-                    seama_header = seama_header_be.clone();
+                    seama_header = seama_header_be;
                 }
             }
         }

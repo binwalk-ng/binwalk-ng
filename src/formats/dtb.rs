@@ -213,7 +213,7 @@ pub fn parse_dtb_node(
 }
 
 /// DTB entries must be aligned to 4-byte boundaries
-fn dtb_aligned(len: usize) -> usize {
+const fn dtb_aligned(len: usize) -> usize {
     const ALIGNMENT: usize = 4;
 
     match len % ALIGNMENT {

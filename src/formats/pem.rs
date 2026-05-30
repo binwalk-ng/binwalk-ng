@@ -272,7 +272,7 @@ fn get_pem_size(file_data: &[u8], start_of_pem_offset: usize) -> Option<usize> {
         .find_overlapping_iter(&file_data[start_of_pem_offset..])
         .next()
     {
-        let eof_marker_index: usize = eof_match.pattern().as_usize();
+        let eof_marker_index = eof_match.pattern().as_usize();
         let mut pem_size = eof_match.start() + eof_markers[eof_marker_index].len();
 
         // Include any trailing newline characters in the total size of the PEM file

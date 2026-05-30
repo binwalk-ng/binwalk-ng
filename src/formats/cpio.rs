@@ -137,8 +137,8 @@ pub fn parse_cpio_entry_header(cpio_data: &[u8]) -> Result<CPIOEntryHeader, Stru
                             let header_total_size = CPIO_HEADER_SIZE + file_name_size;
 
                             return Ok(CPIOEntryHeader {
-                                magic: header_magic.clone(),
-                                file_name: file_name.clone(),
+                                magic: header_magic,
+                                file_name,
                                 data_size: file_data_size + byte_padding(file_data_size),
                                 header_size: header_total_size + byte_padding(header_total_size),
                             });
@@ -153,7 +153,7 @@ pub fn parse_cpio_entry_header(cpio_data: &[u8]) -> Result<CPIOEntryHeader, Stru
 }
 
 /// File data and CPIO headers are padded to 4-byte boundaries
-fn byte_padding(n: usize) -> usize {
+const fn byte_padding(n: usize) -> usize {
     let modulus: usize = n % 4;
     if modulus == 0 { 0 } else { 4 - modulus }
 }

@@ -44,7 +44,7 @@ pub fn srec_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
     // Search for srec footer lines
     for srec_footer_match in grep.find_overlapping_iter(&file_data[offset..]) {
         // Assume origin OS is Unix unless proven otherwise
-        let mut os_type: &str = "Unix";
+        let mut os_type = "Unix";
 
         // Start searching for terminating EOF characters after this footer match (all footer signatures are the same size)
         let mut srec_eof: usize = offset + srec_footer_match.start() + srec_footers[0].len();

@@ -67,7 +67,7 @@ pub fn parse_svg_image(svg_data: &[u8]) -> Result<SVGImage, StructureError> {
     // Need to search through the data to find all <svg ...> and </svg> tags.
     // There may be multiple of these tags in any given SVG image.
     for tag_match in grep.find_overlapping_iter(svg_data) {
-        let tag_start: usize = tag_match.start();
+        let tag_start = tag_match.start();
 
         match parse_svg_tag(&svg_data[tag_start..]) {
             Err(_) => {

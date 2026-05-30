@@ -43,7 +43,7 @@ pub fn cramfs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult,
                 cramfs_image[CRC_START_OFFSET..CRC_END_OFFSET].fill(0);
 
                 // For displaying an error message in the description
-                let mut error_message: &str = "";
+                let mut error_message = "";
 
                 // On CRC error, lower confidence and report the checksum error
                 // (have seen partially corrupted images that still extract Ok)
@@ -127,7 +127,7 @@ pub fn parse_cramfs_header(cramfs_data: &[u8]) -> Result<CramFSHeader, Structure
                         return Err(StructureError);
                     }
                     Ok(cramfs_be_header) => {
-                        cramfs_header = cramfs_be_header.clone();
+                        cramfs_header = cramfs_be_header;
                     }
                 }
             }

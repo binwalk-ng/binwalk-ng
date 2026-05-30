@@ -89,7 +89,7 @@ fn get_ubi_image_size(ubi_data: &[u8]) -> Result<usize, SignatureError> {
     // grep for all volume header magic bytes
     for magic_match in grep.find_overlapping_iter(ubi_data) {
         // Offset in the UBI image where this magic match was found
-        let this_volume_offset: usize = magic_match.start();
+        let this_volume_offset = magic_match.start();
 
         // Parse the volume header
         if parse_ubi_volume_header(&ubi_data[this_volume_offset..]).is_ok() {

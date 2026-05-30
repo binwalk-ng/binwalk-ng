@@ -334,12 +334,11 @@ pub fn extract_uimage(
             // If extraction was requested and the data CRC is valid, carve the uImage data out to a file
             if data_crc_valid && let Some(output_directory) = output_directory {
                 let chroot = Chroot::new(output_directory);
-                let mut file_base_name: String = DEFAULT_OUTPUT_FILE_NAME.to_string();
-
-                // Use the name specified in the uImage header as the file name, if one was provided
-                if !uimage_header.name.is_empty() {
-                    file_base_name = uimage_header.name.replace(" ", "_");
-                }
+                let file_base_name = if uimage_header.name.is_empty() {
+                    DEFAULT_OUTPUT_FILE_NAME.to_string()
+                } else {
+                    uimage_header.name.replace(" ", "_")
+                };
 
                 let output_file = format!("{file_base_name}.{OUTPUT_FILE_EXT}");
 

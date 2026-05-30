@@ -241,8 +241,8 @@ impl Chroot {
     /// assert_eq!(&chroot.chroot_directory, &chroot_dir);
     /// assert_eq!(std::path::Path::new(&chroot_dir).exists(), true);
     /// ```
-    pub fn new(chroot_directory: impl AsRef<Path>) -> Chroot {
-        let mut chroot_instance = Chroot::default();
+    pub fn new(chroot_directory: impl AsRef<Path>) -> Self {
+        let mut chroot_instance = Self::default();
 
         let chroot_directory = chroot_directory.as_ref();
 
@@ -323,7 +323,7 @@ impl Chroot {
         let path2 = path2.as_ref();
         let path2 = path2.strip_prefix("/").unwrap_or(path2);
 
-        let mut joined_path = self.sanitize_path(path1.join(path2)).to_path_buf();
+        let mut joined_path = self.sanitize_path(path1.join(path2));
 
         // If the joined path does not start with the chroot directory,
         // prepend the chroot directory to the final joined path.
@@ -333,8 +333,7 @@ impl Chroot {
         } else if !joined_path.starts_with(&self.chroot_directory) {
             joined_path = self
                 .chroot_directory
-                .join(joined_path.strip_prefix("/").unwrap_or(&joined_path))
-                .to_path_buf();
+                .join(joined_path.strip_prefix("/").unwrap_or(&joined_path));
         }
 
         joined_path
@@ -439,18 +438,15 @@ impl Chroot {
         start: usize,
         size: usize,
     ) -> bool {
-        let mut retval: bool = false;
-
         if let Some(file_data) = data.get(start..start + size) {
-            retval = self.create_file(file_path, file_data);
+            self.create_file(file_path, file_data)
         } else {
             error!(
                 "Failed to create file {}: data offset/size are invalid",
                 file_path.as_ref().display()
             );
+            false
         }
-
-        retval
     }
 
     /// Creates a device file in the chroot directory.
@@ -464,7 +460,7 @@ impl Chroot {
         minor: usize,
     ) -> bool {
         let device_file_contents: String = format!("{device_type} {major} {minor}");
-        self.create_file(file_path, &device_file_contents.clone().into_bytes())
+        self.create_file(file_path, &device_file_contents.into_bytes())
     }
 
     /// Creates a character device file in the chroot directory.
@@ -1018,14 +1014,11 @@ pub fn execute(
             }
 
             Some(default_extractor) => {
-                let extractor_definition: Extractor;
-
                 // If the signature result specified a preferred extractor, use that instead of the default signature extractor
-                if let Some(preferred_extractor) = &signature.preferred_extractor {
-                    extractor_definition = preferred_extractor.clone();
-                } else {
-                    extractor_definition = default_extractor.clone();
-                }
+                let extractor_definition = signature.preferred_extractor.as_ref().map_or_else(
+                    || default_extractor.clone(),
+                    |preferred_extractor| preferred_extractor.clone(),
+                );
 
                 // Decide how to execute the extractor depending on the extractor type
                 match &extractor_definition.utility {
@@ -1214,7 +1207,7 @@ fn proc_wait(mut worker_info: ProcInfo) -> Result<ExtractionResult, ExtractionEr
         // Child terminated with an exit status
         Ok(status) => {
             // Assume failure until proven otherwise
-            let mut extraction_success: bool = false;
+            let mut extraction_success = false;
 
             // Clean up the carved file used as input to the extractor
             debug!("Deleting carved file {}", worker_info.carved_file);

@@ -63,10 +63,10 @@ pub fn crc32(data: &[u8]) -> u32 {
 /// assert_eq!(timestamp, "1970-01-01 00:00:00");
 /// ```
 pub fn epoch_to_string(epoch_timestamp: impl Into<i64>) -> String {
-    match jiff::Timestamp::new(epoch_timestamp.into(), 0) {
-        Ok(timestamp) => timestamp.strftime("%Y-%m-%d %H:%M:%S").to_string(),
-        Err(_) => "".to_string(),
-    }
+    jiff::Timestamp::new(epoch_timestamp.into(), 0).map_or_else(
+        |_| "".to_string(),
+        |timestamp| timestamp.strftime("%Y-%m-%d %H:%M:%S").to_string(),
+    )
 }
 
 /// Get a C-style NULL-terminated string from the provided array of u8 bytes.

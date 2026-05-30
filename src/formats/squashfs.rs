@@ -206,7 +206,7 @@ pub fn parse_squashfs_header(sqsh_data: &[u8]) -> Result<SquashFSHeader, Structu
          * This can then be reliably used to determine both the SquashFS superblock header version, as well as the endianness used.
          * Interpret the squashfs major version, assuming little endian.
          */
-        let mut squashfs_version: u16 = u16::from_le_bytes(
+        let mut squashfs_version = u16::from_le_bytes(
             sqsh_data[SQUASHFS_VERSION_START..SQUASHFS_VERSION_END]
                 .try_into()
                 .unwrap(),
@@ -239,7 +239,7 @@ pub fn parse_squashfs_header(sqsh_data: &[u8]) -> Result<SquashFSHeader, Structu
                         return Err(e);
                     }
                     Ok(squash4_header) => {
-                        squashfs_header = squash4_header.clone();
+                        squashfs_header = squash4_header;
                     }
                 }
             } else {
@@ -253,7 +253,7 @@ pub fn parse_squashfs_header(sqsh_data: &[u8]) -> Result<SquashFSHeader, Structu
                         return Err(e);
                     }
                     Ok(squash3_header) => {
-                        squashfs_header = squash3_header.clone();
+                        squashfs_header = squash3_header;
 
                         // Adjust the reported header values for v1 and v2 images
                         if squashfs_version < 3 {

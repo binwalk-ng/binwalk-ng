@@ -16,12 +16,7 @@ const COLUMN1_WIDTH: usize = 35;
 const COLUMN2_WIDTH: usize = 35;
 
 fn terminal_width() -> usize {
-    let terminal_width: u16 = match termsize::get() {
-        Some(ts) => ts.cols,
-        None => DEFAULT_TERMINAL_WIDTH,
-    };
-
-    terminal_width as usize
+    termsize::get().map_or(DEFAULT_TERMINAL_WIDTH, |ts| ts.cols) as usize
 }
 
 fn line_delimiter() -> String {
@@ -154,10 +149,10 @@ fn print_extractions(
     signatures: &Vec<signatures::SignatureResult>,
     extraction_results: &HashMap<String, extractors::ExtractionResult>,
 ) {
-    let mut delimiter_printed: bool = false;
+    let mut delimiter_printed = false;
 
     for signature in signatures {
-        let mut printable_extraction: bool = false;
+        let mut printable_extraction = false;
         let mut extraction_result: Option<&extractors::ExtractionResult> = None;
 
         // Only print extraction results if an extraction was attempted or explicitly declined

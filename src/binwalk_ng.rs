@@ -29,7 +29,7 @@ pub struct BinwalkError {
 
 impl BinwalkError {
     pub fn new(message: &str) -> Self {
-        BinwalkError {
+        Self {
             message: message.to_string(),
         }
     }
@@ -97,8 +97,8 @@ impl Binwalk {
     /// let binwalker = Binwalk::new();
     /// ```
     #[allow(dead_code)]
-    pub fn new() -> Binwalk {
-        Binwalk::configure(None, None, vec![], vec![], None, false).unwrap()
+    pub fn new() -> Self {
+        Self::configure(None, None, vec![], vec![], None, false).unwrap()
     }
 
     /// Create a new Binwalk instance.
@@ -137,8 +137,8 @@ impl Binwalk {
         exclude: Vec<String>,
         signatures: Option<Vec<signatures::Signature>>,
         full_search: bool,
-    ) -> Result<Binwalk, BinwalkError> {
-        let mut new_instance = Binwalk::default();
+    ) -> Result<Self, BinwalkError> {
+        let mut new_instance = Self::default();
 
         // Target file is optional, especially if being called via the library
         if let Some(target_file) = target_file_name {
@@ -356,7 +356,7 @@ impl Binwalk {
                 let magic_offset: usize = next_valid_offset + magic_match.start();
 
                 // Get the signature associated with this magic signature
-                let magic_pattern_index: usize = magic_match.pattern().as_usize();
+                let magic_pattern_index = magic_match.pattern().as_usize();
                 let signature: signatures::Signature = self
                     .pattern_signature_table
                     .get(&magic_pattern_index)
@@ -778,13 +778,10 @@ impl Binwalk {
     pub fn analyze(&self, target_file: impl AsRef<Path>, do_extraction: bool) -> AnalysisResults {
         let file_path = target_file.as_ref();
 
-        let file_data = match read_file(file_path) {
-            Err(_) => {
-                error!("Failed to read data from {}", file_path.display());
-                b"".to_vec()
-            }
-            Ok(data) => data,
-        };
+        let file_data = read_file(file_path).unwrap_or_else(|_| {
+            error!("Failed to read data from {}", file_path.display());
+            b"".to_vec()
+        });
 
         self.analyze_buf(&file_data, file_path, do_extraction)
     }

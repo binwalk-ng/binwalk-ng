@@ -8,6 +8,21 @@ readme = "CARGO_README.md"
 repository = "https://github.com/binwalk-ng/binwalk-ng"
 description = "Analyzes data for embedded file types"
 keywords = ["binwalk", "firmware", "analysis"]
+categories = [
+    "security",
+    "command-line-utilities",
+    "parsing-tools",
+    "parser-implementations",
+    "filesystem",
+]
+
+[lints.clippy]
+redundant_type_annotations = "warn"
+redundant_clone = "warn"
+redundant_as_str = "warn"
+panic = "warn"
+nursery = "warn"
+
 
 [features]
 default = []

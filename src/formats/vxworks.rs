@@ -124,7 +124,7 @@ pub fn parse_symtab_entry(
         ("group", "u32"),
     ];
 
-    let symtab_structure_size: usize = crate::structures::size(&symtab_structure);
+    let symtab_structure_size = crate::structures::size(&symtab_structure);
 
     // Parse the symbol table entry
     if let Ok(symbol_entry) = crate::structures::parse(symbol_data, &symtab_structure, endianness) {
@@ -253,8 +253,7 @@ pub fn extract_symbol_table(
 
                 // Write JSON to file
                 Ok(symtab_json) => {
-                    result.success =
-                        chroot.create_file(OUTFILE_NAME, &symtab_json.clone().into_bytes());
+                    result.success = chroot.create_file(OUTFILE_NAME, &symtab_json.into_bytes());
                 }
             }
         }

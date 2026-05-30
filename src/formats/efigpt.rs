@@ -95,9 +95,9 @@ pub fn parse_efigpt_header(efi_data: &[u8]) -> Result<EFIGPTHeader, StructureErr
             // Make sure the revision field is the expected valid
             if gpt_header.revision == EXPECTED_REVISION {
                 // Calculate the start and end offsets of the partition entries
-                let partition_entries_start: usize =
+                let partition_entries_start =
                     lba_to_offset(gpt_header.partition_entry_lba.get() as usize);
-                let partition_entries_end: usize = partition_entries_start
+                let partition_entries_end = partition_entries_start
                     + (gpt_header.partition_entry_count.get()
                         * gpt_header.partition_entry_size.get()) as usize;
 
@@ -121,8 +121,9 @@ pub fn parse_efigpt_header(efi_data: &[u8]) -> Result<EFIGPTHeader, StructureErr
                                 &partition_entries_data[next_partition_offset..],
                             ) {
                                 // EOF is the end of the farthest away partition
-                                if partition.start_offset < partition.end_offset
-                                    && partition.end_offset > result.total_size
+                                let total_size = result.total_size;
+                                if (total_size < partition.end_offset)
+                                    && (partition.start_offset < partition.end_offset)
                                 {
                                     result.total_size = partition.end_offset;
                                 }
@@ -177,6 +178,6 @@ fn parse_gpt_partition_entry(entry_data: &[u8]) -> Option<GPTPartitionEntry> {
 }
 
 // Convert LBA to offset
-fn lba_to_offset(lba: usize) -> usize {
+const fn lba_to_offset(lba: usize) -> usize {
     lba * BLOCK_SIZE
 }

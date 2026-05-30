@@ -32,12 +32,11 @@ pub fn gzip_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
             // The dry run has already validated the header, but we want some header info to display to the user
             if let Ok(gzip_header) = parse_gzip_header(&file_data[offset..]) {
                 // Original file name is optional
-                let mut original_file_name_text: String = "".to_string();
-
-                if !gzip_header.original_name.is_empty() {
-                    original_file_name_text =
-                        format!(" original file name: \"{}\",", gzip_header.original_name);
-                }
+                let original_file_name_text: String = if gzip_header.original_name.is_empty() {
+                    "".to_string()
+                } else {
+                    format!(" original file name: \"{}\",", gzip_header.original_name)
+                };
 
                 // Total size of the gzip file is the size of the header, plus the size of the compressed data, plus the trailing CRC and ISIZE fields
                 let total_size =

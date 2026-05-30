@@ -72,7 +72,7 @@ pub fn parse_csman_header(csman_data: &[u8]) -> Result<CSManHeader, StructureErr
             if let Ok(csman_header_le) =
                 crate::structures::parse(csman_data, &csman_header_structure, "little")
             {
-                csman_header = csman_header_le.clone();
+                csman_header = csman_header_le;
                 result.endianness = "little".to_string();
             }
         } else {
@@ -133,8 +133,8 @@ pub fn parse_csman_entry(
     if let Ok(entry_header) =
         crate::structures::parse(entry_data, &csman_entry_structure, endianness)
     {
-        let value_start: usize = crate::structures::size(&csman_entry_structure);
-        let value_end: usize = value_start + entry_header["size"];
+        let value_start = crate::structures::size(&csman_entry_structure);
+        let value_end = value_start + entry_header["size"];
 
         if let Some(entry_value) = entry_data.get(value_start..value_end) {
             entry.key = entry_header["key"];
@@ -215,7 +215,7 @@ pub fn extract_csman_dat(
                         return result;
                     }
                     Ok(decompressed_data) => {
-                        entry_data = decompressed_data.clone();
+                        entry_data = decompressed_data;
                     }
                 }
             }

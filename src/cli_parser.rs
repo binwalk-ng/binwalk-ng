@@ -60,7 +60,7 @@ pub struct CliArgs {
     pub log: Option<PathBuf>,
 
     /// Manually specify the number of threads to use
-    #[arg(short, long, value_name = "INT")]
+    #[arg(short, long, value_name = "INT", value_parser = clap::value_parser!(u64).range(1..))]
     pub threads: Option<usize>,
 
     /// Do not scan for these signatures
