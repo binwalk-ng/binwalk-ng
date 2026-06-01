@@ -69,6 +69,12 @@ features = [
     "macro-diagnostics", # Enable better diagnostics for compile-time UUIDs
 ]
 
+[profile.dev.package.insta]
+opt-level = 3
+
+[profile.dev.package.similar]
+opt-level = 3
+
 [profile.release]
 lto = true
 
@@ -78,3 +84,4 @@ path = "src/main.rs"
 
 [dev-dependencies]
 tempfile = "3.25.0"
+insta = { version = "1.47", features = ["yaml", "redactions"] }

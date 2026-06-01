@@ -1,0 +1,12 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 218
+  name: 7zip
+  confidence: 250
+  description: "7-zip archive data, version 0.4, total size: 218 bytes"
+  always_display: false
+  extraction_declined: false

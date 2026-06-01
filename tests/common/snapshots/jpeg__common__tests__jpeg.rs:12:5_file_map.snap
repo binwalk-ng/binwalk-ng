@@ -1,0 +1,20 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 89022
+  name: jpeg
+  confidence: 128
+  description: "JPEG image, total size: 89022 bytes"
+  always_display: false
+  extraction_declined: false
+- offset: 89022
+  id: "[uuid]"
+  size: 14573
+  name: jpeg
+  confidence: 128
+  description: "JPEG image, total size: 14573 bytes"
+  always_display: false
+  extraction_declined: false

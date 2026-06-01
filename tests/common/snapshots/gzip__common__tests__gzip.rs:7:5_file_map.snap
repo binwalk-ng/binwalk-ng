@@ -1,0 +1,12 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 109
+  name: gzip
+  confidence: 250
+  description: "gzip compressed data, original file name: \"lsb-release\", operating system: Unix, timestamp: 2024-11-01 15:31:16, total size: 109 bytes"
+  always_display: false
+  extraction_declined: false

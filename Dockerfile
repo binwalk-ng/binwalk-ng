@@ -140,7 +140,7 @@ COPY --link . ${BINWALK_BUILD_DIR}
 
 RUN --mount=type=cache,target=./target,sharing=locked \
     --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
-    . /root/.cargo/env && cargo test
+    . /root/.cargo/env && CI=true cargo test
 
 FROM runtime_build
 

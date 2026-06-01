@@ -1,0 +1,9 @@
+---
+source: tests/common/mod.rs
+expression: ordered_extractions
+---
+- size: ~
+  success: true
+  extractor: 7zz
+  do_not_recurse: false
+  output_directory: "[output_directory]"

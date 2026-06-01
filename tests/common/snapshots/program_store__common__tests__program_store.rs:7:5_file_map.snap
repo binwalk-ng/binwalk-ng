@@ -1,0 +1,12 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 118
+  name: program_store
+  confidence: 250
+  description: "Broadcom ProgramStore firmware image, signature: 0x3350, compression: none, load address: 0x00000000, revision: 1.2, build time: 2001-09-09 01:46:40, filename: \"program_store.bin\""
+  always_display: false
+  extraction_declined: false

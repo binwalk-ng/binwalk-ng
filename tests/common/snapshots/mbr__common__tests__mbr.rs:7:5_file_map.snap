@@ -1,0 +1,12 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 5120
+  name: mbr
+  confidence: 128
+  description: "DOS Master Boot Record, partition: Linux, image size: 5120 bytes"
+  always_display: true
+  extraction_declined: false
