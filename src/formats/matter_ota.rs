@@ -162,7 +162,6 @@ pub fn parse_matter_ota_header(ota_data: &[u8]) -> Result<MatterOTAHeader, Struc
     Err(StructureError)
 }
 
-/// Parse tlv element, return result and new offset
 fn parse_tlv_element<'a>(data: &mut &'a [u8]) -> Option<Element<'a>> {
     let control_octet = *data.split_off_first()?;
 
