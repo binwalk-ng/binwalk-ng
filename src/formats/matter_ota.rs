@@ -1,10 +1,23 @@
-use crate::common::{get_cstring, is_offset_safe};
+//! Matter OTA (Over-The-Air) firmware update image format.
+//!
+//! Defined in §11.21 of the [Matter Core Specification][1]. All multibyte fields are little-endian.
+//!
+//! [1]: https://csa-iot.org/wp-content/uploads/2024/11/24-27349-006_Matter-1.4-Core-Specification.pdf
+
 use crate::extractors::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
 use crate::structures::StructureError;
-use std::collections::HashMap;
 use std::path::Path;
 use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
+
+mod tags {
+    pub const VENDOR_ID: u8 = 0;
+    pub const PRODUCT_ID: u8 = 1;
+    pub const SOFTWARE_VERSION_STRING: u8 = 3;
+    pub const PAYLOAD_SIZE: u8 = 4;
+    pub const IMAGE_DIGEST_TYPE: u8 = 8;
+    pub const IMAGE_DIGEST: u8 = 9;
+}
 
 /// Human readable description
 pub const DESCRIPTION: &str = "Matter OTA firmware";
@@ -19,28 +32,25 @@ pub fn matter_ota_parser(
     file_data: &[u8],
     offset: usize,
 ) -> Result<SignatureResult, SignatureError> {
-    // Successful return value
-    let mut result = SignatureResult {
-        offset,
-        description: DESCRIPTION.to_string(),
-        ..Default::default()
-    };
-
     if let Ok(ota_header) = parse_matter_ota_header(&file_data[offset..]) {
-        result.confidence = CONFIDENCE_HIGH;
-        result.size = ota_header.header_size;
-        result.description = format!(
-            "{}, total size: {} bytes, tlv header size: {} bytes, vendor id: 0x{:x}, product id: 0x{:x}, version: {}, payload size: {} bytes, digest type: {}, payload digest: {}",
-            result.description,
-            ota_header.total_size,
-            ota_header.header_size,
-            ota_header.vendor_id,
-            ota_header.product_id,
-            ota_header.version,
-            ota_header.payload_size,
-            ota_header.image_digest_type,
-            ota_header.image_digest,
-        );
+        let result = SignatureResult {
+            offset,
+            size: ota_header.header_size,
+            confidence: CONFIDENCE_HIGH,
+            description: format!(
+                "{}, total size: {} bytes, tlv header size: {} bytes, vendor id: 0x{:x}, product id: 0x{:x}, version: {}, payload size: {} bytes, digest type: {}, payload digest: {}",
+                DESCRIPTION,
+                ota_header.total_size,
+                ota_header.header_size,
+                ota_header.vendor_id,
+                ota_header.product_id,
+                ota_header.version,
+                ota_header.payload_size,
+                ota_header.image_digest_type,
+                ota_header.image_digest,
+            ),
+            ..Default::default()
+        };
 
         return Ok(result);
     }
@@ -61,18 +71,18 @@ pub struct MatterOTAHeader {
 }
 
 #[derive(Debug)]
-enum Value {
+enum Value<'a> {
     Struct,
     EndOfContainer,
     Unsigned(usize),
-    String(String),
-    OctetString(Vec<u8>),
+    String(&'a str),
+    OctetString(&'a [u8]),
 }
 
 #[derive(Debug)]
-struct Element {
-    tag: Option<usize>,
-    value: Value,
+struct Element<'a> {
+    tag: Option<u8>,
+    value: Value<'a>,
 }
 
 #[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
@@ -85,18 +95,12 @@ struct OtaHeaderBytes {
 
 /// Parse a Matter OTA firmware header
 pub fn parse_matter_ota_header(ota_data: &[u8]) -> Result<MatterOTAHeader, StructureError> {
-    let (ota_header, _) = OtaHeaderBytes::ref_from_prefix(ota_data).map_err(|_| StructureError)?;
+    let (ota_header, rest) =
+        OtaHeaderBytes::ref_from_prefix(ota_data).map_err(|_| StructureError)?;
     let total_size = ota_header.total_size.get() as usize;
     let header_size = ota_header.header_size.get() as usize;
 
-    // Header starts after the magic, total size and header size fields
-    let header_start = std::mem::size_of::<OtaHeaderBytes>();
-    let header_end = header_start + header_size;
-    let header_data = ota_data
-        .get(header_start..header_end)
-        .ok_or(StructureError)?;
-
-    let header = parse_tlv_header(header_data)?;
+    let (mut header_data, _payload) = rest.split_at_checked(header_size).ok_or(StructureError)?;
 
     let mut result = MatterOTAHeader {
         total_size,
@@ -104,17 +108,46 @@ pub fn parse_matter_ota_header(ota_data: &[u8]) -> Result<MatterOTAHeader, Struc
         ..Default::default()
     };
 
-    for (key, value) in header.into_iter() {
-        match (key.as_ref(), value) {
-            ("VendorID", Value::Unsigned(vendor_id)) => result.vendor_id = vendor_id,
-            ("ProductID", Value::Unsigned(product_id)) => result.product_id = product_id,
-            ("SoftwareVersionString", Value::String(version)) => result.version = version,
-            ("PayloadSize", Value::Unsigned(payload_size)) => result.payload_size = payload_size,
-            ("ImageDigestType", Value::Unsigned(image_digest_type)) => {
-                result.image_digest_type = image_digest_type
+    while !header_data.is_empty() {
+        let element = parse_tlv_element(&mut header_data).ok_or(StructureError)?;
+        // Ignore anonymous (non tagged) values
+        let Some(tag) = element.tag else { continue };
+        match tag {
+            tags::VENDOR_ID => {
+                let Value::Unsigned(vendor_id) = element.value else {
+                    return Err(StructureError);
+                };
+                result.vendor_id = vendor_id;
             }
-            ("ImageDigest", Value::OctetString(image_digest)) => {
-                result.image_digest = image_digest.iter().map(|b| format!("{b:02x}")).collect();
+            tags::PRODUCT_ID => {
+                let Value::Unsigned(product_id) = element.value else {
+                    return Err(StructureError);
+                };
+                result.product_id = product_id;
+            }
+            tags::SOFTWARE_VERSION_STRING => {
+                let Value::String(version_str) = element.value else {
+                    return Err(StructureError);
+                };
+                result.version = String::from(version_str);
+            }
+            tags::PAYLOAD_SIZE => {
+                let Value::Unsigned(payload_size) = element.value else {
+                    return Err(StructureError);
+                };
+                result.payload_size = payload_size;
+            }
+            tags::IMAGE_DIGEST_TYPE => {
+                let Value::Unsigned(image_digest_type) = element.value else {
+                    return Err(StructureError);
+                };
+                result.image_digest_type = image_digest_type;
+            }
+            tags::IMAGE_DIGEST => {
+                let Value::OctetString(image_digest) = element.value else {
+                    return Err(StructureError);
+                };
+                result.image_digest = hex::encode(image_digest);
             }
             // Ignore other fields
             _ => {}
@@ -122,145 +155,79 @@ pub fn parse_matter_ota_header(ota_data: &[u8]) -> Result<MatterOTAHeader, Struc
     }
 
     // Sanity check
-    if (result.payload_size + header_start + header_size) == total_size {
+    if (result.payload_size + size_of::<OtaHeaderBytes>() + header_size) == total_size {
         return Ok(result);
     }
 
     Err(StructureError)
 }
 
-/// Parse tlv element, return result and new offset
-fn parse_tlv_element(data: &[u8]) -> Result<(Element, usize), StructureError> {
-    let control_octet = data.first().ok_or(StructureError)?;
+fn parse_tlv_element<'a>(data: &mut &'a [u8]) -> Option<Element<'a>> {
+    let control_octet = *data.split_off_first()?;
 
     let element_type = control_octet & 0x1f;
     let tag_control = control_octet >> 5;
 
-    // Lower 2 bits of the control octet determine the field width of integer types
-    // or the width of the length field for string types
-    let field_width_type = match element_type & 0x3 {
-        0 => "u8",
-        1 => "u16",
-        2 => "u32",
-        3 => "u64",
-        _ => return Err(StructureError),
-    };
-
     // Parse numerical tag. Only supports anonymous fields and fields with a one byte tag
-    let (tag, field_offset) = match tag_control {
-        0 => (None, 1), // Anonymous field
-        1 => (Some(*data.get(1).ok_or(StructureError)? as usize), 2),
-        _ => return Err(StructureError),
+    let tag = match tag_control {
+        0 => None, // Anonymous field
+        1 => Some(*data.split_off_first()?),
+        _ => return None,
     };
 
-    let field_data = data.get(field_offset..).ok_or(StructureError)?;
-
-    match element_type {
-        0b1_0101 => Ok((
+    let element = match element_type {
+        0b1_0101 => {
             // Struct container
             Element {
                 tag,
                 value: Value::Struct,
-            },
-            field_offset,
-        )),
-        0b1_1000 => Ok((
+            }
+        }
+        0b1_1000 => {
             // End of container
             Element {
                 tag,
                 value: Value::EndOfContainer,
-            },
-            field_offset,
-        )),
+            }
+        }
         0b0_0100..=0b0_0111 => {
             // Unsigned integer
-            let structure = &[("field", field_width_type)];
-            let result = crate::structures::parse(field_data, structure, "little")?;
-            Ok((
-                Element {
-                    tag,
-                    value: Value::Unsigned(result["field"]),
-                },
-                field_offset + crate::structures::size(structure),
-            ))
+            let value = split_off_variable_integer(data, element_type)?;
+            Element {
+                tag,
+                value: Value::Unsigned(value),
+            }
         }
         0b0_1100..=0b0_1111 => {
             // UTF-8 String
-            let structure = &[("string_length", field_width_type)];
-            let result = crate::structures::parse(field_data, structure, "little")?;
-            let string_length = result["string_length"];
-            let string_data = field_data
-                .get(crate::structures::size(structure)..)
-                .ok_or(StructureError)?;
-            // The string buffer isn't null-terminated, so use the explicit length
-            let string = string_data
-                .get(..string_length)
-                .map(get_cstring)
-                .ok_or(StructureError)?;
-            Ok((
-                Element {
-                    tag,
-                    value: Value::String(string),
-                },
-                field_offset + crate::structures::size(structure) + string_length,
-            ))
+            let len = split_off_variable_integer(data, element_type)?;
+            let string_data = data.split_off(..len)?;
+            let string = std::str::from_utf8(string_data).ok()?;
+            Element {
+                tag,
+                value: Value::String(string),
+            }
         }
         0b1_0000..=0b1_0011 => {
-            // Octet string
-            let structure = &[("octet_string_length", field_width_type)];
-            let result = crate::structures::parse(field_data, structure, "little")?;
-            let octet_string_length = result["octet_string_length"];
-            let octet_string_data = field_data
-                .get(crate::structures::size(structure)..)
-                .ok_or(StructureError)?;
-            Ok((
-                Element {
-                    tag,
-                    value: Value::OctetString(
-                        octet_string_data
-                            .get(..octet_string_length)
-                            .ok_or(StructureError)?
-                            .to_vec(),
-                    ),
-                },
-                field_offset + crate::structures::size(structure) + octet_string_length,
-            ))
+            let len = split_off_variable_integer(data, element_type)?;
+            let octet_data = data.split_off(..len)?;
+            Element {
+                tag,
+                value: Value::OctetString(octet_data),
+            }
         }
-        _ => Err(StructureError), // Other types are not implemented, but not necessary for header parsing
-    }
+        _ => return None, // Other types are not implemented, but not necessary for header parsing
+    };
+    Some(element)
 }
 
-fn parse_tlv_header(data: &[u8]) -> Result<HashMap<String, Value>, StructureError> {
-    // Field names for the Matter OTA header indexed by the tag number
-    let fields = [
-        "VendorID",
-        "ProductID",
-        "SoftwareVersion",
-        "SoftwareVersionString",
-        "PayloadSize",
-        "MinApplicableSoftwareVersion",
-        "MaxApplicableSoftwareVersion",
-        "ReleaseNotesURL",
-        "ImageDigestType",
-        "ImageDigest",
-    ];
-    let mut header = HashMap::new();
+fn split_off_variable_integer(data: &mut &[u8], element_type: u8) -> Option<usize> {
+    let mut res = [0; 8];
 
-    let available_data: usize = data.len();
+    let len = 1 << (element_type & 0x3);
+    res[..len].copy_from_slice(data.split_off(..len)?);
 
-    let mut last_tlv_offset: Option<usize> = None;
-    let mut next_tlv_offset: usize = 0;
-
-    while is_offset_safe(available_data, next_tlv_offset, last_tlv_offset) {
-        let (element, new_offset) = parse_tlv_element(&data[next_tlv_offset..])?;
-        last_tlv_offset = Some(next_tlv_offset);
-        next_tlv_offset += new_offset;
-        if let Some(tag) = element.tag {
-            let field_name = *fields.get(tag).ok_or(StructureError)?;
-            header.insert(field_name.to_string(), element.value);
-        }
-    }
-    Ok(header)
+    Some(usize::from_le_bytes(res))
 }
 
 /// Defines the internal extractor function for extracting a Matter OTA firmware payload */
@@ -303,12 +270,7 @@ pub fn extract_matter_ota(
     let mut result = ExtractionResult::default();
 
     if let Ok(ota_header) = parse_matter_ota_header(&file_data[offset..]) {
-        const MAGIC_SIZE: usize = 4;
-        const TOTAL_SIZE_SIZE: usize = 8;
-        const HEADER_SIZE_SIZE: usize = 4;
-
-        let total_header_size =
-            MAGIC_SIZE + TOTAL_SIZE_SIZE + HEADER_SIZE_SIZE + ota_header.header_size;
+        let total_header_size = size_of::<OtaHeaderBytes>() + ota_header.header_size;
 
         result.success = true;
         result.size = Some(ota_header.total_size);
