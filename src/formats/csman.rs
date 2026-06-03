@@ -1,13 +1,18 @@
-use crate::common::is_offset_safe;
 use crate::extractors::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
-use crate::structures::StructureError;
+use crate::structures::{Endianness, StructureError, dyn_endian};
 use miniz_oxide::inflate;
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::path::Path;
+use zerocopy::{FromBytes, Immutable, KnownLayout, Unaligned};
 
 /// Human readable description
 pub const DESCRIPTION: &str = "CSman DAT file";
+
+const MAGIC: u16 = 0x5343;
+const LITTLE_ENDIAN_MAGIC: dyn_endian::U16 = dyn_endian::U16::new(MAGIC, Endianness::Little);
+const BIG_ENDIAN_MAGIC: dyn_endian::U16 = dyn_endian::U16::new(MAGIC, Endianness::Big);
 
 /// CSMAN DAT files always start with these bytes
 pub fn csman_magic() -> Vec<Vec<u8>> {
@@ -39,119 +44,96 @@ pub fn csman_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
 }
 
 /// Struct to store CSMAN header info
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct CSManHeader {
     pub compressed: bool,
     pub data_size: usize,
-    pub endianness: String,
+    pub endianness: Endianness,
     pub header_size: usize,
 }
 
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+pub struct CSManHeaderBytes {
+    magic: dyn_endian::U16,
+    unknown1: dyn_endian::U16,
+    compressed_size: dyn_endian::U32,
+    unknown2: dyn_endian::U32,
+    decompressed_size: dyn_endian::U32,
+}
+
 /// Parses a CSMAN header
-pub fn parse_csman_header(csman_data: &[u8]) -> Result<CSManHeader, StructureError> {
+pub fn parse_csman_header(csman_data: &[u8]) -> Result<(CSManHeader, &[u8]), StructureError> {
     const COMPRESSED_MAGIC: &[u8] = b"\x78";
-    const LITTLE_ENDIAN_MAGIC: usize = 0x4353;
+    let (csman_header, rest) =
+        CSManHeaderBytes::ref_from_prefix(csman_data).map_err(|_| StructureError)?;
+    let endianness = match csman_header.magic {
+        LITTLE_ENDIAN_MAGIC => Endianness::Little,
+        BIG_ENDIAN_MAGIC => Endianness::Big,
+        _ => return Err(StructureError),
+    };
 
-    let csman_header_structure = vec![
-        ("magic", "u16"),
-        ("unknown1", "u16"),
-        ("compressed_size", "u32"),
-        ("unknown2", "u32"),
-        ("decompressed_size", "u32"),
-    ];
+    let compressed_size = csman_header.compressed_size.get(endianness) as usize;
+    let decompressed_size = csman_header.decompressed_size.get(endianness) as usize;
+    let compressed = compressed_size != decompressed_size;
 
-    let mut result = CSManHeader::default();
+    let payload = rest.get(..compressed_size).ok_or(StructureError)?;
 
-    // Parse the header
-    if let Ok(mut csman_header) =
-        crate::structures::parse(csman_data, &csman_header_structure, "big")
-    {
-        // Detect the endianness
-        if csman_header["magic"] == LITTLE_ENDIAN_MAGIC {
-            // If this is a little endian header, re-parse the data as little endian
-            if let Ok(csman_header_le) =
-                crate::structures::parse(csman_data, &csman_header_structure, "little")
-            {
-                csman_header = csman_header_le;
-                result.endianness = "little".to_string();
-            }
-        } else {
-            result.endianness = "big".to_string();
-        }
-
-        // Should have been able to determine the endianness
-        if !result.endianness.is_empty() {
-            result.data_size = csman_header["compressed_size"];
-            result.header_size = crate::structures::size(&csman_header_structure);
-            result.compressed =
-                csman_header["compressed_size"] != csman_header["decompressed_size"];
-
-            // If compressed, check the expected compressed magic bytes
-            if result.compressed
-                && let Some(compressed_magic) =
-                    csman_data.get(result.header_size..result.header_size + COMPRESSED_MAGIC.len())
-                && compressed_magic != COMPRESSED_MAGIC
-            {
-                return Err(StructureError);
-            }
-
-            return Ok(result);
-        }
+    if compressed && !payload.starts_with(COMPRESSED_MAGIC) {
+        return Err(StructureError);
     }
 
-    Err(StructureError)
+    Ok((
+        CSManHeader {
+            compressed,
+            data_size: compressed_size,
+            endianness,
+            header_size: size_of::<CSManHeaderBytes>(),
+        },
+        payload,
+    ))
 }
 
 /// Stores info about a single CSMan DAT file entry
-#[derive(Debug, Default, Clone)]
-pub struct CSManEntry {
-    pub size: usize,
-    pub eof: bool,
-    pub key: usize,
-    pub value: Vec<u8>,
+#[derive(Debug, Clone)]
+pub enum CSManEntry<'a> {
+    Eof,
+    Data { key: u32, value: &'a [u8] },
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct EofEntryBytes {
+    key: dyn_endian::U32,
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct EntryBytes {
+    key: dyn_endian::U32,
+    size: dyn_endian::U16,
 }
 
 /// Parses a single CSMan DAT file entry
 pub fn parse_csman_entry(
     entry_data: &[u8],
-    endianness: &str,
-) -> Result<CSManEntry, StructureError> {
-    const EOF_TAG: usize = 0;
+    endianness: Endianness,
+) -> Result<(CSManEntry<'_>, &[u8]), StructureError> {
+    const EOF_TAG: u32 = 0;
 
-    // The last entry is just a single 4-byte NULL value
-    let csman_last_entry_structure = vec![("eof", "u32")];
-
-    // Entries consist of a 4-byte identifier, a 2-byte size, and a value
-    let csman_entry_structure = vec![
-        ("key", "u32"),
-        ("size", "u16"),
-        // value of size bytes immediately follows
-    ];
-
-    let mut entry = CSManEntry::default();
-
-    if let Ok(entry_header) =
-        crate::structures::parse(entry_data, &csman_entry_structure, endianness)
-    {
-        let value_start = crate::structures::size(&csman_entry_structure);
-        let value_end = value_start + entry_header["size"];
-
-        if let Some(entry_value) = entry_data.get(value_start..value_end) {
-            entry.key = entry_header["key"];
-            entry.value = entry_value.to_vec();
-            entry.size = crate::structures::size(&csman_entry_structure) + entry_value.len();
-            return Ok(entry);
+    if let Ok((entry_header, rest)) = EntryBytes::ref_from_prefix(entry_data) {
+        let key = entry_header.key.get(endianness);
+        let size = entry_header.size.get(endianness) as usize;
+        let (value, rest) = rest.split_at_checked(size).ok_or(StructureError)?;
+        Ok((CSManEntry::Data { key, value }, rest))
+    } else if let Ok((eof_entry, rest)) = EofEntryBytes::ref_from_prefix(entry_data) {
+        if eof_entry.key.get(endianness) != EOF_TAG {
+            return Err(StructureError);
         }
-    } else if let Ok(entry_header) =
-        crate::structures::parse(entry_data, &csman_last_entry_structure, endianness)
-        && entry_header["eof"] == EOF_TAG
-    {
-        entry.eof = true;
-        entry.size = crate::structures::size(&csman_last_entry_structure);
-        return Ok(entry);
+        Ok((CSManEntry::Eof, rest))
+    } else {
+        Err(StructureError)
     }
-
-    Err(StructureError)
 }
 
 /// Defines the internal extractor function for CSMan DAT files
@@ -194,100 +176,64 @@ pub fn extract_csman_dat(
     // Return value
     let mut result = ExtractionResult::default();
 
-    let mut csman_entries: Vec<CSManEntry> = Vec::new();
+    let Ok((csman_header, payload)) = parse_csman_header(&file_data[offset..]) else {
+        return result;
+    };
 
-    // Parse the CSMAN header
-    if let Ok(csman_header) = parse_csman_header(&file_data[offset..]) {
-        // Calulate the start and end offsets of the CSMAN entries
-        let entries_start: usize = offset + csman_header.header_size;
-        let entries_end: usize = entries_start + csman_header.data_size;
+    let decompressed_data: Vec<u8>;
+    let entry_data = if csman_header.compressed {
+        // If the entries are compressed, decompress it (zlib compression)
+        let Some(compressed_payload) = payload.get(COMPRESSED_HEADER_SIZE..) else {
+            return result;
+        };
+        match inflate::decompress_to_vec(compressed_payload) {
+            Ok(data) => decompressed_data = data,
+            Err(_) => return result,
+        }
+        &decompressed_data[..]
+    } else {
+        payload
+    };
 
-        // Get the CSMAN entry data
-        if let Some(raw_entry_data) = file_data.get(entries_start..entries_end) {
-            let mut entry_data = raw_entry_data.to_vec();
+    let mut csman_entries: Vec<(u32, &[u8])> = Vec::new();
 
-            // If the entries are compressed, decompress it (zlib compression)
-            if csman_header.compressed
-                && let Some(compressed_data) = raw_entry_data.get(COMPRESSED_HEADER_SIZE..)
-            {
-                match inflate::decompress_to_vec(compressed_data) {
-                    Err(_) => {
-                        return result;
-                    }
-                    Ok(decompressed_data) => {
-                        entry_data = decompressed_data;
-                    }
-                }
+    let mut remaining = entry_data;
+    while let Ok((entry, rest)) = parse_csman_entry(remaining, csman_header.endianness) {
+        remaining = rest;
+        match entry {
+            CSManEntry::Eof => {
+                result.success = !csman_entries.is_empty();
+                break;
             }
-
-            // Offsets for processing CSMAN entries in entry_data
-            let mut next_offset: usize = 0;
-            let mut previous_offset = None;
-            let available_data: usize = entry_data.len();
-
-            // Loop while there is still data that can be safely parsed
-            while is_offset_safe(available_data, next_offset, previous_offset) {
-                // Get the next entry's data
-                match entry_data.get(next_offset..) {
-                    None => {
-                        break;
-                    }
-                    Some(next_entry_data) => {
-                        // Parse the next entry
-                        match parse_csman_entry(next_entry_data, &csman_header.endianness) {
-                            Err(_) => {
-                                break;
-                            }
-                            Ok(entry) => {
-                                if entry.eof {
-                                    // Last entry should be an EOF marker; an EOF marker should always exist.
-                                    // There should be at least one valid entry.
-                                    result.success = !csman_entries.is_empty();
-                                    break;
-                                } else {
-                                    // Append this entry to the list of entries and update the offsets to process the next entry
-                                    csman_entries.push(entry.clone());
-                                    previous_offset = Some(next_offset);
-                                    next_offset += entry.size;
-                                }
-                            }
-                        }
-                    }
-                }
+            CSManEntry::Data { key, value } => {
+                csman_entries.push((key, value));
             }
+        }
+    }
+    if !result.success {
+        return result;
+    }
 
-            // If all entries were processed successfully
-            if result.success {
-                // Update the reported size of data processed
-                result.size = Some(csman_header.header_size + csman_header.data_size);
+    result.size = Some(csman_header.header_size + csman_header.data_size);
+    if let Some(output_directory) = output_directory {
+        // If extraction was requested, extract each entry using the entry key as the file name
+        let chroot = Chroot::new(output_directory);
+        // There may be more than one entry with the same key; track the key and how many times it was encountered
+        let mut processed_entries: HashMap<u32, usize> = HashMap::new();
 
-                // If extraction was requested, extract each entry using the entry key as the file name
-                if let Some(output_directory) = output_directory {
-                    // All files will be written inside the provided output directory
-                    let chroot = Chroot::new(output_directory);
+        for &(key, data) in &csman_entries {
+            // File name is [key value, in ASCII hex].dat
+            let mut file_name = format!("{key:08X}.dat");
+            // If this key value has already been extracted, file name is [key value, in ASCII hex].dat_[count]
+            let count = processed_entries.entry(key).or_insert(0);
+            if *count != 0 {
+                write!(file_name, "_{}", *count).unwrap();
+            }
+            *count += 1;
 
-                    // There may be more than one entry with the same key; track the key and how many times it was encountered
-                    let mut processed_entries: HashMap<usize, usize> = HashMap::new();
-
-                    // Loop through all entries
-                    for entry in csman_entries {
-                        // File name is [key value, in ASCII hex].dat
-                        let mut file_name = format!("{:08X}.dat", entry.key);
-
-                        // If this key value has already been extracted, file name is [key value, in ASCII hex].dat_[count]
-                        if processed_entries.contains_key(&entry.key) {
-                            file_name = format!("{}_{}", file_name, processed_entries[&entry.key]);
-                            processed_entries.insert(entry.key, processed_entries[&entry.key] + 1);
-                        } else {
-                            processed_entries.insert(entry.key, 1);
-                        }
-
-                        if !chroot.create_file(&file_name, &entry.value) {
-                            result.success = false;
-                            break;
-                        }
-                    }
-                }
+            if !chroot.create_file(&file_name, data) {
+                result.success = false;
+                break;
             }
         }
     }
