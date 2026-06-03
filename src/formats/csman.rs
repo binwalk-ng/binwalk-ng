@@ -294,3 +294,116 @@ pub fn extract_csman_dat(
 
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const CSMAN_BIG_ENDIAN: &[u8] = &[
+        // Header
+        0x53, 0x43, // magic "SC" (big endian file)
+        0x00, 0x00, // unknown1
+        0x00, 0x00, 0x00, 0x0E, // compressed_size = 14
+        0x00, 0x00, 0x00, 0x00, // unknown2
+        0x00, 0x00, 0x00, 0x0E, // decompressed_size = 14 (uncompressed)
+        // Entry: key=1, size=4, value=[0xDE, 0xAD, 0xBE, 0xEF]
+        0x00, 0x00, 0x00, 0x01, // key
+        0x00, 0x04, // size
+        0xDE, 0xAD, 0xBE, 0xEF, // value
+        // EOF marker
+        0x00, 0x00, 0x00, 0x00,
+    ];
+
+    const CSMAN_LITTLE_ENDIAN: &[u8] = &[
+        // Header
+        0x43, 0x53, // magic "CS" (little endian file)
+        0x00, 0x00, // unknown1
+        0x0E, 0x00, 0x00, 0x00, // compressed_size = 14
+        0x00, 0x00, 0x00, 0x00, // unknown2
+        0x0E, 0x00, 0x00, 0x00, // decompressed_size = 14 (uncompressed)
+        // Entry: key=1, size=4, value=[0xDE, 0xAD, 0xBE, 0xEF]
+        0x01, 0x00, 0x00, 0x00, // key
+        0x04, 0x00, // size
+        0xDE, 0xAD, 0xBE, 0xEF, // value
+        // EOF marker
+        0x00, 0x00, 0x00, 0x00,
+    ];
+
+    #[test]
+    fn test_csman_parser_big_endian() {
+        let result = csman_parser(CSMAN_BIG_ENDIAN, 0);
+        let sig = result.unwrap();
+        assert_eq!(sig.offset, 0);
+        assert_eq!(sig.size, CSMAN_BIG_ENDIAN.len());
+        assert_eq!(sig.description, "CSman DAT file, total size: 30 bytes")
+    }
+
+    #[test]
+    fn test_csman_parser_little_endian() {
+        let result = csman_parser(CSMAN_LITTLE_ENDIAN, 0);
+        let sig = result.unwrap();
+        assert_eq!(sig.offset, 0);
+        assert_eq!(sig.size, CSMAN_LITTLE_ENDIAN.len());
+        assert_eq!(sig.description, "CSman DAT file, total size: 30 bytes")
+    }
+
+    #[test]
+    fn test_csman_parser_with_offset() {
+        let full_data = [b"A", CSMAN_LITTLE_ENDIAN].concat();
+        let result = csman_parser(&full_data, 1);
+        let sig = result.unwrap();
+        assert_eq!(sig.offset, 1);
+        assert_eq!(sig.size, CSMAN_LITTLE_ENDIAN.len());
+        assert_eq!(sig.description, "CSman DAT file, total size: 30 bytes")
+    }
+
+    #[test]
+    fn test_compressed_duplicate_keys_extraction() {
+        use miniz_oxide::deflate;
+        use std::fs;
+
+        // Build uncompressed entry data (big-endian):
+        //   Entry 1: key=1, value=[0xAA, 0xBB, 0xCC]
+        //   Entry 2: key=1, value=[0xDD, 0xEE]  (duplicate key)
+        //   EOF marker
+        let entries: Vec<u8> = vec![
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x03, 0xAA, 0xBB, 0xCC, // entry 1
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x02, 0xDD, 0xEE, // entry 2 (duplicate key)
+            0x00, 0x00, 0x00, 0x00, // EOF
+        ];
+        let decompressed_size = entries.len() as u32;
+
+        // Compress as raw deflate and prepend 2-byte zlib header (0x78, 0x9C)
+        let deflated = deflate::compress_to_vec(&entries, 6);
+        let mut payload: Vec<u8> = vec![0x78, 0x9C];
+        payload.extend_from_slice(&deflated);
+        let compressed_size = payload.len() as u32;
+
+        // Build the big-endian CSMAN file
+        let mut file_data: Vec<u8> = vec![
+            0x53, 0x43, // magic "SC" (big-endian)
+            0x00, 0x00, // unknown1
+        ];
+        file_data.extend_from_slice(&compressed_size.to_be_bytes());
+        file_data.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // unknown2
+        file_data.extend_from_slice(&decompressed_size.to_be_bytes());
+        file_data.extend_from_slice(&payload);
+
+        let tmp = tempfile::tempdir().unwrap();
+
+        let result = extract_csman_dat(&file_data, 0, Some(tmp.path()));
+        assert!(result.success);
+        assert_eq!(result.size, Some(file_data.len()));
+
+        // First occurrence of key=1: "00000001.dat"
+        assert_eq!(
+            fs::read(tmp.path().join("00000001.dat")).unwrap(),
+            &[0xAA, 0xBB, 0xCC]
+        );
+        // Duplicate key=1: "00000001.dat_1"
+        assert_eq!(
+            fs::read(tmp.path().join("00000001.dat_1")).unwrap(),
+            &[0xDD, 0xEE]
+        );
+    }
+}
