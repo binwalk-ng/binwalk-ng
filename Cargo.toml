@@ -60,6 +60,7 @@ plotly = { version = "0.14", features = [
 jiff = "0.2.20"
 zerocopy = { version = "0.8.28", features = ["derive"] }
 u24 = "0.6.0"
+tar = "0.4"
 
 [dependencies.uuid]
 version = "1.17.0"

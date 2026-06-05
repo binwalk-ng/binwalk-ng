@@ -795,6 +795,57 @@ impl Chroot {
         false
     }
 
+    /// Applies a Unix file mode to an existing path in the chroot directory, preserving
+    /// the permission, setuid/setgid, and sticky bits exactly as recorded in the archive.
+    ///
+    /// On non-Unix platforms this is a no-op that returns `true`.
+    pub fn set_mode(&self, file_path: impl AsRef<Path>, mode: u32) -> bool {
+        let safe_file_path: PathBuf = self.chrooted_path(file_path);
+
+        #[cfg(unix)]
+        {
+            if let Err(e) = fs::set_permissions(&safe_file_path, fs::Permissions::from_mode(mode)) {
+                warn!("Failed to set mode on {}: {e}", safe_file_path.display());
+                return false;
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = mode;
+        }
+
+        true
+    }
+
+    /// Best-effort restore of ownership (uid/gid) on an existing path in the chroot
+    /// directory. Uses `lchown`, so it never follows the final symlink component and is
+    /// safe to call on symlink entries.
+    ///
+    /// Changing ownership typically requires privileges (root); failures are ignored, as
+    /// an unprivileged `tar`/`cpio` extraction would simply keep the caller's ownership.
+    /// On non-Unix platforms this is a no-op that returns `true`.
+    pub fn set_ownership(&self, file_path: impl AsRef<Path>, uid: u32, gid: u32) -> bool {
+        let safe_file_path: PathBuf = self.chrooted_path(file_path);
+
+        #[cfg(unix)]
+        {
+            if let Err(e) = unix_fs::lchown(&safe_file_path, Some(uid), Some(gid)) {
+                // Expected without privileges; don't treat as an extraction failure.
+                debug!(
+                    "Could not set ownership on {} to {uid}:{gid}: {e}",
+                    safe_file_path.display()
+                );
+                return false;
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (uid, gid);
+        }
+
+        true
+    }
+
     /// Removes the chroot prefix → returns path relative to chroot root
     /// e.g. "/chroot/bin/ls" → "/bin/ls"
     fn strip_chroot_prefix(&self, path: &Path) -> PathBuf {

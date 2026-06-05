@@ -90,7 +90,6 @@ RUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv,target=/bin/uv \
     7zip \
     zstd \
     srecord \
-    tar \
     sleuthkit \
     cabextract \
     lz4 \

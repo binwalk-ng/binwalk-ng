@@ -8,7 +8,6 @@ DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get -y install \
     7zip \
     zstd \
     srecord \
-    tar \
     unzip \
     sleuthkit \
     cabextract \

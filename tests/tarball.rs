@@ -23,10 +23,14 @@ fn integration_test() {
 #[test]
 fn extraction_produces_expected_files() {
     // Expected archive layout and contents -- kept in sync with gen_tarball.sh.
-    let expected: [(&str, Vec<u8>); 3] = [
-        ("testdir/hello.txt", b"Hello, binwalk-ng tarball!\n".to_vec()),
+    let expected: [(&str, Vec<u8>); 4] = [
+        (
+            "testdir/hello.txt",
+            b"Hello, binwalk-ng tarball!\n".to_vec(),
+        ),
         ("testdir/readme.md", b"# Tarball test fixture\n".to_vec()),
         ("testdir/nested/data.bin", vec![0xAB; 256]),
+        ("testdir/run.sh", b"#!/bin/sh\necho hi\n".to_vec()),
     ];
 
     // Bind the output directory in this scope so it lives until the assertions are
@@ -74,6 +78,58 @@ fn extraction_produces_expected_files() {
             expected_contents,
             "contents mismatch for extracted file {}",
             path.display()
+        );
+    }
+
+    // The explicit directory entry must be extracted as a directory.
+    let subdir = root.join("testdir/subdir");
+    assert!(
+        subdir.is_dir(),
+        "expected extracted directory was not created: {}",
+        subdir.display()
+    );
+
+    // The symlink entry must be extracted as a symlink. binwalk rewrites link
+    // targets to be absolute *within the extraction root* (chroot-safe: a symlink
+    // can never escape the extracted tree), so the on-disk target is
+    // "/testdir/hello.txt" -- it intentionally does not resolve on the host.
+    let symlink = root.join("testdir/hello.link");
+    let link_metadata = fs::symlink_metadata(&symlink)
+        .expect("expected symlink testdir/hello.link was not extracted");
+    assert!(
+        link_metadata.file_type().is_symlink(),
+        "expected {} to be a symlink",
+        symlink.display()
+    );
+    assert_eq!(
+        fs::read_link(&symlink).unwrap(),
+        Path::new("/testdir/hello.txt"),
+        "unexpected symlink target for {}",
+        symlink.display()
+    );
+
+    // The extractor must preserve the archived Unix mode: the executable file keeps its
+    // execute bits and the directory keeps its sticky bit. (Ownership/uid+gid is
+    // best-effort and only applies when extracting as root, so it isn't asserted here.)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let script_mode = fs::metadata(root.join("testdir/run.sh"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(
+            script_mode & 0o777,
+            0o755,
+            "executable bits not preserved on run.sh (mode {script_mode:#o})"
+        );
+
+        let subdir_mode = fs::metadata(&subdir).unwrap().permissions().mode();
+        assert_eq!(
+            subdir_mode & 0o1000,
+            0o1000,
+            "sticky bit not preserved on subdir (mode {subdir_mode:#o})"
         );
     }
 }
