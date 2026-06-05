@@ -6,9 +6,11 @@
 //!   2. Disk / memory exhaustion via uncapped block_count and block_size
 //!   3. Integer underflow when chunk total_size < chunk header size (12)
 
-use binwalk::Binwalk;
-use binwalk::extractors::androidsparse::extract_android_sparse;
-use binwalk::structures::androidsparse::parse_android_sparse_chunk_header;
+use binwalk_ng::Binwalk;
+use binwalk_ng::formats::androidsparse::extract_android_sparse;
+use binwalk_ng::formats::androidsparse::parse_android_sparse_chunk_header;
+use std::path::Path;
+use walkdir::WalkDir;
 
 const SPARSE_MAGIC: u32 = 0xED26FF3A;
 const FILE_HEADER_SIZE: u16 = 28;
@@ -40,15 +42,6 @@ fn chunk_header(chunk_type: u16, output_block_count: u32, total_size: u32) -> Ve
     c.extend_from_slice(&output_block_count.to_le_bytes());
     c.extend_from_slice(&total_size.to_le_bytes());
     c
-}
-
-/// Per-test output dir under the OS temp dir so tests don't collide with each
-/// other or pollute the repo.
-fn test_output_dir(name: &str) -> String {
-    let dir = std::env::temp_dir().join(format!("binwalk_androidsparse_test_{name}"));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("failed to create test output dir");
-    dir.display().to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -109,14 +102,13 @@ fn fill_chunk_with_no_payload_does_not_hang_extraction() {
     let mut img = sparse_header(4096, 1, 1);
     img.extend(chunk_header(CHUNK_TYPE_FILL, 1, 12)); // total_size==12 -> no payload
 
-    let outdir = test_output_dir("fill_no_payload");
-    let result = extract_android_sparse(&img, 0, Some(&outdir));
+    let outdir = tempfile::tempdir().unwrap();
+    let result = extract_android_sparse(&img, 0, Some(outdir.path()));
 
     assert!(
         !result.success,
         "extractor should refuse a FILL chunk with no fill data, not loop on it"
     );
-    let _ = std::fs::remove_dir_all(&outdir);
 }
 
 /// Defense in depth: a non-empty FILL payload that happens to also have
@@ -138,22 +130,22 @@ fn fill_chunk_with_wrong_payload_size_is_rejected() {
 #[test]
 fn header_with_overflowing_total_size_is_rejected() {
     // u32::MAX & ~3 to satisfy block_size % 4 == 0
-    let huge = u32::MAX & !3u32;
+    let huge = !3u32;
     let mut img = sparse_header(huge, huge, 1);
     img.extend(chunk_header(CHUNK_TYPE_DONT_CARE, 1, 12));
 
-    let outdir = test_output_dir("overflow_total_size");
-    let result = extract_android_sparse(&img, 0, Some(&outdir));
+    let outdir = tempfile::tempdir().unwrap();
+    let result = extract_android_sparse(&img, 0, Some(outdir.path()));
     assert!(
         !result.success,
         "sparse header with overflowing block_count*block_size must be rejected"
     );
 
     // And nothing should have been written.
-    let written: u64 = walk_size(&outdir);
-    assert_eq!(written, 0, "extractor wrote {written} bytes for a rejected image");
-
-    let _ = std::fs::remove_dir_all(&outdir);
+    assert!(
+        is_dir_empty_or_zero_size(outdir.path()),
+        "extractor wrote bytes for a rejected image"
+    );
 }
 
 /// A sparse header whose declared total output size is huge but doesn't
@@ -162,18 +154,15 @@ fn header_with_overflowing_total_size_is_rejected() {
 fn header_with_oversized_but_nonoverflowing_total_is_rejected() {
     // 256 TB = 2^48; block_size = 64 KiB, block_count = 2^32
     let block_size: u32 = 64 * 1024;
-    let block_count: u32 = u32::MAX;
+    let block_count = u32::MAX;
     let mut img = sparse_header(block_size, block_count, 1);
     img.extend(chunk_header(CHUNK_TYPE_DONT_CARE, 1, 12));
 
-    let outdir = test_output_dir("oversized_total");
-    let result = extract_android_sparse(&img, 0, Some(&outdir));
+    let outdir = tempfile::tempdir().unwrap();
+    let result = extract_android_sparse(&img, 0, Some(outdir.path()));
     assert!(!result.success, "256TB-class sparse image must be rejected");
 
-    let written: u64 = walk_size(&outdir);
-    assert_eq!(written, 0);
-
-    let _ = std::fs::remove_dir_all(&outdir);
+    assert!(is_dir_empty_or_zero_size(outdir.path()));
 }
 
 /// Even if the *header* declares a sane total, an individual chunk must not be
@@ -185,17 +174,14 @@ fn chunk_claiming_more_blocks_than_header_is_rejected() {
     let mut img = sparse_header(4096, 1, 1);
     img.extend(chunk_header(CHUNK_TYPE_DONT_CARE, 1_000_000_000, 12));
 
-    let outdir = test_output_dir("chunk_exceeds_header");
-    let result = extract_android_sparse(&img, 0, Some(&outdir));
+    let outdir = tempfile::tempdir().unwrap();
+    let result = extract_android_sparse(&img, 0, Some(outdir.path()));
     assert!(
         !result.success,
         "chunk block_count > header block_count must be rejected"
     );
 
-    let written: u64 = walk_size(&outdir);
-    assert_eq!(written, 0);
-
-    let _ = std::fs::remove_dir_all(&outdir);
+    assert!(is_dir_empty_or_zero_size(outdir.path()));
 }
 
 /// RAW chunks must carry exactly block_count * block_size bytes of payload.
@@ -208,13 +194,12 @@ fn raw_chunk_with_mismatched_payload_size_is_rejected() {
     img.extend(chunk_header(CHUNK_TYPE_RAW, 16, 12 + 4));
     img.extend_from_slice(&[0u8; 4]);
 
-    let outdir = test_output_dir("raw_size_mismatch");
-    let result = extract_android_sparse(&img, 0, Some(&outdir));
+    let outdir = tempfile::tempdir().unwrap();
+    let result = extract_android_sparse(&img, 0, Some(outdir.path()));
     assert!(
         !result.success,
         "RAW chunk with payload != block_count*block_size must be rejected"
     );
-    let _ = std::fs::remove_dir_all(&outdir);
 }
 
 // ---------------------------------------------------------------------------
@@ -230,30 +215,23 @@ fn valid_minimal_sparse_image_extracts_successfully() {
     let mut img = sparse_header(block_size, total_blocks, 1);
     img.extend(chunk_header(CHUNK_TYPE_DONT_CARE, 1, 12));
 
-    let outdir = test_output_dir("valid_minimal");
-    let result = extract_android_sparse(&img, 0, Some(&outdir));
-    assert!(result.success, "minimal valid sparse image failed to extract");
+    let outdir = tempfile::tempdir().unwrap();
+    let result = extract_android_sparse(&img, 0, Some(outdir.path()));
+    assert!(
+        result.success,
+        "minimal valid sparse image failed to extract"
+    );
 
-    let unsparsed = std::path::Path::new(&outdir).join("unsparsed.img");
+    let unsparsed = outdir.path().join("unsparsed.img");
     let bytes = std::fs::read(&unsparsed).expect("expected output file");
     assert_eq!(bytes, vec![0u8; block_size as usize]);
-
-    let _ = std::fs::remove_dir_all(&outdir);
 }
 
-/// Sum the size of every regular file beneath `dir`.
-fn walk_size(dir: &str) -> u64 {
-    let mut total: u64 = 0;
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            if let Ok(meta) = entry.metadata() {
-                if meta.is_file() {
-                    total += meta.len();
-                } else if meta.is_dir() {
-                    total += walk_size(&entry.path().display().to_string());
-                }
-            }
-        }
-    }
-    total
+fn is_dir_empty_or_zero_size(dir: &Path) -> bool {
+    WalkDir::new(dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .filter_map(|e| e.metadata().ok())
+        .all(|meta| meta.len() == 0) // Short-circuits on the first non-empty file
 }

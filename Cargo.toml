@@ -78,3 +78,4 @@ path = "src/main.rs"
 
 [dev-dependencies]
 tempfile = "3.25.0"
+walkdir = "2.5.0"
