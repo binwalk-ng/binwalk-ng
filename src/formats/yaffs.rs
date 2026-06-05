@@ -1,7 +1,8 @@
 use crate::common::is_offset_safe;
 use crate::extractors;
 use crate::signatures::{CONFIDENCE_MEDIUM, SignatureError, SignatureResult};
-use crate::structures::StructureError;
+use crate::structures::{Endianness, StructureError, dyn_endian};
+use zerocopy::{FromBytes, Immutable, KnownLayout, Unaligned};
 
 /// Minimum number of expected YAFFS objects in a YAFFS image
 const MIN_NUMBER_OF_OBJS: usize = 2;
@@ -33,16 +34,16 @@ pub fn yaffs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
         ..Default::default()
     };
 
-    let mut endianness = "little";
     let available_data = file_data.len();
     let required_min_offset = offset + (MAX_OBJ_SIZE * MIN_NUMBER_OF_OBJS);
 
     // Sanity check the amount of available data
     if is_offset_safe(available_data, required_min_offset, None) {
         // Detect endianness
-        if file_data[offset] == BIG_ENDIAN_FIRST_BYTE {
-            endianness = "big";
-        }
+        let endianness = match file_data[offset] {
+            BIG_ENDIAN_FIRST_BYTE => Endianness::Big,
+            _ => Endianness::Little,
+        };
 
         // Determine the page
         if let Ok(page_size) = get_page_size(&file_data[offset..]) {
@@ -104,7 +105,7 @@ fn get_page_size(file_data: &[u8]) -> Result<usize, SignatureError> {
 fn get_spare_size(
     file_data: &[u8],
     page_size: usize,
-    endianness: &str,
+    endianness: Endianness,
 ) -> Result<usize, SignatureError> {
     // Valid spare sizes
     let spare_sizes = [16, 32, 64, 128, 256, 512];
@@ -132,10 +133,10 @@ fn get_image_size(
     file_data: &[u8],
     page_size: usize,
     spare_size: usize,
-    endianness: &str,
+    endianness: Endianness,
 ) -> Result<usize, SignatureError> {
     // Object type for files
-    const FILE_TYPE: usize = 1;
+    const FILE_TYPE: u32 = 1;
 
     let mut image_size: usize = 0;
     let mut next_obj_offset: usize = 0;
@@ -195,7 +196,7 @@ fn get_image_size(
 fn get_file_block_count(
     obj_data: &[u8],
     page_size: usize,
-    endianness: &str,
+    endianness: Endianness,
 ) -> Result<usize, SignatureError> {
     // parse_yaffs_file_header only parses a portion of the header that we need; the partial structure starts this many bytes into the object data
     const INFO_STRUCT_START: usize = 268;
@@ -217,40 +218,39 @@ fn get_file_block_count(
 #[derive(Debug, Default, Clone)]
 pub struct YAFFSObject {
     // All that is needed for now is the object type; this may be updated in the future as necessary
-    pub obj_type: usize,
+    pub obj_type: u32,
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct YAFFSHeader {
+    obj_type: dyn_endian::U32,
+    parent_id: dyn_endian::U32,
+    name_checksum: dyn_endian::U16,
 }
 
 /// Partially parse a YAFFS object header
 pub fn parse_yaffs_obj_header(
     header_data: &[u8],
-    endianness: &str,
+    endianness: Endianness,
 ) -> Result<YAFFSObject, StructureError> {
     // The name checksum field is unused and should be 0xFFFF
-    const UNUSED: usize = 0xFFFF;
-
-    // First part of an object header
-    let yaffs_object_structure = vec![
-        ("type", "u32"),
-        ("parent_id", "u32"),
-        ("name_checksum", "u16"),
-    ];
+    const UNUSED: u16 = 0xFFFF;
 
     // Allowed object types
     let allowed_types = [0, 1, 2, 3, 4, 5];
 
     // Parse the object header
-    if let Ok(obj_header) =
-        crate::structures::parse(header_data, &yaffs_object_structure, endianness)
+    let (obj_header, _) = YAFFSHeader::ref_from_prefix(header_data).map_err(|_| StructureError)?;
+
+    // Validate that the header looks sane
+    if allowed_types.contains(&obj_header.obj_type.get(endianness))
+        && (obj_header.parent_id.get(endianness) > 0)
+        && (obj_header.name_checksum.get(endianness) == UNUSED)
     {
-        // Validate that the header looks sane
-        if allowed_types.contains(&obj_header["type"])
-            && (obj_header["parent_id"] > 0)
-            && (obj_header["name_checksum"] == UNUSED)
-        {
-            return Ok(YAFFSObject {
-                obj_type: obj_header["type"],
-            });
-        }
+        return Ok(YAFFSObject {
+            obj_type: obj_header.obj_type.get(endianness),
+        });
     }
 
     Err(StructureError)
@@ -263,29 +263,30 @@ pub struct YAFFSFileHeader {
     pub file_size: usize,
 }
 
+// Second part of an object header (after the name field)
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct YAFFSFileHeaderBytes {
+    mode: dyn_endian::U32,
+    uid: dyn_endian::U32,
+    gid: dyn_endian::U32,
+    atime: dyn_endian::U32,
+    mtime: dyn_endian::U32,
+    ctime: dyn_endian::U32,
+    file_size: dyn_endian::U32,
+}
+
 /// Partially parse a YAFFS file header
 pub fn parse_yaffs_file_header(
     header_data: &[u8],
-    endianness: &str,
+    endianness: Endianness,
 ) -> Result<YAFFSFileHeader, StructureError> {
-    // Second part of an object header (after the name field)
-    let yaffs_file_info = vec![
-        ("mode", "u32"),
-        ("uid", "u32"),
-        ("gid", "u32"),
-        ("atime", "u32"),
-        ("mtime", "u32"),
-        ("ctime", "u32"),
-        ("file_size", "u32"),
-    ];
+    let (file_info, _) =
+        YAFFSFileHeaderBytes::ref_from_prefix(header_data).map_err(|_| StructureError)?;
 
-    if let Ok(file_info) = crate::structures::parse(header_data, &yaffs_file_info, endianness) {
-        return Ok(YAFFSFileHeader {
-            file_size: file_info["file_size"],
-        });
-    }
-
-    Err(StructureError)
+    Ok(YAFFSFileHeader {
+        file_size: file_info.file_size.get(endianness) as usize,
+    })
 }
 
 /// Describes how to run the unyaffs utility to extract YAFFS2 file systems
