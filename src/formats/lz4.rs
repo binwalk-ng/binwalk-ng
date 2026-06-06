@@ -185,12 +185,6 @@ pub struct LZ4BlockHeader {
     pub last_block: bool,
 }
 
-#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
-#[repr(C, packed)]
-struct LZ4Block {
-    block_size: zerocopy::U32<LE>,
-}
-
 /// Parse an LZ4 block header
 pub fn parse_lz4_block_header(
     lz4_block_data: &[u8],
@@ -204,15 +198,15 @@ pub fn parse_lz4_block_header(
 
     let mut lz4_block = LZ4BlockHeader::default();
 
-    // Parse the block header
-    let (block_header, _) =
-        LZ4Block::ref_from_prefix(lz4_block_data).map_err(|_| StructureError)?;
+    // Parse the block header block size
+    let (block_size, _) =
+        zerocopy::U32::<LE>::ref_from_prefix(lz4_block_data).map_err(|_| StructureError)?;
 
     // Header size is always 4 bytes
     lz4_block.header_size = BLOCK_STRUCT_SIZE;
 
     // If file size is 0, this is the end of the LZ4 data
-    lz4_block.last_block = block_header.block_size == END_MARKER;
+    lz4_block.last_block = *block_size == END_MARKER;
 
     // If a checksum is present, it will be an extra 4 bytes at the end of the block
     if checksum_present {
@@ -220,7 +214,7 @@ pub fn parse_lz4_block_header(
     }
 
     // The high bit of the reported block size is not part of the actual block size
-    lz4_block.data_size = (block_header.block_size.get() & SIZE_MASK) as usize;
+    lz4_block.data_size = (block_size.get() & SIZE_MASK) as usize;
 
     Ok(lz4_block)
 }

@@ -229,12 +229,6 @@ pub fn parse_lzop_block_header(
     Err(StructureError)
 }
 
-#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
-#[repr(C, packed)]
-struct EOFMarker {
-    marker: zerocopy::U32<BE>,
-}
-
 /// Parse an LZOP EOF marker, returns the size of the EOF marker (always 4 bytes)
 pub fn parse_lzop_eof_marker(eof_data: &[u8]) -> Result<usize, StructureError> {
     const EOF_MARKER: u32 = 0;
@@ -242,10 +236,11 @@ pub fn parse_lzop_eof_marker(eof_data: &[u8]) -> Result<usize, StructureError> {
      * It is unclear, but observed, that LZOP files end with 0x00000000; this is assumed to be an EOF marker,
      * as other similar compression file formats use that. This assumption could be incorrect.
      */
-    let (eof_marker, _) = EOFMarker::ref_from_prefix(eof_data).map_err(|_| StructureError)?;
+    let (eof_marker, _) =
+        zerocopy::U32::<BE>::ref_from_prefix(eof_data).map_err(|_| StructureError)?;
 
-    match eof_marker.marker.get() {
-        EOF_MARKER => Ok(std::mem::size_of::<EOFMarker>()),
+    match eof_marker.get() {
+        EOF_MARKER => Ok(std::mem::size_of::<zerocopy::U32<BE>>()),
         _ => Err(StructureError),
     }
 }
