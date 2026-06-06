@@ -58,12 +58,6 @@ struct BlockHeader {
     block_size: dyn_endian::U32,
 }
 
-#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
-#[repr(C, packed)]
-struct BlockFooter {
-    block_size: dyn_endian::U32,
-}
-
 /// Parse a Pcap-ng block
 pub fn parse_pcapng_block(
     block_data: &[u8],
@@ -72,7 +66,7 @@ pub fn parse_pcapng_block(
     // Reserved bit in block type field
     const BLOCK_TYPE_RESERVED_MASK: u32 = 0x80000000;
 
-    let footer_size = std::mem::size_of::<BlockFooter>();
+    let footer_size = std::mem::size_of::<dyn_endian::U32>();
 
     // Parse the block header
     let (block_header, _) = BlockHeader::ref_from_prefix(block_data).map_err(|_| StructureError)?;
@@ -90,8 +84,8 @@ pub fn parse_pcapng_block(
 
         // Validate that the block size in the block footer matches the block size in the block header
         if let Some(block_footer_data) = block_data.get(block_footer_start..)
-            && let Ok((block_footer, _)) = BlockFooter::ref_from_prefix(block_footer_data)
-            && block_footer.block_size.get(endianness) as usize == result.block_size
+            && let Ok((block_size, _)) = dyn_endian::U32::ref_from_prefix(block_footer_data)
+            && block_size.get(endianness) as usize == result.block_size
         {
             return Ok(result);
         }

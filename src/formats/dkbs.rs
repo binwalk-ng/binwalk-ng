@@ -1,7 +1,7 @@
 use crate::common::get_cstring;
 use crate::signatures::{CONFIDENCE_HIGH, CONFIDENCE_MEDIUM, SignatureError, SignatureResult};
 use crate::structures::{Endianness, StructureError, dyn_endian};
-use zerocopy::{FromBytes, Immutable, KnownLayout, Unaligned};
+use zerocopy::FromBytes;
 
 /// Human readable description
 pub const DESCRIPTION: &str = "DKBS firmware header";
@@ -72,12 +72,6 @@ pub struct DKBSHeader {
     pub endianness: Endianness,
 }
 
-#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
-#[repr(C, packed)]
-struct DataSizeField {
-    size: dyn_endian::U32,
-}
-
 /// Parses a DKBS header
 pub fn parse_dkbs_header(dkbs_data: &[u8]) -> Result<DKBSHeader, StructureError> {
     // Header is a fixed size
@@ -108,13 +102,13 @@ pub fn parse_dkbs_header(dkbs_data: &[u8]) -> Result<DKBSHeader, StructureError>
         {
             // Parse the payload size field
             let data_size =
-                DataSizeField::ref_from_bytes(data_size_bytes).map_err(|_| StructureError)?;
+                dyn_endian::U32::ref_from_bytes(data_size_bytes).map_err(|_| StructureError)?;
 
-            let endianness = match data_size.size.get(Endianness::Big) & 0xFF000000 {
+            let endianness = match data_size.get(Endianness::Big) & 0xFF000000 {
                 0 => Endianness::Big,
                 _ => Endianness::Little,
             };
-            let data_size = data_size.size.get(endianness) as usize;
+            let data_size = data_size.get(endianness) as usize;
 
             if data_size != 0 {
                 // return Ok(header);
