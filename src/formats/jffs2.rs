@@ -150,7 +150,6 @@ pub fn parse_jffs2_node_header(node_data: &[u8]) -> Result<JFFS2Node, StructureE
     let (node_header, _) =
         JFFS2NodeBytes::ref_from_prefix(node_data).map_err(|_| StructureError)?;
 
-    // If the node header magic isn't correct, try parsing the header as big endian
     let endianness = match node_header.magic {
         LITTLE_ENDIAN_MAGIC => Endianness::Little,
         BIG_ENDIAN_MAGIC => Endianness::Big,

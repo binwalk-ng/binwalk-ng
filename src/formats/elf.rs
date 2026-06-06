@@ -114,7 +114,7 @@ pub fn parse_elf_header(elf_data: &[u8]) -> Result<ELFHeader, StructureError> {
                 return Ok(ELFHeader {
                     class: elf_class.to_string(),
                     osabi: osabi.to_string(),
-                    machine: parse_elf_machine(elf_machine),
+                    machine: parse_elf_machine(elf_machine).to_string(),
                     exe_type: elf_type_str.to_string(),
                     endianness,
                 });
@@ -125,7 +125,7 @@ pub fn parse_elf_header(elf_data: &[u8]) -> Result<ELFHeader, StructureError> {
     Err(StructureError)
 }
 
-fn parse_elf_machine(elf_machine: u16) -> String {
+const fn parse_elf_machine(elf_machine: u16) -> &'static str {
     match elf_machine {
         0 => "no machine",
         1 => "AT&T WE 32100",
@@ -319,7 +319,6 @@ fn parse_elf_machine(elf_machine: u16) -> String {
         259 => "ChipON KungFu32",
         _ => "Unknown",
     }
-    .to_string()
 }
 
 const fn parse_elf_osabi(osabi: u8) -> Option<&'static str> {
