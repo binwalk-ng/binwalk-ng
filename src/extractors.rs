@@ -406,10 +406,40 @@ impl Chroot {
         false
     }
 
+    /// Creates a file for writing in the chrooted directory and returns the opened `File`.
+    ///
+    /// This function ensures parent directories exist and fails (returns `None`)
+    /// if the file already exists.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_extractors_common_rs_417_0() -> Result<(), Box<dyn std::error::Error>> {
+    /// use binwalk_ng::extractors::Chroot;
+    /// use std::io::Write;
+    ///
+    /// let file_name = "writer_test.txt";
+    /// let test_data = b"Hello from create_file_writer!";
+    ///
+    /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let chroot_dir = temp_dir.path();
+    ///
+    /// let chroot = Chroot::new(&chroot_dir);
+    ///
+    /// if let Some(mut file) = chroot.create_file_writer(file_name) {
+    ///     file.write_all(test_data)?;
+    ///     assert_eq!(std::fs::read(chroot_dir.join(file_name))?, test_data);
+    /// } else {
+    ///     panic!("Failed to create file writer");
+    /// }
+    /// # Ok(())
+    /// # } _doctest_main_src_extractors_common_rs_417_0(); }
+    /// ```
     pub fn create_file_writer(&self, file_path: impl AsRef<Path>) -> Option<File> {
         let safe_file_path: PathBuf = self.chrooted_path(file_path);
 
-        // Ensure parent directory exists
+        // Ensure parent directories exist
         if let Some(parent) = safe_file_path.parent()
             && !parent.exists()
             && let Err(e) = fs::create_dir_all(parent)
@@ -428,7 +458,13 @@ impl Chroot {
             return None;
         }
 
-        File::create(&safe_file_path).ok()
+        match File::create(&safe_file_path) {
+            Ok(file) => Some(file),
+            Err(e) => {
+                error!("Failed to create file {}: {}", safe_file_path.display(), e);
+                None
+            }
+        }
     }
 
     /// Carve data and write it to a new file.
