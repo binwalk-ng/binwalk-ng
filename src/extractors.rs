@@ -142,7 +142,7 @@
 use crate::signatures::SignatureResult;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::fs::{self, File};
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs as unix_fs;
@@ -404,6 +404,31 @@ impl Chroot {
         }
 
         false
+    }
+
+    pub fn create_file_writer(&self, file_path: impl AsRef<Path>) -> Option<File> {
+        let safe_file_path: PathBuf = self.chrooted_path(file_path);
+
+        // Ensure parent directory exists
+        if let Some(parent) = safe_file_path.parent()
+            && !parent.exists()
+            && let Err(e) = fs::create_dir_all(parent)
+        {
+            error!(
+                "Failed to create parent directories for {}: {}",
+                safe_file_path.display(),
+                e
+            );
+            return None;
+        }
+
+        if safe_file_path.exists() {
+            let msg = format!("Path already exists: {}", safe_file_path.display());
+            error!("{}", msg);
+            return None;
+        }
+
+        File::create(&safe_file_path).ok()
     }
 
     /// Carve data and write it to a new file.

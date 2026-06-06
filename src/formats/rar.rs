@@ -1,7 +1,10 @@
-use crate::extractors;
+use crate::extractors::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::signatures::{CONFIDENCE_MEDIUM, SignatureError, SignatureResult};
 use crate::structures::StructureError;
 use aho_corasick::AhoCorasick;
+use log::error;
+use std::io::{self, Write};
+use std::path::Path;
 use zerocopy::{FromBytes, Immutable, KnownLayout, Unaligned};
 
 /// Human readable description
@@ -92,39 +95,63 @@ pub fn parse_rar_archive_header(rar_data: &[u8]) -> Result<RarArchiveHeader, Str
     Ok(RarArchiveHeader { version })
 }
 
-/// Describes how to run the unrar utility to extract RAR archives
-///
-/// ```
-/// use std::io::ErrorKind;
-/// use std::process::Command;
-/// use binwalk_ng::extractors::ExtractorType;
-/// use binwalk_ng::formats::rar::rar_extractor;
-///
-/// match rar_extractor().utility {
-///     ExtractorType::None => panic!("Invalid extractor type of None"),
-///     ExtractorType::Internal(func) => println!("Internal extractor OK: {:?}", func),
-///     ExtractorType::External(cmd) => {
-///         if let Err(e) = Command::new(&cmd).output() {
-///             if e.kind() == ErrorKind::NotFound {
-///                 panic!("External extractor '{}' not found", cmd);
-///             } else {
-///                 panic!("Failed to execute external extractor '{}': {}", cmd, e);
-///             }
-///         }
-///     }
-/// }
-/// ```
-pub fn rar_extractor() -> extractors::Extractor {
-    extractors::Extractor {
-        utility: extractors::ExtractorType::External("unrar".to_string()),
-        extension: "rar".to_string(),
-        arguments: vec![
-            "x".to_string(),          // Perform extraction
-            "-y".to_string(),         // Answer yes to all questions
-            "-ppassword".to_string(), // Set the password to  'password' for password protected rar files
-            extractors::SOURCE_FILE_PLACEHOLDER.to_string(),
-        ],
-        exit_codes: vec![0],
+pub fn rar_extractor() -> Extractor {
+    Extractor {
+        utility: ExtractorType::Internal(extract_rar),
         ..Default::default()
     }
+}
+
+pub fn extract_rar(
+    file_data: &[u8],
+    offset: usize,
+    output_directory: Option<&Path>,
+) -> ExtractionResult {
+    let mut result = ExtractionResult::default();
+
+    let slice = &file_data[offset..];
+
+    let archive = match rars::ArchiveReader::read(slice) {
+        Ok(arch) => arch,
+        Err(e) => {
+            eprintln!("Failed to parse RAR archive: {}", e);
+            return result;
+        }
+    };
+
+    result.size = Some(slice.len());
+    result.success = true;
+
+    let Some(chroot) = output_directory.map(Chroot::new) else {
+        return result;
+    };
+
+    let extraction_result = archive.extract_to(None, |meta| {
+        let name = meta.name_lossy();
+
+        if meta.is_directory {
+            if !chroot.create_directory(&name) {
+                result.success = false;
+            }
+            return Ok(Box::new(io::sink()) as Box<dyn Write>);
+        }
+
+        // Create writer for regular file
+        match chroot.create_file_writer(&name) {
+            Some(file) => Ok(Box::new(file) as Box<dyn Write>),
+            None => {
+                result.success = false;
+                error!("Failed to create writer for '{}'", name);
+                // Continue extraction (discard this file's data)
+                Ok(Box::new(io::sink()) as Box<dyn Write>)
+            }
+        }
+    });
+
+    if let Err(e) = extraction_result {
+        error!("RAR extraction error: {}", e);
+        result.success = false;
+    }
+
+    result
 }
