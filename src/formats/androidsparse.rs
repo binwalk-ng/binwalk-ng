@@ -183,17 +183,13 @@ pub fn parse_android_sparse_chunk_header(
     chonker.is_fill = chunk_header.chunk_type == CHUNK_TYPE_FILL;
     chonker.is_dont_care = chunk_header.chunk_type == CHUNK_TYPE_DONT_CARE;
 
-    // The chunk type must be one of the known chunk types
-    if !(chonker.is_crc || chonker.is_raw || chonker.is_fill || chonker.is_dont_care) {
-        return Err(StructureError);
-    }
-
-    // Reject chunks whose declared payload doesn't match the spec for their
-    // type. In particular, a FILL chunk with data_size == 0 would cause the
-    // extractor to loop forever trying to fill a block with no data.
-    if (chonker.is_fill && chonker.data_size != FILL_DATA_SIZE)
-        || (chonker.is_dont_care && chonker.data_size != DONT_CARE_DATA_SIZE)
-        || (chonker.is_crc && chonker.data_size != CRC_DATA_SIZE)
+    // The chunk type must be one of the known chunk types, and the payload size must
+    // match their declared type. In particular, a FILL chunk with data_size == 0 would
+    // cause the extractor to loop forever trying to fill a block with no data.
+    if !(chonker.is_raw
+        || (chonker.is_crc && chonker.data_size == CRC_DATA_SIZE)
+        || (chonker.is_fill && chonker.data_size == FILL_DATA_SIZE)
+        || (chonker.is_dont_care && chonker.data_size == DONT_CARE_DATA_SIZE))
     {
         return Err(StructureError);
     }
