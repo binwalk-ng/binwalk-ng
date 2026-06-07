@@ -436,8 +436,8 @@ pub fn squashfs_v4_be_extractor() -> extractors::Extractor {
     }
 }
 
-const fn parse_compression_type(compreession_type: u16) -> Option<&'static str> {
-    Some(match compreession_type {
+const fn parse_compression_type(compression_type: u16) -> Option<&'static str> {
+    Some(match compression_type {
         0 => "unknown",
         1 => "gzip",
         2 => "lzma",
