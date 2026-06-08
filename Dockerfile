@@ -80,7 +80,7 @@ WORKDIR ${BUILD_DIR}
 # but that would require that I untangle the Eldritch Horror that is the
 # pip build process, and that's not a particular monster that I'm up to slaying today.
 RUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv,target=/bin/uv \
-    --mount=from=build,source=${BUILD_DIR}/${SASQUATCH_FILENAME},target=/tmp/sasquatch.deb \
+    --mount=from=base_build,source=${BUILD_DIR}/${SASQUATCH_FILENAME},target=/tmp/sasquatch.deb \
     apt-get update -y \
     && apt-get upgrade -y \
     && apt-get -y install --no-install-recommends \
@@ -122,7 +122,10 @@ RUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv,target=/bin/uv \
     && mkdir -p ${DEFAULT_WORKING_DIR} \
     && chmod 777 ${DEFAULT_WORKING_DIR}
 
-FROM runtime_build AS tests
+# Container with all build dependencies, as well as all runtime dependencies, for tests
+# e.g. `docker build --target dev . --tag 'binwalk:dev'`
+# `docker run --rm -v (pwd):/tmp/binwalk -e INSTA_UPDATE=unseen binwalk:dev cargo test`
+FROM runtime_build AS dev
 # Copy the build artifacts from the scratch build stage
 COPY --link --from=base_build \
     /usr/local/bin/lzfse \
@@ -133,14 +136,9 @@ COPY --link --from=base_build \
 RUN apt-get update \
     && apt-get install -y curl build-essential \
     && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH=/root/.cargo/bin:${PATH}
 
 WORKDIR ${BINWALK_BUILD_DIR}
-
-COPY --link . ${BINWALK_BUILD_DIR}
-
-RUN --mount=type=cache,target=./target,sharing=locked \
-    --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
-    . /root/.cargo/env && CI=true cargo test
 
 FROM runtime_build
 
