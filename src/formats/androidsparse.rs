@@ -348,14 +348,9 @@ fn extract_chunk(
                 return false;
             }
             // Fill chunks are block_count blocks that contain a repeated sequence of data (typically 4-bytes repeated over and over again)
+            let repeat_count = sparse_header.block_size.div_ceil(chunk_data.len());
+            let fill_block = chunk_data.repeat(repeat_count);
             for _ in 0..chunk_header.block_count {
-                let mut fill_block: Vec<u8> = vec![];
-
-                // Fill each block with the repeated data
-                while fill_block.len() < sparse_header.block_size {
-                    fill_block.extend(chunk_data);
-                }
-
                 // Append fill block to file
                 if !chroot.append_to_file(outfile, &fill_block) {
                     return false;
