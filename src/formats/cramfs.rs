@@ -1,6 +1,7 @@
 use crate::common;
 use crate::signatures::{CONFIDENCE_HIGH, CONFIDENCE_MEDIUM, SignatureError, SignatureResult};
-use crate::structures::StructureError;
+use crate::structures::{Endianness, StructureError, dyn_endian};
+use zerocopy::{FromBytes, Immutable, KnownLayout, Unaligned};
 
 /// Human readable description
 pub const DESCRIPTION: &str = "CramFS filesystem";
@@ -69,79 +70,53 @@ pub fn cramfs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult,
 }
 
 /// Struct to store info about a CramFS header
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct CramFSHeader {
     pub size: usize,
     pub checksum: u32,
     pub file_count: usize,
-    pub endianness: String,
+    pub endianness: Endianness,
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct CramFSHeaderBytes {
+    magic: dyn_endian::U32,
+    size: dyn_endian::U32,
+    flags: dyn_endian::U32,
+    future: dyn_endian::U32,
+    signature: [u8; 16],
+    checksum: dyn_endian::U32,
+    edition: dyn_endian::U32,
+    block_count: dyn_endian::U32,
+    file_count: dyn_endian::U32,
 }
 
 /// Parses a CramFS header
 pub fn parse_cramfs_header(cramfs_data: &[u8]) -> Result<CramFSHeader, StructureError> {
-    // Endian specific magic bytes
-    const BIG_ENDIAN_MAGIC: usize = 0x453DCD28;
-    const LITTLE_ENDIAN_MAGIC: usize = 0x28CD3D45;
+    const MAGIC: u32 = 0x28CD3D45;
+    const LITTLE_ENDIAN_MAGIC: dyn_endian::U32 = dyn_endian::U32::new(MAGIC, Endianness::Little);
+    const BIG_ENDIAN_MAGIC: dyn_endian::U32 = dyn_endian::U32::new(MAGIC, Endianness::Big);
 
-    let allowed_magics = [BIG_ENDIAN_MAGIC, LITTLE_ENDIAN_MAGIC];
+    let cramfs_structure_size = std::mem::size_of::<CramFSHeaderBytes>();
 
-    let cramfs_header_structure = vec![
-        ("magic", "u32"),
-        ("size", "u32"),
-        ("flags", "u32"),
-        ("future", "u32"),
-        ("signature_p1", "u64"),
-        ("signature_p2", "u64"),
-        ("checksum", "u32"),
-        ("edition", "u32"),
-        ("block_count", "u32"),
-        ("file_count", "u32"),
-    ];
+    let (cramfs_header, _) =
+        CramFSHeaderBytes::ref_from_prefix(cramfs_data).map_err(|_| StructureError)?;
 
-    let mut cramfs_info = CramFSHeader::default();
+    let endianness = match cramfs_header.magic {
+        LITTLE_ENDIAN_MAGIC => Endianness::Little,
+        BIG_ENDIAN_MAGIC => Endianness::Big,
+        _ => return Err(StructureError),
+    };
 
-    let cramfs_structure_size = crate::structures::size(&cramfs_header_structure);
-
-    // Default to little endian
-    cramfs_info.endianness = "little".to_string();
-
-    // Parse the CramFS header, try little endian first
-    if let Ok(mut cramfs_header) = crate::structures::parse(
-        cramfs_data,
-        &cramfs_header_structure,
-        &cramfs_info.endianness,
-    ) {
-        // Do the magic bytes match?
-        if allowed_magics.contains(&cramfs_header["magic"]) {
-            // If the magic bytes endianness don't match what's expected for little endian, switch to big endian
-            if cramfs_header["magic"] == BIG_ENDIAN_MAGIC {
-                cramfs_info.endianness = "big".to_string();
-
-                // Parse the header again, this time as big endian
-                match crate::structures::parse(
-                    cramfs_data,
-                    &cramfs_header_structure,
-                    &cramfs_info.endianness,
-                ) {
-                    Err(_) => {
-                        return Err(StructureError);
-                    }
-                    Ok(cramfs_be_header) => {
-                        cramfs_header = cramfs_be_header;
-                    }
-                }
-            }
-
-            // Reported image size must be larger than the header structure
-            if cramfs_header["size"] > cramfs_structure_size {
-                // Populate info about the CramFS image
-                cramfs_info.size = cramfs_header["size"];
-                cramfs_info.checksum = cramfs_header["checksum"] as u32;
-                cramfs_info.file_count = cramfs_header["file_count"];
-
-                return Ok(cramfs_info);
-            }
-        }
+    // Reported image size must be larger than the header structure
+    if cramfs_header.size.get(endianness) as usize > cramfs_structure_size {
+        return Ok(CramFSHeader {
+            size: cramfs_header.size.get(endianness) as usize,
+            checksum: cramfs_header.checksum.get(endianness),
+            file_count: cramfs_header.file_count.get(endianness) as usize,
+            endianness,
+        });
     }
 
     Err(StructureError)

@@ -127,7 +127,7 @@ pub fn parse_7z_header(sevenzip_data: &[u8]) -> Result<SevenZipHeader, Structure
 /// ```
 pub fn sevenzip_extractor() -> extractors::Extractor {
     extractors::Extractor {
-        utility: extractors::ExtractorType::External("7zz".to_string()),
+        utility: extractors::ExtractorType::External("7z".to_string()),
         extension: "bin".to_string(),
         arguments: vec![
             "x".to_string(),    // Perform extraction

@@ -1,7 +1,7 @@
 use crate::common::get_cstring;
 use crate::extractors;
 use crate::signatures::{CONFIDENCE_LOW, CONFIDENCE_MEDIUM, SignatureError, SignatureResult};
-use crate::structures::StructureError;
+use crate::structures::{Endianness, StructureError};
 use aho_corasick::AhoCorasick;
 use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
@@ -244,9 +244,9 @@ struct BootImageHeader {
 }
 
 /// Struct to store Linux ARM zImage info
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct LinuxARMzImageHeader {
-    pub endianness: String,
+    pub endianness: Endianness,
 }
 
 /// Parses a Linux ARM zImage header
@@ -265,10 +265,10 @@ pub fn parse_linux_arm_zimage_header(
     }
     match first.get() {
         NOP_LE => Ok(LinuxARMzImageHeader {
-            endianness: "little".to_string(),
+            endianness: Endianness::Little,
         }),
         NOP_BE => Ok(LinuxARMzImageHeader {
-            endianness: "big".to_string(),
+            endianness: Endianness::Big,
         }),
         _ => Err(StructureError),
     }

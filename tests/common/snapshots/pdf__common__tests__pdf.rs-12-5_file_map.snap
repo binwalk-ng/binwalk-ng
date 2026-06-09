@@ -1,0 +1,12 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 245715
+  name: pdf
+  confidence: 0
+  description: "PDF document, version 1.4"
+  always_display: false
+  extraction_declined: false

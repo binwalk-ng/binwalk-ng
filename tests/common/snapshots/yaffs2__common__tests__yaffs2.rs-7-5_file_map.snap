@@ -1,0 +1,12 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 126720
+  name: yaffs
+  confidence: 128
+  description: "YAFFSv2 filesystem, Little Endian endian, page size: 2048, spare size: 64, image size: 126720 bytes"
+  always_display: false
+  extraction_declined: false

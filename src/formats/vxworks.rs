@@ -1,11 +1,12 @@
 use crate::common::{get_cstring, is_offset_safe};
 use crate::extractors::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::signatures::{CONFIDENCE_HIGH, CONFIDENCE_LOW, SignatureError, SignatureResult};
-use crate::structures::StructureError;
+use crate::structures::{Endianness, StructureError, dyn_endian};
 use log::error;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::path::Path;
+use zerocopy::{FromBytes, Immutable, KnownLayout, Unaligned};
 
 /// Human readable descriptions
 pub const SYMTAB_DESCRIPTION: &str = "VxWorks symbol table";
@@ -106,66 +107,65 @@ pub fn symbol_table_parser(
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct VxWorksSymbolTableEntry {
     pub size: usize,
-    pub name: usize,
-    pub value: usize,
+    pub name: u32,
+    pub value: u32,
     pub symtype: String,
+}
+
+// This *seems* to be the correct structure for a symbol table entry, it may be different for different VxWorks versions...
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct SymbolEntryBytes {
+    name_ptr: dyn_endian::U32,
+    value_ptr: dyn_endian::U32,
+    symbol_type: dyn_endian::U32,
+    group: dyn_endian::U32,
 }
 
 /// Parse a single VxWorks symbol table entry
 pub fn parse_symtab_entry(
     symbol_data: &[u8],
-    endianness: &str,
+    endianness: Endianness,
 ) -> Result<VxWorksSymbolTableEntry, StructureError> {
-    // This *seems* to be the correct structure for a symbol table entry, it may be different for different VxWorks versions...
-    let symtab_structure = vec![
-        ("name_ptr", "u32"),
-        ("value_ptr", "u32"),
-        ("type", "u32"),
-        ("group", "u32"),
-    ];
-
-    let symtab_structure_size = crate::structures::size(&symtab_structure);
+    let symtab_structure_size = std::mem::size_of::<SymbolEntryBytes>();
 
     // Parse the symbol table entry
-    if let Ok(symbol_entry) = crate::structures::parse(symbol_data, &symtab_structure, endianness) {
-        // Sanity check expected values in the symbol table entry
-        if symbol_entry["name_ptr"] != 0 && symbol_entry["value_ptr"] != 0 {
-            // There may be more types; these are the only ones I've found in the wild
-            let symbol_type = match symbol_entry["type"] {
-                0x500 => "function",
-                0x700 => "initialized data",
-                0x900 => "uninitialized data",
-                _ => return Err(StructureError),
-            };
+    let (symbol_entry, _) =
+        SymbolEntryBytes::ref_from_prefix(symbol_data).map_err(|_| StructureError)?;
 
-            return Ok(VxWorksSymbolTableEntry {
-                size: symtab_structure_size,
-                name: symbol_entry["name_ptr"],
-                value: symbol_entry["value_ptr"],
-                symtype: symbol_type.to_string(),
-            });
-        }
+    // Sanity check expected values in the symbol table entry
+    let name_ptr = symbol_entry.name_ptr.get(endianness);
+    let value_ptr = symbol_entry.value_ptr.get(endianness);
+    if name_ptr != 0 && value_ptr != 0 {
+        // There may be more types; these are the only ones I've found in the wild
+        let symbol_type = match symbol_entry.symbol_type.get(endianness) {
+            0x500 => "function",
+            0x700 => "initialized data",
+            0x900 => "uninitialized data",
+            _ => return Err(StructureError),
+        };
+
+        return Ok(VxWorksSymbolTableEntry {
+            size: symtab_structure_size,
+            name: name_ptr,
+            value: value_ptr,
+            symtype: symbol_type.to_string(),
+        });
     }
 
     Err(StructureError)
 }
 
 /// Detect a symbol table entry's endianness
-pub fn get_symtab_endianness(symbol_data: &[u8]) -> Result<String, StructureError> {
+pub fn get_symtab_endianness(symbol_data: &[u8]) -> Result<Endianness, StructureError> {
     const TYPE_FIELD_OFFSET: usize = 9;
 
-    let mut endianness = "little";
-
     // The type field starts at offset 8 and is 0x00_00_05_00, so for big endian targets the 9th byte will be NULL
-    if let Some(offset_field) = symbol_data.get(TYPE_FIELD_OFFSET) {
-        if *offset_field == 0 {
-            endianness = "big";
-        }
-
-        return Ok(endianness.to_string());
+    match symbol_data.get(TYPE_FIELD_OFFSET) {
+        Some(0) => Ok(Endianness::Big),
+        Some(_) => Ok(Endianness::Little),
+        None => Err(StructureError),
     }
-
-    Err(StructureError)
 }
 
 /// Describes the VxWorks symbol table extractor
@@ -219,7 +219,7 @@ pub fn extract_symbol_table(
         // Loop through all the symbol table entries, until we run out of data or hit an invalid entry
         while is_offset_safe(available_data, symtab_entry_offset, previous_entry_offset) {
             // Parse the symbol table entry
-            match parse_symtab_entry(&file_data[symtab_entry_offset..], &endianness) {
+            match parse_symtab_entry(&file_data[symtab_entry_offset..], endianness) {
                 // Break on an invalid entry
                 Err(_) => {
                     break;

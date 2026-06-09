@@ -1,6 +1,7 @@
 use crate::common::get_cstring;
 use crate::signatures::{CONFIDENCE_HIGH, CONFIDENCE_MEDIUM, SignatureError, SignatureResult};
-use crate::structures::StructureError;
+use crate::structures::{Endianness, StructureError, dyn_endian};
+use zerocopy::FromBytes;
 
 /// Human readable description
 pub const DESCRIPTION: &str = "DKBS firmware header";
@@ -61,14 +62,14 @@ pub fn dkbs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
 }
 
 /// Struct to store DKBS header info
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct DKBSHeader {
     pub data_size: usize,
     pub header_size: usize,
     pub board_id: String,
     pub version: String,
     pub boot_device: String,
-    pub endianness: String,
+    pub endianness: Endianness,
 }
 
 /// Parses a DKBS header
@@ -86,43 +87,39 @@ pub fn parse_dkbs_header(dkbs_data: &[u8]) -> Result<DKBSHeader, StructureError>
     const DATA_SIZE_START: usize = 0x68;
     const DATA_SIZE_END: usize = DATA_SIZE_START + 4;
 
-    let data_size_field = vec![("size", "u32")];
-
-    let mut header = DKBSHeader {
-        header_size: HEADER_SIZE,
-        ..Default::default()
-    };
-
     // Available data should be at least big enough for the header to fit
     if dkbs_data.len() >= HEADER_SIZE {
         // Parse the version, board ID, and boot device strings
-        header.version = get_cstring(&dkbs_data[VERSION_START..VERSION_END]);
-        header.board_id = get_cstring(&dkbs_data[BOARD_ID_START..BOARD_ID_END]);
-        header.boot_device = get_cstring(&dkbs_data[BOOT_DEVICE_START..BOOT_DEVICE_END]);
+        let version = get_cstring(&dkbs_data[VERSION_START..VERSION_END]);
+        let board_id = get_cstring(&dkbs_data[BOARD_ID_START..BOARD_ID_END]);
+        let boot_device = get_cstring(&dkbs_data[BOOT_DEVICE_START..BOOT_DEVICE_END]);
 
         // Sanity check to make sure the strings were retrieved
-        if !header.version.is_empty()
-            && !header.board_id.is_empty()
-            && !header.boot_device.is_empty()
+        if !version.is_empty()
+            && !board_id.is_empty()
+            && !boot_device.is_empty()
             && let Some(data_size_bytes) = dkbs_data.get(DATA_SIZE_START..DATA_SIZE_END)
         {
             // Parse the payload size field
-            if let Ok(data_size) =
-                crate::structures::parse(data_size_bytes, &data_size_field, "big")
-            {
-                if data_size["size"] & 0xFF000000 == 0 {
-                    header.data_size = data_size["size"];
-                    header.endianness = "big".to_string();
-                } else if let Ok(data_size) =
-                    crate::structures::parse(data_size_bytes, &data_size_field, "little")
-                {
-                    header.data_size = data_size["size"];
-                    header.endianness = "little".to_string();
-                }
-            }
+            let data_size =
+                dyn_endian::U32::ref_from_bytes(data_size_bytes).map_err(|_| StructureError)?;
 
-            if header.data_size != 0 {
-                return Ok(header);
+            let endianness = match data_size.get(Endianness::Big) & 0xFF000000 {
+                0 => Endianness::Big,
+                _ => Endianness::Little,
+            };
+            let data_size = data_size.get(endianness) as usize;
+
+            if data_size != 0 {
+                // return Ok(header);
+                return Ok(DKBSHeader {
+                    data_size,
+                    header_size: HEADER_SIZE,
+                    board_id,
+                    version,
+                    boot_device,
+                    endianness,
+                });
             }
         }
     }

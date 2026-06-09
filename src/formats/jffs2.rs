@@ -1,8 +1,9 @@
 use crate::extractors;
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
-use crate::structures::StructureError;
+use crate::structures::{Endianness, StructureError, dyn_endian};
 use aho_corasick::AhoCorasick;
 use crc32_v2;
+use zerocopy::{FromBytes, Immutable, KnownLayout, Unaligned};
 
 /// Human readable description
 pub const DESCRIPTION: &str = "JFFS2 filesystem";
@@ -54,10 +55,9 @@ pub fn jffs2_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
             let mut node_count: usize = 1;
 
             // Determine which node magic bytes to search for based on the first node's endianness
-            let node_magic = if first_node_header.endianness == "big" {
-                JFFS2_BIG_ENDIAN_MAGIC
-            } else {
-                JFFS2_LITTLE_ENDIAN_MAGIC
+            let node_magic = match first_node_header.endianness {
+                Endianness::Big => JFFS2_BIG_ENDIAN_MAGIC,
+                Endianness::Little => JFFS2_LITTLE_ENDIAN_MAGIC,
             };
 
             // Need to grep for all JFFS2 nodes to figure out how big this file system really is
@@ -121,62 +121,50 @@ fn roundup(num: usize) -> usize {
 pub const JFFS2_NODE_STRUCT_SIZE: usize = 12;
 
 /// Structure for storing useful JFFS node info
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct JFFS2Node {
     pub size: usize,
-    pub node_type: u16,
-    pub endianness: String,
+    pub endianness: Endianness,
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct JFFS2NodeBytes {
+    magic: dyn_endian::U16,
+    node_type: dyn_endian::U16,
+    size: dyn_endian::U32,
+    crc: dyn_endian::U32,
 }
 
 /// Parse a JFFS2 node header
 pub fn parse_jffs2_node_header(node_data: &[u8]) -> Result<JFFS2Node, StructureError> {
     // Expected JFFS2 node magic
-    const JFFS2_CORRECT_MAGIC: usize = 0x1985;
+    const MAGIC: u16 = 0x1985;
+    const LITTLE_ENDIAN_MAGIC: dyn_endian::U16 = dyn_endian::U16::new(MAGIC, Endianness::Little);
+    const BIG_ENDIAN_MAGIC: dyn_endian::U16 = dyn_endian::U16::new(MAGIC, Endianness::Big);
 
     // Number of header bytes over which the header CRC is calculated
     const JFFS2_HEADER_CRC_SIZE: usize = 8;
 
-    let jffs2_node_structure = vec![
-        ("magic", "u16"),
-        ("type", "u16"),
-        ("size", "u32"),
-        ("crc", "u32"),
-    ];
+    // Parse the node header
+    let (node_header, _) =
+        JFFS2NodeBytes::ref_from_prefix(node_data).map_err(|_| StructureError)?;
 
-    let mut node = JFFS2Node {
-        endianness: "little".to_string(), // Try little endian first
-        ..Default::default()
+    let endianness = match node_header.magic {
+        LITTLE_ENDIAN_MAGIC => Endianness::Little,
+        BIG_ENDIAN_MAGIC => Endianness::Big,
+        _ => return Err(StructureError),
     };
 
-    // Parse the node header
-    if let Ok(mut node_header) =
-        crate::structures::parse(node_data, &jffs2_node_structure, &node.endianness)
-    {
-        // If the node header magic isn't correct, try parsing the header as big endian
-        if node_header["magic"] != JFFS2_CORRECT_MAGIC {
-            match crate::structures::parse(node_data, &jffs2_node_structure, &node.endianness) {
-                Err(_) => {
-                    return Err(StructureError);
-                }
-                Ok(node_header_be) => {
-                    node.endianness = "big".to_string();
-                    node_header = node_header_be;
-                }
-            }
-        }
+    // Calculate the node header CRC
+    let node_calculated_crc = jffs2_node_crc(&node_data[0..JFFS2_HEADER_CRC_SIZE]);
 
-        // Node magic must be correct at this point, else this node is invalid
-        if node_header["magic"] == JFFS2_CORRECT_MAGIC {
-            // Calculate the node header CRC
-            let node_calculated_crc = jffs2_node_crc(&node_data[0..JFFS2_HEADER_CRC_SIZE]);
-
-            // Validate the node header CRC
-            if node_calculated_crc == node_header["crc"] as u32 {
-                node.size = node_header["size"];
-                node.node_type = node_header["type"] as u16;
-                return Ok(node);
-            }
-        }
+    // Validate the node header CRC
+    if node_calculated_crc == node_header.crc.get(endianness) {
+        return Ok(JFFS2Node {
+            size: node_header.size.get(endianness) as usize,
+            endianness,
+        });
     }
 
     Err(StructureError)

@@ -1,0 +1,20 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 13
+  id: "[uuid]"
+  size: 34
+  name: arj
+  confidence: 128
+  description: "ARJ archive data, header size: 34, version 11, minimum version to extract: 1, flags: no password|slash-switched, compression method: stored, file type: comment header, original name: example.arj, original file date: 2025-02-23 14:49:02, compressed file size: 1740322564, uncompressed file size: 0, os: UNIX"
+  always_display: false
+  extraction_declined: false
+- offset: 70
+  id: "[uuid]"
+  size: 46
+  name: arj
+  confidence: 128
+  description: "ARJ archive data, header size: 46, version 11, minimum version to extract: 1, flags: no password|slash-switched, compression method: compressed most, file type: binary, original name: secret.txt, original file date: 2025-02-23 14:56:01, compressed file size: 54, uncompressed file size: 60, os: UNIX"
+  always_display: false
+  extraction_declined: true

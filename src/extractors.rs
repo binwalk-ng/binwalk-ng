@@ -387,6 +387,14 @@ impl Chroot {
     pub fn create_file(&self, file_path: impl AsRef<Path>, file_data: &[u8]) -> bool {
         let safe_file_path: PathBuf = self.chrooted_path(file_path);
 
+        if self.escapes_via_symlink(&safe_file_path) {
+            error!(
+                "Refusing to create file {}: path traverses a symlink",
+                safe_file_path.display()
+            );
+            return false;
+        }
+
         if !path::Path::new(&safe_file_path).exists() {
             match fs::write(safe_file_path.clone(), file_data) {
                 Ok(_) => {
@@ -673,7 +681,7 @@ impl Chroot {
     pub fn append_to_file(&self, file_path: impl AsRef<Path>, data: &[u8]) -> bool {
         let safe_file_path: PathBuf = self.chrooted_path(file_path);
 
-        if !self.is_symlink(&safe_file_path) {
+        if !self.escapes_via_symlink(&safe_file_path) {
             match fs::OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -729,6 +737,14 @@ impl Chroot {
     /// ```
     pub fn create_directory(&self, dir_path: impl AsRef<Path>) -> bool {
         let safe_dir_path: PathBuf = self.chrooted_path(dir_path);
+
+        if self.escapes_via_symlink(&safe_dir_path) {
+            error!(
+                "Refusing to create directory {}: path traverses a symlink",
+                safe_dir_path.display()
+            );
+            return false;
+        }
 
         match fs::create_dir_all(safe_dir_path.clone()) {
             Ok(_) => {
@@ -856,6 +872,78 @@ impl Chroot {
         false
     }
 
+    /// Applies a Unix file mode to an existing path in the chroot directory, preserving
+    /// the permission, setuid/setgid, and sticky bits exactly as recorded in the archive.
+    ///
+    /// On non-Unix platforms this is a no-op that returns `true`.
+    pub fn set_mode(&self, file_path: impl AsRef<Path>, mode: u32) -> bool {
+        let safe_file_path: PathBuf = self.chrooted_path(file_path);
+
+        // Never chmod through a symlink (set_permissions follows symlinks).
+        if self.escapes_via_symlink(&safe_file_path) {
+            warn!(
+                "Refusing to set mode on {}: path traverses a symlink",
+                safe_file_path.display()
+            );
+            return false;
+        }
+
+        #[cfg(unix)]
+        {
+            if let Err(e) = fs::set_permissions(&safe_file_path, fs::Permissions::from_mode(mode)) {
+                warn!("Failed to set mode on {}: {e}", safe_file_path.display());
+                return false;
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = mode;
+        }
+
+        true
+    }
+
+    /// Best-effort restore of ownership (uid/gid) on an existing path in the chroot
+    /// directory. Uses `lchown`, so it never follows the final symlink component and is
+    /// safe to call on symlink entries.
+    ///
+    /// Changing ownership typically requires privileges (root); failures are ignored, as
+    /// an unprivileged `tar`/`cpio` extraction would simply keep the caller's ownership.
+    /// On non-Unix platforms this is a no-op that returns `true`.
+    pub fn set_ownership(&self, file_path: impl AsRef<Path>, uid: u32, gid: u32) -> bool {
+        let safe_file_path: PathBuf = self.chrooted_path(file_path);
+
+        // lchown leaves the final symlink alone, but a symlinked *parent* would still be
+        // followed; refuse if the parent traverses a symlink.
+        if let Some(parent) = safe_file_path.parent()
+            && self.escapes_via_symlink(parent)
+        {
+            warn!(
+                "Refusing to set ownership on {}: path traverses a symlink",
+                safe_file_path.display()
+            );
+            return false;
+        }
+
+        #[cfg(unix)]
+        {
+            if let Err(e) = unix_fs::lchown(&safe_file_path, Some(uid), Some(gid)) {
+                // Expected without privileges; don't treat as an extraction failure.
+                debug!(
+                    "Could not set ownership on {} to {uid}:{gid}: {e}",
+                    safe_file_path.display()
+                );
+                return false;
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (uid, gid);
+        }
+
+        true
+    }
+
     /// Removes the chroot prefix → returns path relative to chroot root
     /// e.g. "/chroot/bin/ls" → "/bin/ls"
     fn strip_chroot_prefix(&self, path: &Path) -> PathBuf {
@@ -877,8 +965,9 @@ impl Chroot {
 
     /// Creates a symbolic link in the chroot directory, named `symlink_path`, which points to `target_path`.
     ///
-    /// Note that both the symlink and target paths will be sanitized to stay in the chroot directory.
-    /// Both the target path will be converted into a path relative to the symlink file path.
+    /// The link target is rewritten to a path relative to the symlink that always
+    /// resolves *within* the chroot directory, so neither the symlink nor anything that
+    /// follows it can escape the chroot — even when `target_path` is absolute.
     ///
     /// ## Example
     ///
@@ -890,16 +979,14 @@ impl Chroot {
     /// # let temp_dir = tempfile::tempdir().unwrap();
     /// # let chroot_dir = temp_dir.path();
     ///
-    /// let symlink_name = "symlink";
-    /// let target_path = "target";
-    ///
-    /// let expected_symlink_path = std::path::Path::new(&chroot_dir).join(symlink_name);
-    /// let expected_target_path = std::path::Path::new(&chroot_dir).join(target_path);
-    ///
     /// let chroot = Chroot::new(&chroot_dir);
     ///
-    /// assert_eq!(chroot.create_symlink(symlink_name, target_path), true);
-    /// assert_eq!(std::fs::canonicalize(expected_symlink_path)?.to_str(), expected_target_path.to_str());
+    /// // Create the target file, then a symlink that points at it.
+    /// chroot.create_file("target", b"data");
+    /// assert_eq!(chroot.create_symlink("symlink", "target"), true);
+    ///
+    /// // The link is relative and chroot-contained, so reading through it yields the target.
+    /// assert_eq!(std::fs::read_to_string(std::path::Path::new(&chroot_dir).join("symlink"))?, "data");
     /// # Ok(())
     /// # } _doctest_main_src_extractors_common_rs_571_0(); }
     /// ```
@@ -913,6 +1000,17 @@ impl Chroot {
 
         // Get chroot-safe absolute paths
         let safe_symlink = self.chrooted_path(symlink);
+
+        // Refuse to place the symlink itself through an existing symlink component,
+        // which could let it (or a later write through it) escape the chroot.
+        if self.escapes_via_symlink(&safe_symlink) {
+            error!(
+                "Refusing to create symlink {}: path traverses a symlink",
+                safe_symlink.display()
+            );
+            return false;
+        }
+
         let safe_target_base = if target.is_absolute() {
             self.chrooted_path(target)
         } else {
@@ -924,24 +1022,22 @@ impl Chroot {
         let symlink_inside = self.strip_chroot_prefix(&safe_symlink);
         let target_inside = self.strip_chroot_prefix(&safe_target_base);
 
-        // Build relative path from symlink location → target location
+        // Build a relative path from the symlink's location to the target so the link
+        // always resolves *within* the chroot directory and can never point outside it
+        // (even when the archive's target is absolute, e.g. "/etc/passwd").
         let mut relative_target = PathBuf::new();
 
-        // How many .. we need = number of components in symlink path - 1
-        let depth = symlink_inside.components().count().saturating_sub(1);
+        // Number of ".." needed to climb from the symlink's directory back to the
+        // chroot root: total components, minus the leading root, minus the symlink
+        // file itself.
+        let depth = symlink_inside.components().count().saturating_sub(2);
         for _ in 0..depth {
             relative_target.push("..");
         }
 
-        // Append the target path components
-        relative_target.push(target_inside);
-
-        // If it starts with /, turn it into ./
-        if relative_target.starts_with("/") {
-            let mut dot = PathBuf::from(".");
-            dot.push(relative_target);
-            relative_target = dot;
-        }
+        // Append the target as a path relative to the chroot root (strip its leading
+        // '/'), so the final link never starts with '/' and stays chroot-contained.
+        relative_target.push(target_inside.strip_prefix("/").unwrap_or(&target_inside));
 
         // Create the symlink
 
@@ -982,6 +1078,28 @@ impl Chroot {
     fn is_symlink(&self, file_path: impl AsRef<Path>) -> bool {
         if let Ok(metadata) = fs::symlink_metadata(file_path) {
             return metadata.file_type().is_symlink();
+        }
+
+        false
+    }
+
+    /// Returns true if `safe_path` (an already-chrooted path) itself, or any of its
+    /// ancestors up to but not including the chroot root, is an existing symlink.
+    ///
+    /// Writing to or through such a path would follow the symlink and could escape the
+    /// chroot directory, so callers must refuse the operation. This mirrors the
+    /// protection a well-behaved `tar`/`cpio` applies during extraction.
+    fn escapes_via_symlink(&self, safe_path: impl AsRef<Path>) -> bool {
+        for ancestor in safe_path.as_ref().ancestors() {
+            // Stop once we reach the chroot root (or anything at/above it); only
+            // components strictly inside the chroot are attacker-controlled.
+            if ancestor == self.chroot_directory || !ancestor.starts_with(&self.chroot_directory) {
+                break;
+            }
+
+            if self.is_symlink(ancestor) {
+                return true;
+            }
         }
 
         false
@@ -1376,3 +1494,83 @@ pub mod dumpifs;
 pub mod inflate;
 pub mod swapped;
 pub mod tsk;
+
+#[cfg(test)]
+mod chroot_security_tests {
+    use super::Chroot;
+    use std::fs;
+    use std::path::Path;
+
+    /// A write whose path traverses an existing symlink component must be refused,
+    /// and must not write through the link. This is the core defense against the
+    /// classic archive symlink-traversal escape.
+    #[test]
+    fn refuses_to_write_through_a_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let chroot = Chroot::new(dir.path());
+
+        assert!(chroot.create_directory("realdir"));
+        assert!(chroot.create_symlink("linkdir", "realdir"));
+
+        // create_file / create_directory / append_to_file through the symlink: refused.
+        assert!(!chroot.create_file("linkdir/inside.txt", b"data"));
+        assert!(!chroot.create_directory("linkdir/sub"));
+        assert!(!chroot.append_to_file("linkdir/inside.txt", b"data"));
+
+        // Nothing was written through the link.
+        assert!(!dir.path().join("realdir/inside.txt").exists());
+        assert!(!dir.path().join("realdir/sub").exists());
+    }
+
+    /// An absolute archive target (e.g. "/etc/passwd") must become a relative,
+    /// chroot-contained link target, never the host's absolute path.
+    #[test]
+    fn absolute_symlink_target_is_contained() {
+        let dir = tempfile::tempdir().unwrap();
+        let chroot = Chroot::new(dir.path());
+
+        assert!(chroot.create_symlink("evil", "/etc/passwd"));
+
+        let on_disk_target = fs::read_link(dir.path().join("evil")).unwrap();
+        assert!(
+            on_disk_target.is_relative(),
+            "link target {on_disk_target:?} must be relative, not host-absolute"
+        );
+        assert_eq!(on_disk_target, Path::new("etc/passwd"));
+    }
+
+    /// A relative symlink resolves to its target within the chroot (reading through
+    /// the link yields the target's contents).
+    #[test]
+    fn relative_symlink_resolves_within_chroot() {
+        let dir = tempfile::tempdir().unwrap();
+        let chroot = Chroot::new(dir.path());
+
+        assert!(chroot.create_file("hello.txt", b"hi"));
+        assert!(chroot.create_symlink("link", "hello.txt"));
+        assert_eq!(fs::read(dir.path().join("link")).unwrap(), b"hi");
+    }
+
+    /// A nested symlink (deeper than the chroot root) also resolves within the chroot.
+    #[test]
+    fn nested_symlink_resolves_within_chroot() {
+        let dir = tempfile::tempdir().unwrap();
+        let chroot = Chroot::new(dir.path());
+
+        assert!(chroot.create_directory("a"));
+        assert!(chroot.create_file("a/target.txt", b"deep"));
+        assert!(chroot.create_symlink("a/link", "target.txt"));
+        assert_eq!(fs::read(dir.path().join("a/link")).unwrap(), b"deep");
+    }
+
+    /// Ordinary (non-symlink) file and directory creation is unaffected.
+    #[test]
+    fn ordinary_creation_still_works() {
+        let dir = tempfile::tempdir().unwrap();
+        let chroot = Chroot::new(dir.path());
+
+        assert!(chroot.create_directory("x/y"));
+        assert!(chroot.create_file("x/y/z.txt", b"ok"));
+        assert_eq!(fs::read(dir.path().join("x/y/z.txt")).unwrap(), b"ok");
+    }
+}

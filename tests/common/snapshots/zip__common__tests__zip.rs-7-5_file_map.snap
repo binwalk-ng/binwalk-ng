@@ -1,0 +1,12 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 605739
+  name: zip
+  confidence: 250
+  description: "ZIP archive, version: 2.0, file count: 1, total size: 605739 bytes"
+  always_display: false
+  extraction_declined: false

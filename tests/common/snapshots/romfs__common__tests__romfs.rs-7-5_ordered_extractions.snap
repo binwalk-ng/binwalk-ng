@@ -1,0 +1,9 @@
+---
+source: tests/common/mod.rs
+expression: ordered_extractions
+---
+- size: 240
+  success: true
+  extractor: romfs_built_in
+  do_not_recurse: false
+  output_directory: "[output_directory]"

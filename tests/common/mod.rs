@@ -1,10 +1,13 @@
+use std::panic::Location;
 use std::path::Path;
 
+use binwalk_ng::extractors::ExtractionResult;
 use binwalk_ng::{AnalysisResults, Binwalk};
 
 /// Convenience function for running an integration test against the specified file, with the provided signature filter.
 /// Assumes that there will be one signature result and one extraction result at file offset 0.
 #[allow(dead_code)]
+#[track_caller]
 pub fn integration_test(signature_filter: &str, file_name: &str) {
     let expected_signature_offsets: Vec<usize> = vec![0];
     let expected_extraction_offsets: Vec<usize> = vec![0];
@@ -21,17 +24,38 @@ pub fn integration_test(signature_filter: &str, file_name: &str) {
 }
 
 /// Assert that there was a valid signature match and corresponding extraction at, and only at, the specified file offsets
+#[track_caller]
 pub fn assert_results_ok(
     results: AnalysisResults,
     signature_offsets: Vec<usize>,
     extraction_offsets: Vec<usize>,
 ) {
+    let caller_loc = Location::caller();
+    let base = format!(
+        "{}-{}-{}",
+        caller_loc.file(),
+        caller_loc.line(),
+        caller_loc.column()
+    );
+    insta::assert_yaml_snapshot!(format!("{base}_file_map"), results.file_map, {
+        "[].id" => "[uuid]",
+    });
+
+    let ordered_extractions: Vec<Option<&ExtractionResult>> = results
+        .file_map
+        .iter()
+        .map(|extraction_result| results.extractions.get(&extraction_result.id))
+        .collect();
+    insta::assert_yaml_snapshot!(format!("{base}_ordered_extractions"), ordered_extractions, {
+        "[].output_directory" => "[output_directory]",
+    });
+
     // Assert that the number of signature results and extractions match the expected results
-    assert!(results.file_map.len() == signature_offsets.len());
-    assert!(results.extractions.len() == extraction_offsets.len());
+    assert_eq!(results.file_map.len(), signature_offsets.len());
+    assert_eq!(results.extractions.len(), extraction_offsets.len());
 
     // Assert that each signature match was at an expected offset and that extraction, if expected, was successful
-    for signature_result in results.file_map {
+    for signature_result in &results.file_map {
         assert!(signature_offsets.contains(&signature_result.offset));
         if extraction_offsets.contains(&signature_result.offset) {
             assert!(results.extractions[&signature_result.id].success);

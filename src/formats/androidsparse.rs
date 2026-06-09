@@ -60,6 +60,8 @@ pub struct AndroidSparseHeader {
     pub minor_version: u16,
     pub header_size: usize,
     pub block_size: usize,
+    /// Total number of blocks in the unsparsed output image
+    pub block_count: usize,
     pub chunk_count: usize,
 }
 
@@ -109,6 +111,7 @@ pub fn parse_android_sparse_header(
             minor_version: header.minor_version.get(),
             header_size: header.header_size.get() as usize,
             block_size: header.block_size.get() as usize,
+            block_count: header.block_count.get() as usize,
             chunk_count: header.total_chunks.get() as usize,
         });
     }
@@ -117,15 +120,25 @@ pub fn parse_android_sparse_header(
 }
 
 /// Storage structure for Android Sparse chunk headers
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct AndroidSparseChunkHeader {
     pub header_size: usize,
     pub data_size: usize,
     pub block_count: usize,
-    pub is_crc: bool,
-    pub is_raw: bool,
-    pub is_fill: bool,
-    pub is_dont_care: bool,
+    pub chunk_type: ChunkType,
+}
+
+const CHUNK_TYPE_RAW: u16 = 0xCAC1;
+const CHUNK_TYPE_FILL: u16 = 0xCAC2;
+const CHUNK_TYPE_DONT_CARE: u16 = 0xCAC3;
+const CHUNK_TYPE_CRC: u16 = 0xCAC4;
+
+#[derive(Debug, Copy, Clone)]
+pub enum ChunkType {
+    Raw,
+    Fill,
+    DontCare,
+    Crc,
 }
 
 #[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
@@ -141,37 +154,48 @@ struct AndroidSparseChunkHeaderBytes {
 pub fn parse_android_sparse_chunk_header(
     chunk_data: &[u8],
 ) -> Result<AndroidSparseChunkHeader, StructureError> {
-    // Known chunk types
-    const CHUNK_TYPE_RAW: u16 = 0xCAC1;
-    const CHUNK_TYPE_FILL: u16 = 0xCAC2;
-    const CHUNK_TYPE_DONT_CARE: u16 = 0xCAC3;
-    const CHUNK_TYPE_CRC: u16 = 0xCAC4;
-
-    let mut chonker = AndroidSparseChunkHeader {
-        header_size: std::mem::size_of::<AndroidSparseChunkHeaderBytes>(),
-        ..Default::default()
-    };
+    // Expected payload sizes by chunk type (per the Android sparse spec):
+    //   FILL:      4 bytes (the repeated fill value)
+    //   DONT_CARE: 0 bytes
+    //   CRC:       4 bytes (CRC32)
+    //   RAW:       block_count * block_size bytes (validated by the extractor,
+    //              which has access to the sparse header)
+    const FILL_DATA_SIZE: usize = 4;
+    const DONT_CARE_DATA_SIZE: usize = 0;
+    const CRC_DATA_SIZE: usize = 4;
 
     // Parse the header
     let (chunk_header, _) =
         AndroidSparseChunkHeaderBytes::ref_from_prefix(chunk_data).map_err(|_| StructureError)?;
     // Make sure the reserved field is zero
-    if chunk_header.reserved == 0 {
-        // Populate the structure values
-        chonker.block_count = chunk_header.output_block_count.get() as usize;
-        chonker.data_size = (chunk_header.total_size.get() as usize) - chonker.header_size;
-        chonker.is_crc = chunk_header.chunk_type == CHUNK_TYPE_CRC;
-        chonker.is_raw = chunk_header.chunk_type == CHUNK_TYPE_RAW;
-        chonker.is_fill = chunk_header.chunk_type == CHUNK_TYPE_FILL;
-        chonker.is_dont_care = chunk_header.chunk_type == CHUNK_TYPE_DONT_CARE;
-
-        // The chunk type must be one of the known chunk types
-        if chonker.is_crc || chonker.is_raw || chonker.is_fill || chonker.is_dont_care {
-            return Ok(chonker);
-        }
+    if chunk_header.reserved != 0 {
+        return Err(StructureError);
     }
 
-    Err(StructureError)
+    let header_size = std::mem::size_of::<AndroidSparseChunkHeaderBytes>();
+    // Populate the structure values
+    let data_size = (chunk_header.total_size.get() as usize)
+        .checked_sub(header_size)
+        .ok_or(StructureError)?;
+
+    // The chunk type must be one of the known chunk types, and the payload size must
+    // match their declared type. In particular, a FILL chunk with data_size == 0 would
+    // cause the extractor to loop forever trying to fill a block with no data.
+    let chunk_type = match chunk_header.chunk_type.get() {
+        CHUNK_TYPE_FILL if data_size == FILL_DATA_SIZE => ChunkType::Fill,
+        CHUNK_TYPE_DONT_CARE if data_size == DONT_CARE_DATA_SIZE => ChunkType::DontCare,
+        CHUNK_TYPE_CRC if data_size == CRC_DATA_SIZE => ChunkType::Crc,
+        // validated by the extractor, which has access to the sparse header
+        CHUNK_TYPE_RAW => ChunkType::Raw,
+        _ => return Err(StructureError),
+    };
+
+    Ok(AndroidSparseChunkHeader {
+        header_size,
+        data_size,
+        chunk_type,
+        block_count: chunk_header.output_block_count.get() as usize,
+    })
 }
 
 /// Defines the internal extractor function for extracting Android Sparse files
@@ -211,13 +235,27 @@ pub fn extract_android_sparse(
 ) -> ExtractionResult {
     const OUTFILE_NAME: &str = "unsparsed.img";
 
+    // Refuse to produce an unsparsed image larger than this. Real-world Android
+    // partitions are well under this cap; anything beyond is almost certainly a
+    // crafted header trying to exhaust disk space.
+    const MAX_UNSPARSED_SIZE: usize = 16 * 1024 * 1024 * 1024; // 16 GiB
+
     let mut result = ExtractionResult::default();
 
     // Parse the sparse file header
     if let Ok(sparse_header) = parse_android_sparse_header(&file_data[offset..]) {
+        match sparse_header
+            .block_count
+            .checked_mul(sparse_header.block_size)
+        {
+            Some(s) if s <= MAX_UNSPARSED_SIZE => {}
+            _ => return result,
+        };
+
         let available_data: usize = file_data.len();
         let mut last_chunk_offset: Option<usize> = None;
         let mut processed_chunk_count: usize = 0;
+        let mut blocks_written: usize = 0;
         let mut next_chunk_offset: usize = offset + sparse_header.header_size;
 
         while is_offset_safe(available_data, next_chunk_offset, last_chunk_offset) {
@@ -228,6 +266,27 @@ pub fn extract_android_sparse(
                 }
 
                 Ok(chunk_header) => {
+                    // A single chunk can never describe more blocks than the
+                    // total declared by the sparse header. This bounds the
+                    // cumulative output to max_output_size.
+                    blocks_written = match blocks_written.checked_add(chunk_header.block_count) {
+                        Some(n) if n <= sparse_header.block_count => n,
+                        _ => break,
+                    };
+
+                    // For RAW chunks the payload must exactly cover block_count
+                    // blocks; otherwise the extracted image would be silently
+                    // misaligned and an absurd block_count would still drive
+                    // unbounded reads via file_data.get().
+                    if matches!(chunk_header.chunk_type, ChunkType::Raw) {
+                        let expected = chunk_header
+                            .block_count
+                            .checked_mul(sparse_header.block_size);
+                        if expected != Some(chunk_header.data_size) {
+                            break;
+                        }
+                    }
+
                     // If not a dry run, extract the data from the next chunk
                     if let Some(output_directory) = output_directory {
                         let chroot = Chroot::new(output_directory);
@@ -274,34 +333,42 @@ fn extract_chunk(
     outfile: &str,
     chroot: &Chroot,
 ) -> bool {
-    if chunk_header.is_raw {
-        // Raw chunks are just data chunks stored verbatim
-        if !chroot.append_to_file(outfile, chunk_data) {
-            return false;
-        }
-    } else if chunk_header.is_fill {
-        // Fill chunks are block_count blocks that contain a repeated sequence of data (typically 4-bytes repeated over and over again)
-        for _ in 0..chunk_header.block_count {
-            let mut fill_block: Vec<u8> = vec![];
-
-            // Fill each block with the repeated data
-            while fill_block.len() < sparse_header.block_size {
-                fill_block.extend(chunk_data);
-            }
-
-            // Append fill block to file
-            if !chroot.append_to_file(outfile, &fill_block) {
+    match chunk_header.chunk_type {
+        ChunkType::Raw => {
+            // Raw chunks are just data chunks stored verbatim
+            if !chroot.append_to_file(outfile, chunk_data) {
                 return false;
             }
         }
-    } else if chunk_header.is_dont_care {
-        let null_block = vec![0u8; sparse_header.block_size];
-
-        // Write block_count NULL blocks to disk
-        for _ in 0..chunk_header.block_count {
-            if !chroot.append_to_file(outfile, &null_block) {
+        ChunkType::Fill => {
+            // The parser rejects FILL chunks whose payload isn't the spec-required
+            // 4 bytes, but guard here too: an empty fill value would make the inner
+            // loop below spin forever.
+            if chunk_data.is_empty() {
                 return false;
             }
+            // Fill chunks are block_count blocks that contain a repeated sequence of data (typically 4-bytes repeated over and over again)
+            let repeat_count = sparse_header.block_size.div_ceil(chunk_data.len());
+            let fill_block = chunk_data.repeat(repeat_count);
+            for _ in 0..chunk_header.block_count {
+                // Append fill block to file
+                if !chroot.append_to_file(outfile, &fill_block) {
+                    return false;
+                }
+            }
+        }
+        ChunkType::DontCare => {
+            let null_block = vec![0u8; sparse_header.block_size];
+
+            // Write block_count NULL blocks to disk
+            for _ in 0..chunk_header.block_count {
+                if !chroot.append_to_file(outfile, &null_block) {
+                    return false;
+                }
+            }
+        }
+        ChunkType::Crc => {
+            // No data for a crc block
         }
     }
 

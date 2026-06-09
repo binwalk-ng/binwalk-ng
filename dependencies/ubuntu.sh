@@ -8,7 +8,6 @@ DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get -y install \
     7zip \
     zstd \
     srecord \
-    tar \
     unzip \
     sleuthkit \
     cabextract \
@@ -29,7 +28,6 @@ DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get -y install \
     libfontconfig1-dev \
     liblzma-dev \
     libssl-dev \
-    7zip-standalone \
     cpio \
     device-tree-compiler
 

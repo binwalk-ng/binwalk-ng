@@ -1,8 +1,9 @@
 use crate::common::is_offset_safe;
 use crate::extractors::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
-use crate::structures::StructureError;
+use crate::structures::{Endianness, StructureError, dyn_endian};
 use std::path::Path;
+use zerocopy::{FromBytes, Immutable, KnownLayout, Unaligned};
 
 /// Human readable description
 pub const PCAPNG_DESCRIPTION: &str = "Pcap-NG capture file";
@@ -46,93 +47,96 @@ pub fn pcapng_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult,
 /// Storage struct for Pcap block info
 #[derive(Debug, Clone, Default)]
 pub struct PcapBlock {
-    pub block_type: usize,
+    pub block_type: u32,
     pub block_size: usize,
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct BlockHeader {
+    block_type: dyn_endian::U32,
+    block_size: dyn_endian::U32,
 }
 
 /// Parse a Pcap-ng block
 pub fn parse_pcapng_block(
     block_data: &[u8],
-    endianness: &str,
+    endianness: Endianness,
 ) -> Result<PcapBlock, StructureError> {
     // Reserved bit in block type field
-    const BLOCK_TYPE_RESERVED_MASK: usize = 0x80000000;
+    const BLOCK_TYPE_RESERVED_MASK: u32 = 0x80000000;
 
-    let block_header_structure = vec![("block_type", "u32"), ("block_size", "u32")];
-
-    let block_footer_structure = vec![("block_size", "u32")];
-
-    let mut result = PcapBlock::default();
-
-    let footer_size = crate::structures::size(&block_footer_structure);
+    let footer_size = std::mem::size_of::<dyn_endian::U32>();
 
     // Parse the block header
-    if let Ok(block_header) =
-        crate::structures::parse(block_data, &block_header_structure, endianness)
-    {
-        // Populate the block type and size values
-        result.block_type = block_header["block_type"];
-        result.block_size = block_header["block_size"];
+    let (block_header, _) = BlockHeader::ref_from_prefix(block_data).map_err(|_| StructureError)?;
 
-        // Make sure the reserved bit of the block type is not set
-        if (result.block_type & BLOCK_TYPE_RESERVED_MASK) == 0 {
-            // Calculate the block footer offsets
-            let block_footer_start = result.block_size - footer_size;
-            let block_footer_end = block_footer_start + footer_size;
+    // Populate the block type and size values
+    let result = PcapBlock {
+        block_type: block_header.block_type.get(endianness),
+        block_size: block_header.block_size.get(endianness) as usize,
+    };
 
-            // Validate that the block size in the block footer matches the block size in the block header
-            if let Some(block_footer_data) = block_data.get(block_footer_start..block_footer_end)
-                && let Ok(block_footer) =
-                    crate::structures::parse(block_footer_data, &block_footer_structure, endianness)
-                && block_footer["block_size"] == result.block_size
-            {
-                return Ok(result);
-            }
+    // Make sure the reserved bit of the block type is not set
+    if (result.block_type & BLOCK_TYPE_RESERVED_MASK) == 0 {
+        // Calculate the block footer offsets
+        let block_footer_start = result.block_size - footer_size;
+
+        // Validate that the block size in the block footer matches the block size in the block header
+        if let Some(block_footer_data) = block_data.get(block_footer_start..)
+            && let Ok((block_size, _)) = dyn_endian::U32::ref_from_prefix(block_footer_data)
+            && block_size.get(endianness) as usize == result.block_size
+        {
+            return Ok(result);
         }
     }
 
     Err(StructureError)
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct PcapSectionBlock {
     pub block_size: usize,
-    pub endianness: String,
+    pub endianness: Endianness,
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct SectionHeader {
+    block_type: dyn_endian::U32,
+    block_size: dyn_endian::U32,
+    endian_magic: dyn_endian::U32,
+    major_version: dyn_endian::U16,
+    minor_version: dyn_endian::U16,
+    section_length: dyn_endian::U32,
 }
 
 /// Parse a Pcap-ng section block
 pub fn parse_pcapng_section_block(block_data: &[u8]) -> Result<PcapSectionBlock, StructureError> {
     // Section header block type (same value, regardless of endianness)
-    const SECTION_HEADER_BLOCK_TYPE: usize = 0x0A0D0D0A;
-
-    let section_header_structure = vec![
-        ("block_type", "u32"),
-        ("block_size", "u32"),
-        ("endian_magic", "u32"),
-        ("major_version", "u16"),
-        ("minor_version", "u16"),
-        ("section_length", "u32"),
-    ];
+    const SECTION_HEADER_BLOCK_TYPE: u32 = 0x0A0D0D0A;
+    const MAGIC: u32 = 0x1A2B3C4D;
+    const LITTLE_ENDIAN_MAGIC: dyn_endian::U32 = dyn_endian::U32::new(MAGIC, Endianness::Little);
+    const BIG_ENDIAN_MAGIC: dyn_endian::U32 = dyn_endian::U32::new(MAGIC, Endianness::Big);
 
     // Parse the section header structure; endianness doesn't matter (yet)
-    if let Ok(section_header) =
-        crate::structures::parse(block_data, &section_header_structure, "little")
-    {
-        // Determine the endianness based on the endian magic bytes
-        let endianness = match section_header["endian_magic"] {
-            0x1A2B3C4D => "little",
-            0x4D3C2B1A => "big",
-            _ => return Err(StructureError),
-        };
-        // Parse the section header block as a generic block to ensure it is valid
-        if let Ok(block_header) = parse_pcapng_block(block_data, endianness) {
-            // Make sure the section header block type is the expected value
-            if block_header.block_type == SECTION_HEADER_BLOCK_TYPE {
-                return Ok(PcapSectionBlock {
-                    block_size: block_header.block_size,
-                    endianness: endianness.to_string(),
-                });
-            }
+    let (section_header, _) =
+        SectionHeader::ref_from_prefix(block_data).map_err(|_| StructureError)?;
+
+    // Determine the endianness based on the endian magic bytes
+    let endianness = match section_header.endian_magic {
+        LITTLE_ENDIAN_MAGIC => Endianness::Little,
+        BIG_ENDIAN_MAGIC => Endianness::Big,
+        _ => return Err(StructureError),
+    };
+    // Parse the section header block as a generic block to ensure it is valid
+    if let Ok(block_header) = parse_pcapng_block(block_data, endianness) {
+        // Make sure the section header block type is the expected value
+        if block_header.block_type == SECTION_HEADER_BLOCK_TYPE {
+            return Ok(PcapSectionBlock {
+                block_size: block_header.block_size,
+                endianness,
+            });
         }
     }
 
@@ -199,7 +203,7 @@ pub fn pcapng_carver(
                 }
                 Some(block_data) => {
                     // Parse the next block header
-                    match parse_pcapng_block(block_data, &section_header.endianness) {
+                    match parse_pcapng_block(block_data, section_header.endianness) {
                         Err(_) => {
                             break;
                         }

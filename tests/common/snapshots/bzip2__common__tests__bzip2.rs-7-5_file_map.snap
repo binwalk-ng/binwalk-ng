@@ -1,0 +1,12 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 8125
+  name: bzip2
+  confidence: 250
+  description: "bzip2 compressed data, total size: 8125 bytes"
+  always_display: false
+  extraction_declined: false

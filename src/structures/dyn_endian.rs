@@ -33,4 +33,5 @@ macro_rules! dyn_endian_ty {
 dyn_endian_ty! {
     pub struct U16(u16);
     pub struct U32(u32);
+    pub struct U64(u64);
 }

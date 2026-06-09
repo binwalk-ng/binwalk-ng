@@ -1,0 +1,12 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 5120
+  name: tarball
+  confidence: 128
+  description: "POSIX tar archive, file count: 6"
+  always_display: false
+  extraction_declined: false

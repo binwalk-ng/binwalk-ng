@@ -1,6 +1,10 @@
 use crate::common::is_offset_safe;
 use crate::extractors;
+use crate::extractors::{Chroot, ExtractionResult};
 use crate::signatures::{CONFIDENCE_HIGH, CONFIDENCE_MEDIUM, SignatureError, SignatureResult};
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use tar::{Archive, EntryType};
 
 /// Some tarball constants
 const TARBALL_BLOCK_SIZE: usize = 512;
@@ -156,39 +160,273 @@ fn tarball_octal(octal_string: &[u8]) -> usize {
     num
 }
 
-/// Describes how to run the tar utility to extract tarball archives
+/// Defines the internal extractor for tarball archives.
+///
+/// Archive entries are unpacked into the output directory through the chroot-safe
+/// `Chroot` API, so entry paths (including absolute paths and `..` traversal) cannot
+/// escape the extraction directory.
 ///
 /// ```
-/// use std::io::ErrorKind;
-/// use std::process::Command;
 /// use binwalk_ng::extractors::ExtractorType;
 /// use binwalk_ng::formats::tarball::tarball_extractor;
 ///
 /// match tarball_extractor().utility {
-///     ExtractorType::None => panic!("Invalid extractor type of None"),
-///     ExtractorType::Internal(func) => println!("Internal extractor OK: {:?}", func),
-///     ExtractorType::External(cmd) => {
-///         if let Err(e) = Command::new(&cmd).output() {
-///             if e.kind() == ErrorKind::NotFound {
-///                 panic!("External extractor '{}' not found", cmd);
-///             } else {
-///                 panic!("Failed to execute external extractor '{}': {}", cmd, e);
-///             }
-///         }
-///     }
+///     ExtractorType::Internal(_) => {}
+///     _ => panic!("tarball extractor should be internal"),
 /// }
 /// ```
 pub fn tarball_extractor() -> extractors::Extractor {
     extractors::Extractor {
-        utility: extractors::ExtractorType::External("tar".to_string()),
-        extension: "tar".to_string(),
-        arguments: vec![
-            "-x".to_string(),
-            "-f".to_string(),
-            extractors::SOURCE_FILE_PLACEHOLDER.to_string(),
-        ],
-        // Exit code may be 2 if attempting to create special device files fails
-        exit_codes: vec![0, 2],
+        utility: extractors::ExtractorType::Internal(extract_tarball),
         ..Default::default()
+    }
+}
+
+/// Internal extractor: unpacks a POSIX/GNU tar archive using the `tar` crate.
+///
+/// When `output_directory` is `None`, this performs a dry run (the archive is parsed
+/// and validated, but nothing is written to disk).
+fn extract_tarball(
+    file_data: &[u8],
+    offset: usize,
+    output_directory: Option<&Path>,
+) -> ExtractionResult {
+    let mut result = ExtractionResult::default();
+
+    let Some(tarball_data) = file_data.get(offset..) else {
+        return result;
+    };
+
+    let mut archive = Archive::new(tarball_data);
+    let Ok(entries) = archive.entries() else {
+        return result;
+    };
+
+    // None => dry run (validate only); Some => extract into this chroot.
+    let chroot = output_directory.map(Chroot::new);
+    let mut extracted_something = false;
+    let mut consumed: usize = 0;
+
+    // Directory attributes are applied only after every entry is extracted: restoring a
+    // restrictive directory mode (e.g. read-only) up front could otherwise block writes
+    // of the files that live inside it. This mirrors how `tar` defers directory perms.
+    let mut deferred_dir_metadata: Vec<(PathBuf, EntryMetadata)> = Vec::new();
+
+    for entry in entries {
+        // Stop at the first malformed/truncated entry, keeping anything already
+        // extracted (signature matching is imperfect, so trailing data may be junk).
+        let Ok(mut entry) = entry else {
+            break;
+        };
+
+        let entry_type = entry.header().entry_type();
+        let entry_size = entry.size() as usize;
+        // End of this entry's data within the archive, rounded up to the tar block
+        // size (every entry is padded to a 512-byte boundary). The size field is
+        // attacker-controlled, so use saturating arithmetic and clamp to the input
+        // length to avoid an integer-overflow panic.
+        consumed = (entry.raw_file_position() as usize)
+            .saturating_add(entry_size)
+            .min(tarball_data.len())
+            .next_multiple_of(TARBALL_BLOCK_SIZE);
+
+        // Preserve the entry's mode (permission + setuid/setgid/sticky bits) and
+        // ownership. Read these before any mutable borrow of the entry.
+        let metadata = EntryMetadata::from_entry(&entry);
+
+        // Resolve the entry's (owned) path; skip entries with an unrepresentable path.
+        let Ok(path) = entry.path().map(|p| p.into_owned()) else {
+            continue;
+        };
+
+        // Dry run: validate only, don't touch the filesystem.
+        let Some(chroot) = &chroot else {
+            extracted_something = true;
+            continue;
+        };
+
+        let entry_extracted = match entry_type {
+            EntryType::Directory => {
+                let created = chroot.create_directory(&path);
+                if created {
+                    deferred_dir_metadata.push((path, metadata));
+                }
+                created
+            }
+
+            // Represent both symlinks and hardlinks as symlinks; the Chroot API has
+            // no hardlink primitive, and a symlink preserves the reference.
+            EntryType::Symlink | EntryType::Link => match entry.link_name() {
+                Ok(Some(link)) => {
+                    let created = chroot.create_symlink(&path, &link);
+                    if created {
+                        // Only ownership applies to a symlink (its mode is ignored).
+                        metadata.apply_ownership(chroot, &path);
+                    }
+                    created
+                }
+                _ => false,
+            },
+
+            EntryType::Regular | EntryType::Continuous | EntryType::GNUSparse => {
+                // Don't pre-allocate from the header's (untrusted) size field; let the
+                // buffer grow from the bytes actually read to avoid an allocation bomb.
+                let mut data = Vec::new();
+                if entry.read_to_end(&mut data).is_err() {
+                    false
+                } else {
+                    // Chroot::create_file does not create parent directories.
+                    if let Some(parent) = path.parent() {
+                        chroot.create_directory(parent);
+                    }
+                    let created = chroot.create_file(&path, &data);
+                    if created {
+                        metadata.apply(chroot, &path);
+                    }
+                    created
+                }
+            }
+
+            // Character/block devices, fifos, sockets, and metadata-only entries:
+            // nothing to carve, but their presence must not fail the extraction.
+            _ => true,
+        };
+
+        extracted_something |= entry_extracted;
+    }
+
+    // Now that every file is in place, restore directory ownership and modes.
+    if let Some(chroot) = &chroot {
+        for (path, metadata) in &deferred_dir_metadata {
+            metadata.apply(chroot, path);
+        }
+    }
+
+    if extracted_something {
+        result.success = true;
+        result.size = Some(consumed);
+    }
+
+    result
+}
+
+/// Unix ownership and mode pulled from a tar entry header, used to restore an extracted
+/// path's attributes (execute/setuid/setgid/sticky bits and uid/gid).
+#[derive(Clone, Copy, Default)]
+struct EntryMetadata {
+    mode: Option<u32>,
+    owner: Option<(u32, u32)>,
+}
+
+impl EntryMetadata {
+    fn from_entry<R: Read>(entry: &tar::Entry<'_, R>) -> Self {
+        let header = entry.header();
+        let owner = header
+            .uid()
+            .ok()
+            .zip(header.gid().ok())
+            .map(|(uid, gid)| (uid as u32, gid as u32));
+        Self {
+            mode: header.mode().ok(),
+            owner,
+        }
+    }
+
+    /// Restore ownership (best effort; needs privileges) without following the final
+    /// symlink, so it is safe to call on symlink entries.
+    fn apply_ownership(&self, chroot: &Chroot, path: &Path) {
+        if let Some((uid, gid)) = self.owner {
+            chroot.set_ownership(path, uid, gid);
+        }
+    }
+
+    /// Restore ownership and then mode. Ownership is set first because changing it can
+    /// clear the setuid/setgid bits on some systems.
+    fn apply(&self, chroot: &Chroot, path: &Path) {
+        self.apply_ownership(chroot, path);
+        if let Some(mode) = self.mode {
+            chroot.set_mode(path, mode);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::signatures::{CONFIDENCE_HIGH, CONFIDENCE_MEDIUM};
+
+    /// The shared test fixture: a deterministic POSIX (ustar) tar archive containing
+    /// three files (see tests/inputs/gen_tarball.sh). The `ustar` magic for the first
+    /// entry lives at TARBALL_MAGIC_OFFSET (257), i.e. the archive starts at offset 0.
+    const FIXTURE: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/inputs/tarball.bin"
+    ));
+
+    #[test]
+    fn octal_parses_basic_values() {
+        assert_eq!(tarball_octal(b"33"), 27);
+        assert_eq!(tarball_octal(b"00000000644"), 0o644);
+        assert_eq!(tarball_octal(b""), 0);
+    }
+
+    #[test]
+    fn octal_stops_at_non_octal_terminator() {
+        // tar size/checksum fields are space- or NUL-terminated; parsing must stop there.
+        assert_eq!(tarball_octal(b"17 "), 0o17);
+        assert_eq!(tarball_octal(b"17\x00rest"), 0o17);
+        // A leading terminator yields zero.
+        assert_eq!(tarball_octal(b"\x0033"), 0);
+    }
+
+    #[test]
+    fn checksum_validates_real_header() {
+        let header = &FIXTURE[0..TARBALL_BLOCK_SIZE];
+        assert!(header_checksum_is_valid(header));
+    }
+
+    #[test]
+    fn checksum_rejects_corrupted_header() {
+        let mut header = FIXTURE[0..TARBALL_BLOCK_SIZE].to_vec();
+        // Flip a byte in the file name field (outside the checksum field), which must
+        // invalidate the stored checksum.
+        header[0] ^= 0xFF;
+        assert!(!header_checksum_is_valid(&header));
+    }
+
+    #[test]
+    fn entry_size_rounds_up_to_block_size() {
+        // First entry holds a 27-byte file: one header block + one (partial) data block.
+        let header = &FIXTURE[0..TARBALL_BLOCK_SIZE];
+        assert_eq!(tarball_entry_size(header).unwrap(), 2 * TARBALL_BLOCK_SIZE);
+    }
+
+    #[test]
+    fn entry_size_rejects_bad_magic() {
+        let zeros = [0u8; TARBALL_BLOCK_SIZE];
+        assert!(tarball_entry_size(&zeros).is_err());
+    }
+
+    #[test]
+    fn parser_detects_fixture_archive() {
+        let result = tarball_parser(FIXTURE, TARBALL_MAGIC_OFFSET).unwrap();
+
+        // Archive starts at the very beginning of the file.
+        assert_eq!(result.offset, 0);
+        // Reported size covers all six entries' header + data blocks (not the trailing
+        // end-of-archive zero padding): four files (1024 each) plus a directory and a
+        // symlink (one 512-byte header block each).
+        assert_eq!(result.size, 10 * TARBALL_BLOCK_SIZE);
+        // Six valid headers found; below TARBALL_MIN_EXPECTED_HEADERS, so medium.
+        assert_eq!(result.confidence, CONFIDENCE_MEDIUM);
+        assert!(result.confidence < CONFIDENCE_HIGH);
+        assert!(result.description.contains("file count: 6"));
+    }
+
+    #[test]
+    fn parser_rejects_non_tarball_data() {
+        // A region with no valid tar header (all zeros) must not be reported as a tarball.
+        let zeros = [0u8; 2 * TARBALL_BLOCK_SIZE];
+        assert!(tarball_parser(&zeros, TARBALL_MAGIC_OFFSET).is_err());
     }
 }
