@@ -4,7 +4,6 @@ expression: ordered_extractions
 ---
 - size: ~
   success: true
-  extractor: 7zz
+  extractor: 7z
   do_not_recurse: false
   output_directory: "[output_directory]"
-- ~

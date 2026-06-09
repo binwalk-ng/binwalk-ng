@@ -123,7 +123,7 @@ RUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv,target=/bin/uv \
 
 # Container with all build dependencies, as well as all runtime dependencies, for tests
 # e.g. `docker build --target dev . --tag 'binwalk:dev'`
-# `docker run --rm -v (pwd):/tmp/binwalk -e INSTA_UPDATE=unseen binwalk:dev cargo test`
+# `docker run --rm -it -v (pwd):/tmp/binwalk binwalk:dev cargo insta test --review --unreferenced=delete`
 FROM runtime_build AS dev
 # Copy the build artifacts from the scratch build stage
 COPY --link --from=base_build \
@@ -134,7 +134,9 @@ COPY --link --from=base_build \
     /usr/local/bin/
 RUN apt-get update \
     && apt-get install -y curl build-essential \
-    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+    && . /root/.cargo/env \
+    && cargo install cargo-insta
 ENV PATH=/root/.cargo/bin:${PATH}
 
 WORKDIR ${BINWALK_BUILD_DIR}

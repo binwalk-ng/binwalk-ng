@@ -7,6 +7,6 @@ expression: results.file_map
   size: 315
   name: squashfs
   confidence: 250
-  description: "SquashFS file system, little endian, version: 4.0, compression: gzip, inode count: 2, block size: 131072, image size: 315 bytes, created: 2024-11-02 21:29:35"
+  description: "SquashFS file system, Little Endian endian, version: 4.0, compression: gzip, inode count: 2, block size: 131072, image size: 315 bytes, created: 2024-11-02 21:29:35"
   always_display: false
   extraction_declined: false

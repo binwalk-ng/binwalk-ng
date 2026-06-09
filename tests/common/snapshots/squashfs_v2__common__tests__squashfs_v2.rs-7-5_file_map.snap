@@ -7,6 +7,6 @@ expression: results.file_map
   size: 2587654
   name: squashfs
   confidence: 250
-  description: "SquashFS file system, big endian, version: 2.0, compression: unknown, inode count: 431, block size: 65536, image size: 2587654 bytes, created: 2009-02-12 09:09:55"
+  description: "SquashFS file system, Big Endian endian, version: 2.0, compression: unknown, inode count: 431, block size: 65536, image size: 2587654 bytes, created: 2009-02-12 09:09:55"
   always_display: false
   extraction_declined: false

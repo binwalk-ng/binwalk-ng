@@ -7,6 +7,6 @@ expression: results.file_map
   size: 4096
   name: cramfs
   confidence: 250
-  description: "CramFS filesystem, little endian, 2 files, total size: 4096 bytes"
+  description: "CramFS filesystem, Little Endian endian, 2 files, total size: 4096 bytes"
   always_display: false
   extraction_declined: false

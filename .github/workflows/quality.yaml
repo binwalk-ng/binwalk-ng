@@ -73,7 +73,7 @@ jobs:
             -e CI=true \
             -e INSTA_UPDATE=new \
             binwalk:dev \
-            cargo test
+            cargo insta test --unreferenced=reject
 
       - name: Upload new snapshots
         if: ${{ failure() && steps.run_tests.outcome == 'failure' }}

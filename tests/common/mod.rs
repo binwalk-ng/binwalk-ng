@@ -32,7 +32,7 @@ pub fn assert_results_ok(
 ) {
     let caller_loc = Location::caller();
     let base = format!(
-        "{}:{}:{}",
+        "{}-{}-{}",
         caller_loc.file(),
         caller_loc.line(),
         caller_loc.column()
