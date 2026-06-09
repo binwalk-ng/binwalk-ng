@@ -1,0 +1,12 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 240
+  name: romfs
+  confidence: 250
+  description: "RomFS filesystem, volume name: \"rom 67269c23\", total size: 240 bytes"
+  always_display: false
+  extraction_declined: false

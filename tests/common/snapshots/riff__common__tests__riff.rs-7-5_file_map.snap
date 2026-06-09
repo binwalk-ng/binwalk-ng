@@ -1,0 +1,12 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 30320
+  name: riff
+  confidence: 128
+  description: "RIFF image, encoding type: WEBP, total size: 30320 bytes"
+  always_display: false
+  extraction_declined: false

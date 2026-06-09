@@ -1,0 +1,20 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 753556
+  id: "[uuid]"
+  size: 270056
+  name: bmp
+  confidence: 128
+  description: "BMP image, total size: 270056"
+  always_display: false
+  extraction_declined: false
+- offset: 1093612
+  id: "[uuid]"
+  size: 33236
+  name: bmp
+  confidence: 128
+  description: "BMP image, total size: 33236"
+  always_display: false
+  extraction_declined: false

@@ -1,0 +1,12 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 353993
+  name: zip
+  confidence: 250
+  description: "ZIP archive, version: 1.0, missing end-of-central-directory header, total size: 353993 bytes"
+  always_display: false
+  extraction_declined: false

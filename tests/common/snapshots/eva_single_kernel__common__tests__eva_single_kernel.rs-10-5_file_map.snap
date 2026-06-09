@@ -1,0 +1,12 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 115
+  name: eva
+  confidence: 250
+  description: "Fritz!Box EVA kernel image, single-kernel, primary load: 0x80500000, entry: 0x80500000, compressed: 59 bytes, uncompressed: 320 bytes, file signature CRC: 0xAD768CF5"
+  always_display: false
+  extraction_declined: false

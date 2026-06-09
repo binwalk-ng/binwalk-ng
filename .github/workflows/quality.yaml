@@ -54,14 +54,33 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Run tests
+      - name: Build dev container
         uses: docker/build-push-action@v7
         with:
           context: .
-          target: tests
+          target: dev
           push: false
+          load: true
+          tags: binwalk:dev
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Run tests
+        id: run_tests
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/tmp/binwalk" \
+            -e CI=true \
+            -e INSTA_UPDATE=new \
+            binwalk:dev \
+            cargo insta test --unreferenced=reject
+
+      - name: Upload new snapshots
+        if: ${{ failure() && steps.run_tests.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: new-snapshots
+          path: "**/snapshots/*.snap.new"
 
   clippy:
     name: Lint (clippy)

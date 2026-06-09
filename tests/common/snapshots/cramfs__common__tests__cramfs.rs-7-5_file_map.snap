@@ -1,0 +1,12 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 4096
+  name: cramfs
+  confidence: 250
+  description: "CramFS filesystem, Little Endian endian, 2 files, total size: 4096 bytes"
+  always_display: false
+  extraction_declined: false

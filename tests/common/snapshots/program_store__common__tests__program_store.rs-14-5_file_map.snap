@@ -1,0 +1,12 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 137
+  name: program_store
+  confidence: 250
+  description: "Broadcom ProgramStore firmware image, signature: 0x3350, compression: LZMA, load address: 0x00000000, revision: 3.4, build time: 2001-09-09 01:46:40, filename: \"program_store_dual.bin\", split image"
+  always_display: false
+  extraction_declined: false

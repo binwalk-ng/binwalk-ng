@@ -1,0 +1,12 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 72
+  name: matter_ota
+  confidence: 250
+  description: "Matter OTA firmware, total size: 96 bytes, tlv header size: 72 bytes, vendor id: 0x1234, product id: 0x1234, version: 1.2.120.0, payload size: 8 bytes, digest type: 1, payload digest: f09693eb113fe630bac50b5e99386a704ba4a363133e55f9735d322ddb8e78ef"
+  always_display: false
+  extraction_declined: false

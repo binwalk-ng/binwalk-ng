@@ -1,0 +1,14 @@
+---
+source: tests/common/mod.rs
+expression: ordered_extractions
+---
+- size: 270056
+  success: true
+  extractor: bmp_built_in
+  do_not_recurse: true
+  output_directory: "[output_directory]"
+- size: 33236
+  success: true
+  extractor: bmp_built_in
+  do_not_recurse: true
+  output_directory: "[output_directory]"
