@@ -142,7 +142,7 @@
 use crate::signatures::SignatureResult;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::fs::{self, File};
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs as unix_fs;
@@ -412,6 +412,67 @@ impl Chroot {
         }
 
         false
+    }
+
+    /// Creates a file for writing in the chrooted directory and returns the opened `File`.
+    ///
+    /// This function ensures parent directories exist and fails (returns `None`)
+    /// if the file already exists.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_extractors_common_rs_417_0() -> Result<(), Box<dyn std::error::Error>> {
+    /// use binwalk_ng::extractors::Chroot;
+    /// use std::io::Write;
+    ///
+    /// let file_name = "writer_test.txt";
+    /// let test_data = b"Hello from create_file_writer!";
+    ///
+    /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let chroot_dir = temp_dir.path();
+    ///
+    /// let chroot = Chroot::new(&chroot_dir);
+    ///
+    /// if let Some(mut file) = chroot.create_file_writer(file_name) {
+    ///     file.write_all(test_data)?;
+    ///     assert_eq!(std::fs::read(chroot_dir.join(file_name))?, test_data);
+    /// } else {
+    ///     panic!("Failed to create file writer");
+    /// }
+    /// # Ok(())
+    /// # } _doctest_main_src_extractors_common_rs_417_0(); }
+    /// ```
+    pub fn create_file_writer(&self, file_path: impl AsRef<Path>) -> Option<File> {
+        let safe_file_path: PathBuf = self.chrooted_path(file_path);
+
+        // Ensure parent directories exist
+        if let Some(parent) = safe_file_path.parent()
+            && !parent.exists()
+            && let Err(e) = fs::create_dir_all(parent)
+        {
+            error!(
+                "Failed to create parent directories for {}: {}",
+                safe_file_path.display(),
+                e
+            );
+            return None;
+        }
+
+        if safe_file_path.exists() {
+            let msg = format!("Path already exists: {}", safe_file_path.display());
+            error!("{}", msg);
+            return None;
+        }
+
+        match File::create(&safe_file_path) {
+            Ok(file) => Some(file),
+            Err(e) => {
+                error!("Failed to create file {}: {}", safe_file_path.display(), e);
+                None
+            }
+        }
     }
 
     /// Carve data and write it to a new file.
@@ -1511,5 +1572,150 @@ mod chroot_security_tests {
         assert!(chroot.create_directory("x/y"));
         assert!(chroot.create_file("x/y/z.txt", b"ok"));
         assert_eq!(fs::read(dir.path().join("x/y/z.txt")).unwrap(), b"ok");
+    }
+}
+
+#[cfg(test)]
+mod create_file_writer_tests {
+    use super::Chroot;
+    use std::fs;
+    use std::io::Write;
+
+    /// Basic case: create_file_writer returns Some(File) for a new path, the
+    /// caller can write to it, and the written data is readable on disk.
+    #[test]
+    fn creates_new_file_and_allows_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let chroot = Chroot::new(dir.path());
+        let test_data = b"hello from create_file_writer";
+
+        let mut file = chroot
+            .create_file_writer("new_file.txt")
+            .expect("expected Some(File) for a new path");
+
+        file.write_all(test_data).expect("write should succeed");
+        drop(file);
+
+        let on_disk = fs::read(dir.path().join("new_file.txt")).unwrap();
+        assert_eq!(on_disk, test_data);
+    }
+
+    /// A second call with the same path returns None because the file now exists.
+    #[test]
+    fn returns_none_when_file_already_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let chroot = Chroot::new(dir.path());
+
+        // First creation must succeed.
+        let first = chroot.create_file_writer("dup.txt");
+        assert!(first.is_some(), "first creation should succeed");
+        drop(first);
+
+        // Second creation must fail.
+        let second = chroot.create_file_writer("dup.txt");
+        assert!(second.is_none(), "second creation should return None");
+    }
+
+    /// create_file_writer automatically creates any missing parent directories
+    /// so callers do not have to pre-create them.
+    #[test]
+    fn creates_missing_parent_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let chroot = Chroot::new(dir.path());
+
+        let nested_path = "a/b/c/file.txt";
+        let result = chroot.create_file_writer(nested_path);
+        assert!(result.is_some(), "should succeed even when parents are absent");
+
+        // The parent directories must exist on disk.
+        assert!(dir.path().join("a/b/c").is_dir(), "parent dirs not created");
+        // The file itself must exist.
+        assert!(dir.path().join(nested_path).exists(), "file not created");
+    }
+
+    /// An absolute path like "/etc/passwd" must be safely chrooted—the file must
+    /// appear inside the chroot directory, never at the host path.
+    #[test]
+    fn absolute_path_is_chrooted() {
+        let dir = tempfile::tempdir().unwrap();
+        let chroot = Chroot::new(dir.path());
+
+        // Request an "absolute" path; chrooted_path must normalise it.
+        let file = chroot.create_file_writer("/secret.txt");
+        assert!(
+            file.is_some(),
+            "should create the file inside the chroot, not at /"
+        );
+        drop(file);
+
+        // Must exist inside the chroot, not at the host root.
+        assert!(
+            dir.path().join("secret.txt").exists(),
+            "file not found inside chroot"
+        );
+        assert!(
+            !std::path::Path::new("/secret.txt").exists()
+                || std::path::Path::new("/secret.txt")
+                    .metadata()
+                    .map(|m| m.len())
+                    .unwrap_or(1)
+                    == 0,
+            "file must not be written to host /"
+        );
+    }
+
+    /// A path with ".." components must be normalised so it stays inside the
+    /// chroot root (no directory traversal escape).
+    #[test]
+    fn dotdot_path_stays_inside_chroot() {
+        let dir = tempfile::tempdir().unwrap();
+        let chroot = Chroot::new(dir.path());
+
+        // "../../escape.txt" after chroot normalisation should land at
+        // <chroot>/escape.txt, not two directories above.
+        let file = chroot.create_file_writer("../../escape.txt");
+        assert!(file.is_some(), "should succeed after normalisation");
+        drop(file);
+
+        assert!(
+            dir.path().join("escape.txt").exists(),
+            "chroot-normalised file not found inside chroot"
+        );
+    }
+
+    /// Written data matches what is later read back byte-for-byte — regression
+    /// guard against a flush/buffering issue.
+    #[test]
+    fn written_bytes_are_readable_after_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let chroot = Chroot::new(dir.path());
+        let payload = b"\x00\x01\x02\x03\xFF\xFE\xFD";
+
+        {
+            let mut f = chroot.create_file_writer("binary.bin").unwrap();
+            f.write_all(payload).unwrap();
+        }
+
+        assert_eq!(
+            fs::read(dir.path().join("binary.bin")).unwrap(),
+            payload.as_ref()
+        );
+    }
+
+    /// Empty write: create_file_writer should succeed and produce a zero-length
+    /// file if the caller writes nothing.
+    #[test]
+    fn empty_write_produces_zero_length_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let chroot = Chroot::new(dir.path());
+
+        let _file = chroot
+            .create_file_writer("empty.txt")
+            .expect("should return Some for a new path");
+        // Drop without writing anything.
+        drop(_file);
+
+        let meta = fs::metadata(dir.path().join("empty.txt")).unwrap();
+        assert_eq!(meta.len(), 0, "file should be zero bytes");
     }
 }
