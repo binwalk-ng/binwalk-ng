@@ -142,7 +142,7 @@
 use crate::signatures::SignatureResult;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::fs::{self, File};
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs as unix_fs;
@@ -412,6 +412,73 @@ impl Chroot {
         }
 
         false
+    }
+
+    /// Creates a file for writing in the chrooted directory and returns the opened `File`.
+    ///
+    /// This function ensures parent directories exist and fails (returns `None`)
+    /// if the file already exists.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_extractors_common_rs_417_0() -> Result<(), Box<dyn std::error::Error>> {
+    /// use binwalk_ng::extractors::Chroot;
+    /// use std::io::Write;
+    ///
+    /// let file_name = "writer_test.txt";
+    /// let test_data = b"Hello from create_file_writer!";
+    ///
+    /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let chroot_dir = temp_dir.path();
+    ///
+    /// let chroot = Chroot::new(&chroot_dir);
+    ///
+    /// if let Some(mut file) = chroot.create_file_writer(file_name) {
+    ///     file.write_all(test_data)?;
+    ///     assert_eq!(std::fs::read(chroot_dir.join(file_name))?, test_data);
+    /// } else {
+    ///     panic!("Failed to create file writer");
+    /// }
+    /// # Ok(())
+    /// # } _doctest_main_src_extractors_common_rs_417_0(); }
+    /// ```
+    pub fn create_file_writer(&self, file_path: impl AsRef<Path>) -> Option<File> {
+        let safe_file_path: PathBuf = self.chrooted_path(file_path);
+
+        if self.escapes_via_symlink(&safe_file_path) {
+            error!(
+                "Refusing to create file {}: path traverses a symlink",
+                safe_file_path.display()
+            );
+            return None;
+        }
+
+        // Ensure parent directories exist
+        if let Some(parent) = safe_file_path.parent()
+            && !parent.exists()
+            && let Err(e) = fs::create_dir_all(parent)
+        {
+            error!(
+                "Failed to create parent directories for {}: {}",
+                safe_file_path.display(),
+                e
+            );
+            return None;
+        }
+
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&safe_file_path)
+        {
+            Ok(file) => Some(file),
+            Err(e) => {
+                error!("Failed to create file {}: {}", safe_file_path.display(), e);
+                None
+            }
+        }
     }
 
     /// Carve data and write it to a new file.

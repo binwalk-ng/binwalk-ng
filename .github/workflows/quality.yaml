@@ -61,7 +61,7 @@ jobs:
           target: dev
           push: false
           load: true
-          tags: binwalk:dev
+          tags: binwalk-ng:dev
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -72,7 +72,7 @@ jobs:
             -v "${{ github.workspace }}:/tmp/binwalk" \
             -e CI=true \
             -e INSTA_UPDATE=new \
-            binwalk:dev \
+            binwalk-ng:dev \
             cargo insta test --unreferenced=reject
 
       - name: Upload new snapshots
