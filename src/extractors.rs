@@ -447,6 +447,14 @@ impl Chroot {
     pub fn create_file_writer(&self, file_path: impl AsRef<Path>) -> Option<File> {
         let safe_file_path: PathBuf = self.chrooted_path(file_path);
 
+        if self.escapes_via_symlink(&safe_file_path) {
+            error!(
+                "Refusing to create file {}: path traverses a symlink",
+                safe_file_path.display()
+            );
+            return None;
+        }
+
         // Ensure parent directories exist
         if let Some(parent) = safe_file_path.parent()
             && !parent.exists()
@@ -460,13 +468,11 @@ impl Chroot {
             return None;
         }
 
-        if safe_file_path.exists() {
-            let msg = format!("Path already exists: {}", safe_file_path.display());
-            error!("{}", msg);
-            return None;
-        }
-
-        match File::create(&safe_file_path) {
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&safe_file_path)
+        {
             Ok(file) => Some(file),
             Err(e) => {
                 error!("Failed to create file {}: {}", safe_file_path.display(), e);

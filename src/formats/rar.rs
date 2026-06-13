@@ -109,7 +109,10 @@ pub fn extract_rar(
 ) -> ExtractionResult {
     let mut result = ExtractionResult::default();
 
-    let slice = &file_data[offset..];
+    let Some(slice) = file_data.get(offset..) else {
+        error!("RAR extractor received invalid offset {offset}");
+        return result;
+    };
 
     let archive = match rars::ArchiveReader::read(slice) {
         Ok(arch) => arch,
