@@ -700,56 +700,6 @@ impl Chroot {
         false
     }
 
-    /// Delete a directory in the chroot directory.
-    ///
-    /// Equivalent to rm -rf.
-    ///
-    /// ## Example
-    ///
-    /// ```
-    /// use binwalk_ng::extractors::Chroot;
-    ///
-    /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
-    /// # let temp_dir = tempfile::tempdir().unwrap();
-    /// # let chroot_dir = temp_dir.path();
-    ///
-    /// let dir_name = "my_directory";
-    ///
-    /// let chroot = Chroot::new(&chroot_dir);
-    ///
-    /// assert_eq!(chroot.create_directory(dir_name), true);
-    /// assert_eq!(chroot.remove_directory(dir_name), true);
-    /// assert_eq!(chroot.remove_directory("i_dont_exist"), true);
-    /// ```
-    pub fn remove_directory(&self, dir_path: impl AsRef<Path>) -> bool {
-        let safe_dir_path: PathBuf = self.chrooted_path(dir_path);
-
-        match fs::exists(safe_dir_path.clone()) {
-            Ok(dir_exists) => {
-                if !dir_exists {
-                    return true;
-                }
-            }
-            Err(e) => {
-                error!(
-                    "Failed to check if directory {} exists: {e:?}",
-                    safe_dir_path.display()
-                );
-                return false;
-            }
-        }
-
-        match fs::remove_dir_all(safe_dir_path.clone()) {
-            Ok(_) => return true,
-            Err(e) => error!(
-                "Failed to delete directory {}: {e}",
-                safe_dir_path.display()
-            ),
-        }
-
-        false
-    }
-
     /// Set executable permissions on an existing file in the chroot directory.
     ///
     /// ## Example
@@ -1366,7 +1316,6 @@ fn create_output_directory(
     file_path: impl AsRef<Path>,
     offset: usize,
 ) -> Result<PathBuf, std::io::Error> {
-    let chroot = Chroot::default();
     let file_path = file_path.as_ref();
 
     // Output directory will be: <file_path.extracted/<hex offset>
@@ -1378,14 +1327,10 @@ fn create_output_directory(
         .join(format!("{:X}", offset));
 
     // First, remove the output directory if it exists from a previous run
-    if !chroot.remove_directory(&output_directory) {
-        return Err(std::io::Error::other("Directory deletion failed"));
-    }
+    _ = fs::remove_dir_all(&output_directory);
 
     // Create the output directory, equivalent of mkdir -p
-    if !chroot.create_directory(&output_directory) {
-        return Err(std::io::Error::other("Directory creation failed"));
-    }
+    fs::create_dir_all(&output_directory)?;
 
     Ok(output_directory)
 }
