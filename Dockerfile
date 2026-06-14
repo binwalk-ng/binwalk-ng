@@ -97,7 +97,6 @@ RUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv,target=/bin/uv \
     lz4 \
     lzop \
     unrar \
-    unyaffs \
     zlib1g \
     zlib1g-dev \
     liblz4-1 \
