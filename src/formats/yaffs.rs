@@ -327,6 +327,8 @@ struct YaffsObjectInfo {
     mode: u32,
     /// Packed device numbers (only meaningful for special objects)
     rdev: u32,
+    /// Declared file size in bytes (only meaningful for regular files)
+    file_size: usize,
 }
 
 /// Internal extractor: reconstructs the YAFFS2 file tree directly in Rust (a port of the
@@ -350,6 +352,7 @@ fn extract_yaffs(
 ) -> ExtractionResult {
     const ROOT_OBJECT_ID: u32 = 1;
     const UNUSED_OBJECT_ID: u32 = 0xFFFF_FFFF;
+    const TAG_SEQUENCE_NUMBER: usize = 0;
     const TAG_OBJECT_ID: usize = 4;
     const TAG_CHUNK_ID: usize = 8;
     const TAG_BYTE_COUNT: usize = 12;
@@ -384,10 +387,11 @@ fn extract_yaffs(
     let block_size = page_size + spare_size;
     let chunk_count = image_size / block_size;
 
-    // object id -> parsed header metadata
+    // object id -> parsed header metadata, plus the sequence number it came from
     let mut objects: BTreeMap<u32, YaffsObjectInfo> = BTreeMap::new();
-    // object id -> (chunk id, valid data bytes) for file content chunks
-    let mut file_chunks: BTreeMap<u32, Vec<(u32, Vec<u8>)>> = BTreeMap::new();
+    let mut header_sequence: BTreeMap<u32, u32> = BTreeMap::new();
+    // object id -> (chunk id -> (sequence number, valid data bytes)) for file content
+    let mut file_chunks: BTreeMap<u32, BTreeMap<u32, (u32, Vec<u8>)>> = BTreeMap::new();
 
     for chunk_index in 0..chunk_count {
         let block_offset = chunk_index * block_size;
@@ -398,6 +402,9 @@ fn extract_yaffs(
             break;
         };
 
+        let Some(sequence) = read_u32(spare, TAG_SEQUENCE_NUMBER, endianness) else {
+            continue;
+        };
         let Some(object_id) = read_u32(spare, TAG_OBJECT_ID, endianness) else {
             continue;
         };
@@ -410,10 +417,18 @@ fn extract_yaffs(
             continue;
         }
 
+        // YAFFS is log-structured: superseded pages are left in place, so for each
+        // logical page keep the version with the highest sequence number (ties resolve
+        // to the later physical page, matching how unyaffs replays the image in order).
         if chunk_id == 0 {
             // Object header chunk.
-            if let Some(object) = parse_full_object_header(page, endianness) {
+            let is_newest = match header_sequence.get(&object_id) {
+                Some(&previous) => sequence >= previous,
+                None => true,
+            };
+            if is_newest && let Some(object) = parse_full_object_header(page, endianness) {
                 objects.insert(object_id, object);
+                header_sequence.insert(object_id, sequence);
             }
         } else {
             // File data chunk: only `byte_count` bytes of the page are valid (the final
@@ -421,10 +436,14 @@ fn extract_yaffs(
             let byte_count = read_u32(spare, TAG_BYTE_COUNT, endianness).unwrap_or(0) as usize;
             let valid_len = byte_count.min(page_size);
             if let Some(chunk_bytes) = page.get(..valid_len) {
-                file_chunks
-                    .entry(object_id)
-                    .or_default()
-                    .push((chunk_id, chunk_bytes.to_vec()));
+                let entry = file_chunks.entry(object_id).or_default();
+                let is_newest = match entry.get(&chunk_id) {
+                    Some((previous, _)) => sequence >= *previous,
+                    None => true,
+                };
+                if is_newest {
+                    entry.insert(chunk_id, (sequence, chunk_bytes.to_vec()));
+                }
             }
         }
     }
@@ -451,7 +470,14 @@ fn extract_yaffs(
             continue;
         };
 
-        if write_object(chroot, object_id, &path, &objects, &mut file_chunks) {
+        if write_object(
+            chroot,
+            object_id,
+            &path,
+            &objects,
+            &mut file_chunks,
+            page_size,
+        ) {
             extracted_something = true;
         }
     }
@@ -470,7 +496,8 @@ fn write_object(
     object_id: u32,
     path: &Path,
     objects: &BTreeMap<u32, YaffsObjectInfo>,
-    file_chunks: &mut BTreeMap<u32, Vec<(u32, Vec<u8>)>>,
+    file_chunks: &mut BTreeMap<u32, BTreeMap<u32, (u32, Vec<u8>)>>,
+    page_size: usize,
 ) -> bool {
     // yaffs_obj_type enum values
     const FILE: u32 = 1;
@@ -493,22 +520,68 @@ fn write_object(
         SYMLINK => chroot.create_symlink(path, &object.alias),
         // The Chroot API has no hardlink primitive; represent a hardlink as a symlink to
         // its target object, mirroring how the tarball extractor handles hardlinks.
+        // resolve_object_path returns a path relative to the extraction root, so anchor
+        // it at "/": create_symlink resolves a *relative* target against the symlink's
+        // own parent directory, which would aim a nested hardlink at the wrong place.
         HARDLINK => resolve_object_path(object.equiv_id, objects)
-            .is_some_and(|target| chroot.create_symlink(path, &target)),
+            .is_some_and(|target| chroot.create_symlink(path, Path::new("/").join(target))),
         FILE => {
-            // Concatenate the file's data chunks in chunk-id order.
-            let mut chunks = file_chunks.remove(&object_id).unwrap_or_default();
-            chunks.sort_by_key(|(chunk_id, _)| *chunk_id);
-            let mut contents = Vec::new();
-            for (_, bytes) in chunks {
-                contents.extend_from_slice(&bytes);
-            }
+            let contents =
+                materialize_file(file_chunks.remove(&object_id), object.file_size, page_size);
             chroot.create_file(path, &contents)
         }
         SPECIAL => create_special_file(chroot, path, object),
         // Unknown object type: nothing to write.
         _ => false,
     }
+}
+
+/// Reassemble a regular file's contents by placing each data chunk at its logical offset
+/// `(chunk_id - 1) * page_size`, zero-filling any holes between chunks.
+///
+/// The buffer length is bounded by the data actually present (then truncated to the
+/// declared `file_size` when that is smaller), so a corrupt size field cannot trigger a
+/// huge allocation — mirroring the tarball extractor's "don't trust the header size"
+/// stance while still honoring chunk positions and the partial final page.
+fn materialize_file(
+    chunks: Option<BTreeMap<u32, (u32, Vec<u8>)>>,
+    file_size: usize,
+    page_size: usize,
+) -> Vec<u8> {
+    let chunks = chunks.unwrap_or_default();
+
+    // Furthest byte any present chunk reaches (the final chunk's tag byte count already
+    // encodes the partial last page).
+    let content_end = chunks
+        .iter()
+        .map(|(&chunk_id, (_seq, bytes))| {
+            (chunk_id as usize)
+                .saturating_sub(1)
+                .saturating_mul(page_size)
+                .saturating_add(bytes.len())
+        })
+        .max()
+        .unwrap_or(0);
+
+    // Logical length: the declared size, but never larger than the chunk data supports.
+    let len = if file_size == 0 {
+        content_end
+    } else {
+        file_size.min(content_end)
+    };
+
+    let mut contents = vec![0u8; len];
+    for (chunk_id, (_seq, bytes)) in chunks {
+        let start = (chunk_id as usize)
+            .saturating_sub(1)
+            .saturating_mul(page_size);
+        if start >= len {
+            continue;
+        }
+        let copy_len = bytes.len().min(len - start);
+        contents[start..start + copy_len].copy_from_slice(&bytes[..copy_len]);
+    }
+    contents
 }
 
 /// Create a placeholder for a YAFFS special file (device node / fifo / socket), using the
@@ -535,20 +608,26 @@ fn create_special_file(chroot: &Chroot, path: &Path, object: &YaffsObjectInfo) -
 
 /// Fully parse a YAFFS object header from a header chunk's page data.
 fn parse_full_object_header(page: &[u8], endianness: Endianness) -> Option<YaffsObjectInfo> {
+    const NAME_CHECKSUM_OFFSET: usize = 8;
     const NAME_OFFSET: usize = 10;
     const NAME_MAX_LEN: usize = 256;
     const MODE_OFFSET: usize = 268;
+    const FILE_SIZE_OFFSET: usize = 292;
     const EQUIV_ID_OFFSET: usize = 296;
     const ALIAS_OFFSET: usize = 300;
     const ALIAS_MAX_LEN: usize = 160;
     const RDEV_OFFSET: usize = 460;
     const MAX_OBJ_TYPE: u32 = 5;
+    // The name-checksum field is unused in modern YAFFS images and is set to all-ones.
+    const NAME_CHECKSUM_UNUSED: u16 = 0xFFFF;
 
     let obj_type = read_u32(page, 0, endianness)?;
     let parent_id = read_u32(page, 4, endianness)?;
+    let name_checksum = read_u16(page, NAME_CHECKSUM_OFFSET, endianness)?;
 
-    // Mirror parse_yaffs_obj_header's sanity checks.
-    if obj_type > MAX_OBJ_TYPE || parent_id == 0 {
+    // Mirror parse_yaffs_obj_header's sanity checks, including the unused name-checksum
+    // sentinel, so corrupt pages with chunk id 0 are rejected.
+    if obj_type > MAX_OBJ_TYPE || parent_id == 0 || name_checksum != NAME_CHECKSUM_UNUSED {
         return None;
     }
 
@@ -560,6 +639,7 @@ fn parse_full_object_header(page: &[u8], endianness: Endianness) -> Option<Yaffs
         equiv_id: read_u32(page, EQUIV_ID_OFFSET, endianness).unwrap_or(0),
         mode: read_u32(page, MODE_OFFSET, endianness).unwrap_or(0),
         rdev: read_u32(page, RDEV_OFFSET, endianness).unwrap_or(0),
+        file_size: read_u32(page, FILE_SIZE_OFFSET, endianness).unwrap_or(0) as usize,
     })
 }
 
@@ -601,6 +681,15 @@ fn read_u32(data: &[u8], offset: usize, endianness: Endianness) -> Option<u32> {
     Some(match endianness {
         Endianness::Big => u32::from_be_bytes(bytes),
         Endianness::Little => u32::from_le_bytes(bytes),
+    })
+}
+
+/// Read a little/big-endian `u16` at `offset`, returning `None` if out of bounds.
+fn read_u16(data: &[u8], offset: usize, endianness: Endianness) -> Option<u16> {
+    let bytes: [u8; 2] = data.get(offset..offset + 2)?.try_into().ok()?;
+    Some(match endianness {
+        Endianness::Big => u16::from_be_bytes(bytes),
+        Endianness::Little => u16::from_le_bytes(bytes),
     })
 }
 
@@ -725,6 +814,87 @@ mod tests {
         let result = extract_yaffs(FIXTURE, 0, None);
         assert!(result.success);
         assert_eq!(result.size, Some(IMAGE_SIZE));
+    }
+
+    #[test]
+    fn nested_hardlink_resolves_to_target() {
+        // A regular file in one directory and a hardlink to it from a *different*
+        // directory, to exercise root-relative target resolution.
+        let mut objects = BTreeMap::new();
+        objects.insert(
+            10,
+            YaffsObjectInfo {
+                obj_type: 3,
+                parent_id: 1,
+                name: "d1".to_string(),
+                ..Default::default()
+            },
+        );
+        objects.insert(
+            11,
+            YaffsObjectInfo {
+                obj_type: 1,
+                parent_id: 10,
+                name: "f.txt".to_string(),
+                file_size: 5,
+                ..Default::default()
+            },
+        );
+        objects.insert(
+            12,
+            YaffsObjectInfo {
+                obj_type: 3,
+                parent_id: 1,
+                name: "d2".to_string(),
+                ..Default::default()
+            },
+        );
+        objects.insert(
+            13,
+            YaffsObjectInfo {
+                obj_type: 4,
+                parent_id: 12,
+                name: "link".to_string(),
+                equiv_id: 11,
+                ..Default::default()
+            },
+        );
+
+        let mut file_chunks: BTreeMap<u32, BTreeMap<u32, (u32, Vec<u8>)>> = BTreeMap::new();
+        let mut chunks = BTreeMap::new();
+        chunks.insert(1u32, (4096u32, b"hello".to_vec()));
+        file_chunks.insert(11, chunks);
+
+        let output = tempfile::tempdir().unwrap();
+        let chroot = Chroot::new(output.path());
+
+        for id in [10u32, 11, 12, 13] {
+            let path = resolve_object_path(id, &objects).unwrap();
+            assert!(write_object(
+                &chroot,
+                id,
+                &path,
+                &objects,
+                &mut file_chunks,
+                2048
+            ));
+        }
+
+        // The file extracted correctly...
+        assert_eq!(
+            std::fs::read_to_string(output.path().join("d1").join("f.txt")).unwrap(),
+            "hello"
+        );
+        // ...and the nested hardlink (written as a symlink) resolves back to it rather
+        // than to a path relative to its own directory.
+        let link = output.path().join("d2").join("link");
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(std::fs::read_to_string(&link).unwrap(), "hello");
     }
 
     #[test]
