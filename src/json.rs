@@ -7,10 +7,10 @@ use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
-use crate::binwalk_ng::AnalysisResults;
 use crate::display;
 #[cfg(feature = "entropy-plot")]
 use crate::entropy::FileEntropy;
+use binwalk_ng::AnalysisResults;
 
 const STDOUT: &str = "-";
 const JSON_LIST_START: &str = "[\n";

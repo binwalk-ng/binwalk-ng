@@ -96,7 +96,6 @@ impl Binwalk {
     ///
     /// let binwalker = Binwalk::new();
     /// ```
-    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::configure(None, None, vec![], vec![], None, false).unwrap()
     }
@@ -774,7 +773,6 @@ impl Binwalk {
     /// # Ok(binwalker)
     /// # } _doctest_main_src_binwalk_rs_745_0(); }
     /// ```
-    #[allow(dead_code)]
     pub fn analyze(&self, target_file: impl AsRef<Path>, do_extraction: bool) -> AnalysisResults {
         let file_path = target_file.as_ref();
 

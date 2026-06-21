@@ -1,6 +1,6 @@
-use crate::binwalk_ng::AnalysisResults;
-use crate::extractors;
-use crate::signatures;
+use binwalk_ng::AnalysisResults;
+use binwalk_ng::extractors;
+use binwalk_ng::signatures;
 use colored::ColoredString;
 use colored::Colorize;
 use log::error;

@@ -1,4 +1,5 @@
-use binwalk_ng::AnalysisResults;
+use binwalk_ng::extractors::Chroot;
+use binwalk_ng::{AnalysisResults, common, extractors};
 use clap::Parser;
 use log::{debug, error, info};
 use std::collections::VecDeque;
@@ -12,18 +13,11 @@ use std::thread;
 use std::time;
 use threadpool::ThreadPool;
 
-mod binwalk_ng;
 mod cli_parser;
-mod common;
 mod display;
 #[cfg(feature = "entropy-plot")]
 mod entropy;
-mod extractors;
-mod formats;
 mod json;
-mod magic;
-mod signatures;
-mod structures;
 
 fn main() -> ExitCode {
     // Only use one thread if unable to auto-detect available core info
@@ -60,7 +54,7 @@ fn main() -> ExitCode {
 
     // If --list was specified, just display a list of signatures and return
     if cli_args.list {
-        display::print_signature_list(cli_args.quiet, &magic::patterns());
+        display::print_signature_list(cli_args.quiet, &binwalk_ng::magic::patterns());
         return ExitCode::SUCCESS;
     }
 
@@ -377,7 +371,7 @@ fn carve_file_data_to_disk(
     offset: usize,
     size: usize,
 ) -> bool {
-    let chroot = extractors::Chroot::default();
+    let chroot = Chroot::default();
 
     // Carved file path will be: <source file path>_<offset>_<name>.raw
     let carved_file_path = format!(

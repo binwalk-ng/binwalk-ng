@@ -785,7 +785,6 @@ impl Chroot {
     ///
     /// assert_eq!(chroot.make_executable(file_name), true);
     /// ```
-    #[allow(dead_code)]
     pub fn make_executable(&self, file_path: impl AsRef<Path>) -> bool {
         // Make the file globally executable
         const UNIX_EXEC_FLAG: u32 = 1;

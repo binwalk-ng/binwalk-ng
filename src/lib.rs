@@ -20,7 +20,7 @@ mod binwalk_ng;
 pub mod common;
 pub mod extractors;
 pub mod formats;
-mod magic;
+pub mod magic;
 pub mod signatures;
 pub mod structures;
 pub use binwalk_ng::{AnalysisResults, Binwalk, BinwalkError};
