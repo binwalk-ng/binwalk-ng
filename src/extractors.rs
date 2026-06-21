@@ -492,15 +492,16 @@ impl Chroot {
     /// # } _doctest_main_src_extractors_common_rs_417_0(); }
     /// ```
     pub fn create_file_writer(&self, file_path: impl AsRef<Path>) -> Option<File> {
-        let safe_file_path: PathBuf = self.chrooted_path(file_path);
-
-        if self.escapes_via_symlink(&safe_file_path) {
-            error!(
-                "Refusing to create file {}: path traverses a symlink",
-                safe_file_path.display()
-            );
-            return None;
-        }
+        let safe_file_path: PathBuf = match self.resolve_in_chroot(&file_path, true) {
+            Some(path) => path,
+            None => {
+                error!(
+                    "Refusing to create file {}: path escapes the chroot via a symlink",
+                    file_path.as_ref().display()
+                );
+                return None;
+            }
+        };
 
         // Ensure parent directories exist
         if let Some(parent) = safe_file_path.parent()

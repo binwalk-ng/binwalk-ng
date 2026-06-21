@@ -1,0 +1,12 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 82
+  name: rar
+  confidence: 128
+  description: "RAR archive, version: 5, total size: 82 bytes"
+  always_display: false
+  extraction_declined: false
