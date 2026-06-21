@@ -9,101 +9,38 @@ const TESTFILE_TXT: &[u8] = b"Testing 123\n";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-/// Smoke test for .rar / .cbr files where RAR magic is at offset 0.
 #[track_caller]
 fn smoke_rar(input: &str) {
     common::integration_test("rar", input);
 }
 
-/// Smoke test + content verification for SFX files (RAR at non-zero offset).
-fn smoke_sfx(input: &str) {
+fn run_rar_binwalk(input: &str, output_dir: &Path) -> binwalk_ng::AnalysisResults {
     let path = Path::new("tests").join("inputs").join(input);
-    let output_dir = tempfile::tempdir().unwrap();
-
     let binwalker = Binwalk::configure(
         Some(&path),
-        Some(output_dir.path()),
+        Some(output_dir),
         vec!["rar".to_string()],
         vec![],
         None,
         false,
     )
     .expect("Binwalk initialization failed");
-
-    let results = binwalker.analyze(&binwalker.base_target_file, true);
-
-    assert!(
-        !results.file_map.is_empty(),
-        "SFX '{}': no signatures found",
-        input
-    );
-
-    for ext in results.extractions.values() {
-        assert!(ext.success, "SFX '{}': extraction failed", input);
-    }
-
-    // Verify content for the first successful extraction
-    for ext in results.extractions.values() {
-        if ext.success {
-            let root = &ext.output_directory;
-
-            let p = root.join("testfile.txt");
-            assert!(p.exists(), "SFX '{}': missing testfile.txt", input);
-            assert_eq!(&fs::read(&p).unwrap(), TESTFILE_TXT);
-
-            let p = root.join("acknow.txt");
-            assert!(p.exists(), "SFX '{}': missing acknowledg.txt", input);
-            assert!(
-                !fs::read(&p).unwrap().is_empty(),
-                "SFX '{}': acknowledg.txt is empty",
-                input
-            );
-
-            return;
-        }
-    }
-    panic!("SFX '{}': no successful extraction", input);
+    binwalker.analyze(&binwalker.base_target_file, true)
 }
 
-/// Extract and verify file contents for a RAR archive.
-fn extract_and_check(
-    input: &str,
-    expected: &[(&str, &[u8])],
-    description: &str,
-) {
-    let path = Path::new("tests").join("inputs").join(input);
+fn extract_and_verify(input: &str, checker: impl Fn(&Path)) {
     let output_dir = tempfile::tempdir().unwrap();
+    let results = run_rar_binwalk(input, output_dir.path());
 
-    let binwalker = Binwalk::configure(
-        Some(&path),
-        Some(output_dir.path()),
-        vec!["rar".to_string()],
-        vec![],
-        None,
-        false,
-    )
-    .expect("Binwalk initialization failed");
+    assert!(!results.file_map.is_empty(), "'{}': no signatures", input);
 
-    let results = binwalker.analyze(&binwalker.base_target_file, true);
-
-    assert!(!results.file_map.is_empty(), "{}: no signatures", description);
-
+    let mut any_success = false;
     for ext in results.extractions.values() {
-        assert!(ext.success, "{}: extraction failed", description);
+        assert!(ext.success, "'{}': extraction failed", input);
+        checker(&ext.output_directory);
+        any_success = true;
     }
-
-    for ext in results.extractions.values() {
-        if ext.success {
-            let root = &ext.output_directory;
-            for (name, content) in expected {
-                let p = root.join(name);
-                assert!(p.exists(), "{}: missing '{}'", description, name);
-                assert_eq!(&fs::read(&p).unwrap(), content);
-            }
-            return;
-        }
-    }
-    panic!("{}: no successful extraction", description);
+    assert!(any_success, "'{}': no successful extraction", input);
 }
 
 // ── RAR v3 smoke tests (offset 0) ────────────────────────────────────
@@ -217,71 +154,49 @@ fn sfx_v5_linux() {
     smoke_sfx("testfile.rar5.linux_sfx.bin");
 }
 
+fn smoke_sfx(input: &str) {
+    extract_and_verify(input, |root| {
+        let p = root.join("testfile.txt");
+        assert!(p.exists(), "SFX '{}': missing testfile.txt", input);
+        assert_eq!(&fs::read(&p).unwrap(), TESTFILE_TXT);
+
+        let p = root.join("acknow.txt");
+        assert!(p.exists(), "SFX '{}': missing acknowledg.txt", input);
+        assert!(
+            !fs::read(&p).unwrap().is_empty(),
+            "SFX '{}': acknowledg.txt is empty",
+            input
+        );
+    });
+}
+
 // ── Content-verification for RAR files ────────────────────────────────
 
-#[test]
-fn check_v3_rar() {
-    extract_and_check("testfile.rar3.rar", &[("testfile.txt", TESTFILE_TXT)], "v3.rar");
+macro_rules! check_rar_tests {
+    ($($name:ident => $file:literal,)*) => {
+        $(
+            #[test]
+            fn $name() {
+                extract_and_verify($file, |root| {
+                    let p = root.join("testfile.txt");
+                    assert!(p.exists(), "missing testfile.txt in {}", $file);
+                    assert_eq!(fs::read(&p).unwrap(), TESTFILE_TXT);
+                });
+            }
+        )*
+    }
 }
-#[test]
-fn check_v3_locked_rar() {
-    extract_and_check(
-        "testfile.rar3.locked.rar",
-        &[("testfile.txt", TESTFILE_TXT)],
-        "v3.locked.rar",
-    );
-}
-#[test]
-fn check_v3_solid_rar() {
-    extract_and_check(
-        "testfile.rar3.solid.rar",
-        &[("testfile.txt", TESTFILE_TXT)],
-        "v3.solid.rar",
-    );
-}
-#[test]
-fn check_v3_av_rar() {
-    extract_and_check(
-        "testfile.rar3.av.rar",
-        &[("testfile.txt", TESTFILE_TXT)],
-        "v3.av.rar",
-    );
-}
-#[test]
-fn check_v3_rr_rar() {
-    extract_and_check(
-        "testfile.rar3.rr.rar",
-        &[("testfile.txt", TESTFILE_TXT)],
-        "v3.rr.rar",
-    );
-}
-#[test]
-fn check_v5_rar() {
-    extract_and_check("testfile.rar5.rar", &[("testfile.txt", TESTFILE_TXT)], "v5.rar");
-}
-#[test]
-fn check_v5_locked_rar() {
-    extract_and_check(
-        "testfile.rar5.locked.rar",
-        &[("testfile.txt", TESTFILE_TXT)],
-        "v5.locked.rar",
-    );
-}
-#[test]
-fn check_v5_solid_rar() {
-    extract_and_check(
-        "testfile.rar5.solid.rar",
-        &[("testfile.txt", TESTFILE_TXT)],
-        "v5.solid.rar",
-    );
-}
-#[test]
-fn check_v5_rr_rar() {
-    extract_and_check(
-        "testfile.rar5.rr.rar",
-        &[("testfile.txt", TESTFILE_TXT)],
-        "v5.rr.rar",
-    );
+
+check_rar_tests! {
+    check_v3_rar => "testfile.rar3.rar",
+    check_v3_locked_rar => "testfile.rar3.locked.rar",
+    check_v3_solid_rar => "testfile.rar3.solid.rar",
+    check_v3_av_rar => "testfile.rar3.av.rar",
+    check_v3_rr_rar => "testfile.rar3.rr.rar",
+    check_v5_rar => "testfile.rar5.rar",
+    check_v5_locked_rar => "testfile.rar5.locked.rar",
+    check_v5_solid_rar => "testfile.rar5.solid.rar",
+    check_v5_rr_rar => "testfile.rar5.rr.rar",
 }
 
 // ── Content-verification for CBR files (store images) ────────────────
@@ -289,91 +204,42 @@ fn check_v5_rr_rar() {
 const JPG_SIZE: usize = 220;
 const PNG_SIZE: usize = 87;
 
-#[test]
-fn check_v3_cbr() {
-    extract_and_check_sizes("testfile.rar3.cbr", "v3.cbr");
-}
-#[test]
-fn check_v3_locked_cbr() {
-    extract_and_check_sizes("testfile.rar3.locked.cbr", "v3.locked.cbr");
-}
-#[test]
-fn check_v3_solid_cbr() {
-    extract_and_check_sizes("testfile.rar3.solid.cbr", "v3.solid.cbr");
-}
-#[test]
-fn check_v3_av_cbr() {
-    extract_and_check_sizes("testfile.rar3.av.cbr", "v3.av.cbr");
-}
-#[test]
-fn check_v3_rr_cbr() {
-    extract_and_check_sizes("testfile.rar3.rr.cbr", "v3.rr.cbr");
-}
-#[test]
-fn check_v5_cbr() {
-    extract_and_check_sizes("testfile.rar5.cbr", "v5.cbr");
-}
-#[test]
-fn check_v5_locked_cbr() {
-    extract_and_check_sizes("testfile.rar5.locked.cbr", "v5.locked.cbr");
-}
-#[test]
-fn check_v5_solid_cbr() {
-    extract_and_check_sizes("testfile.rar5.solid.cbr", "v5.solid.cbr");
-}
-#[test]
-fn check_v5_rr_cbr() {
-    extract_and_check_sizes("testfile.rar5.rr.cbr", "v5.rr.cbr");
-}
-
-fn extract_and_check_sizes(input: &str, description: &str) {
-    let path = Path::new("tests").join("inputs").join(input);
-    let output_dir = tempfile::tempdir().unwrap();
-
-    let binwalker = Binwalk::configure(
-        Some(&path),
-        Some(output_dir.path()),
-        vec!["rar".to_string()],
-        vec![],
-        None,
-        false,
-    )
-    .expect("Binwalk initialization failed");
-
-    let results = binwalker.analyze(&binwalker.base_target_file, true);
-
-    assert!(!results.file_map.is_empty(), "{}: no signatures", description);
-
-    for ext in results.extractions.values() {
-        assert!(ext.success, "{}: extraction failed", description);
-    }
-
-    for ext in results.extractions.values() {
-        if ext.success {
-            let root = &ext.output_directory;
-            for (name, expected_size, first_bytes) in &[
-                ("testfile.jpg", JPG_SIZE, &b"\xFF\xD8\xFF\xE0"[..]),
-                ("testfile.png", PNG_SIZE, &[0x89, 0x50, 0x4E, 0x47][..]),
-            ] {
-                let p = root.join(name);
-                assert!(p.exists(), "{}: missing '{}'", description, name);
-                let data = fs::read(&p).unwrap();
-                assert_eq!(
-                    data.len(),
-                    *expected_size,
-                    "{}: '{}' size mismatch",
-                    description,
-                    name
-                );
-                assert!(
-                    data.starts_with(first_bytes),
-                    "{}: '{}' wrong signature",
-                    description,
-                    name
-                );
+macro_rules! check_cbr_tests {
+    ($($name:ident => $file:literal,)*) => {
+        $(
+            #[test]
+            fn $name() {
+                extract_and_verify($file, |root| {
+                    for (name, expected_size, magic) in &[
+                        ("testfile.jpg", JPG_SIZE, &b"\xFF\xD8\xFF\xE0"[..]),
+                        ("testfile.png", PNG_SIZE, &[0x89, 0x50, 0x4E, 0x47][..]),
+                    ] {
+                        let p = root.join(name);
+                        assert!(p.exists(), "missing '{}' in {}", name, $file);
+                        let data = fs::read(&p).unwrap();
+                        assert_eq!(
+                            data.len(), *expected_size,
+                            "'{}' size mismatch in {}", name, $file
+                        );
+                        assert!(
+                            data.starts_with(magic),
+                            "'{}' wrong signature in {}", name, $file
+                        );
+                    }
+                });
             }
-            return;
-        }
+        )*
     }
-    panic!("{}: no successful extraction", description);
+}
+
+check_cbr_tests! {
+    check_v3_cbr => "testfile.rar3.cbr",
+    check_v3_locked_cbr => "testfile.rar3.locked.cbr",
+    check_v3_solid_cbr => "testfile.rar3.solid.cbr",
+    check_v3_av_cbr => "testfile.rar3.av.cbr",
+    check_v3_rr_cbr => "testfile.rar3.rr.cbr",
+    check_v5_cbr => "testfile.rar5.cbr",
+    check_v5_locked_cbr => "testfile.rar5.locked.cbr",
+    check_v5_solid_cbr => "testfile.rar5.solid.cbr",
+    check_v5_rr_cbr => "testfile.rar5.rr.cbr",
 }
