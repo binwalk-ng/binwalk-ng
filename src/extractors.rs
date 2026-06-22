@@ -803,7 +803,7 @@ impl Chroot {
             }
         };
 
-        match fs::create_dir_all(safe_dir_path.clone()) {
+        match fs::create_dir_all(&safe_dir_path) {
             Ok(_) => {
                 return true;
             }

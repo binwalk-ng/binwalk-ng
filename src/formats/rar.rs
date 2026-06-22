@@ -59,13 +59,12 @@ fn get_rar_size(file_data: &[u8], rar_version: usize) -> Result<usize, Signature
         _ => return Err(SignatureError),
     };
 
-    // Need to grep the file for the EOF marker
-    let grep = AhoCorasick::new(eof_marker.clone()).unwrap();
+    let marker_len = eof_marker[0].len();
 
-    // Search the file data for the EOF marker
+    let grep = AhoCorasick::new(eof_marker).unwrap();
+
     if let Some(eof_match) = grep.find_overlapping_iter(file_data).next() {
-        // Accept the first match; total size is the start of the EOF marker plus the size of the EOF marker
-        return Ok(eof_match.start() + eof_marker[0].len());
+        return Ok(eof_match.start() + marker_len);
     }
 
     Err(SignatureError)
@@ -121,7 +120,7 @@ pub fn extract_rar(
     let archive = match rars::ArchiveReader::read(slice) {
         Ok(arch) => arch,
         Err(e) => {
-            eprintln!("Failed to parse RAR archive: {}", e);
+            error!("Failed to parse RAR archive: {}", e);
             return result;
         }
     };
@@ -394,5 +393,31 @@ mod tests {
         let p = dir.path().join("out.txt");
         assert!(p.exists());
         assert_eq!(std::fs::read(&p).unwrap(), b"hello from rar");
+    }
+
+    #[test]
+    fn extract_rar_with_write_v5() {
+        let entries = [rars::rar50::StoredEntry {
+            name: b"out.txt",
+            data: b"hello from rar5",
+            mtime: None,
+            attributes: 0x20,
+            host_os: 3,
+        }];
+        let opts = rars::rar50::WriterOptions::new(
+            rars::ArchiveVersion::Rar50,
+            rars::FeatureSet::store_only(),
+        );
+        let mut bytes = rars::rar50::Rar50Writer::new(opts)
+            .stored_entries(&entries)
+            .finish()
+            .unwrap();
+        bytes.extend_from_slice(RAR5_EOF);
+        let dir = tempfile::tempdir().unwrap();
+        let result = extract_rar(&bytes, 0, Some(dir.path()));
+        assert!(result.success);
+        let p = dir.path().join("out.txt");
+        assert!(p.exists());
+        assert_eq!(std::fs::read(&p).unwrap(), b"hello from rar5");
     }
 }
