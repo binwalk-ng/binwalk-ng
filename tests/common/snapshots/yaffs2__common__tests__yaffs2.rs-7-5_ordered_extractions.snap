@@ -2,8 +2,8 @@
 source: tests/common/mod.rs
 expression: ordered_extractions
 ---
-- size: ~
+- size: 126720
   success: true
-  extractor: unyaffs
+  extractor: yaffs_built_in
   do_not_recurse: false
   output_directory: "[output_directory]"
