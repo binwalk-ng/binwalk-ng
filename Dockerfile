@@ -21,13 +21,11 @@ RUN apt-get update -y \
     tzdata \
     curl \
     git \
-    wget \
     build-essential \
     clang \
     zlib1g \
     zlib1g-dev \
     liblz4-1 \
-    libsrecord-dev \
     liblzma-dev \
     liblzo2-dev \
     libucl-dev \
@@ -100,17 +98,13 @@ RUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv,target=/bin/uv \
     zlib1g \
     zlib1g-dev \
     liblz4-1 \
-    libsrecord-dev \
     liblzma-dev \
     liblzo2-dev \
     libucl-dev \
     liblz4-dev \
     libbz2-dev \
     libssl-dev \
-    libfontconfig1-dev \
     libpython3-dev \
-    cpio \
-    device-tree-compiler \
     clang \
     && dpkg -i /tmp/sasquatch.deb \
     && CC=clang uv pip install --system --break-system-packages uefi_firmware jefferson ubi-reader vmlinux-to-elf \
