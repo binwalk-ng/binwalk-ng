@@ -201,6 +201,7 @@ dependencies = [
  "log",
  "lzfse",
  "md5",
+ "memchr",
  "miniz_oxide 0.9.1",
  "plotly",
  "rars",
