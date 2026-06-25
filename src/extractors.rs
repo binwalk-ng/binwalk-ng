@@ -143,7 +143,7 @@ use crate::signatures::SignatureResult;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
-use std::fs;
+use std::fs::{self, File};
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs as unix_fs;
@@ -461,6 +461,74 @@ impl Chroot {
         false
     }
 
+    /// Creates a file for writing in the chrooted directory and returns the opened `File`.
+    ///
+    /// This function ensures parent directories exist and fails (returns `None`)
+    /// if the file already exists.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_extractors_common_rs_417_0() -> Result<(), Box<dyn std::error::Error>> {
+    /// use binwalk_ng::extractors::Chroot;
+    /// use std::io::Write;
+    ///
+    /// let file_name = "writer_test.txt";
+    /// let test_data = b"Hello from create_file_writer!";
+    ///
+    /// let chroot_dir = std::path::Path::new("tests").join("binwalk_unit_tests");
+    /// # let temp_dir = tempfile::tempdir().unwrap();
+    /// # let chroot_dir = temp_dir.path();
+    ///
+    /// let chroot = Chroot::new(&chroot_dir);
+    ///
+    /// if let Some(mut file) = chroot.create_file_writer(file_name) {
+    ///     file.write_all(test_data)?;
+    ///     assert_eq!(std::fs::read(chroot_dir.join(file_name))?, test_data);
+    /// } else {
+    ///     panic!("Failed to create file writer");
+    /// }
+    /// # Ok(())
+    /// # } _doctest_main_src_extractors_common_rs_417_0(); }
+    /// ```
+    pub fn create_file_writer(&self, file_path: impl AsRef<Path>) -> Option<File> {
+        let safe_file_path: PathBuf = match self.resolve_in_chroot(&file_path, true) {
+            Some(path) => path,
+            None => {
+                error!(
+                    "Refusing to create file {}: path escapes the chroot via a symlink",
+                    file_path.as_ref().display()
+                );
+                return None;
+            }
+        };
+
+        // Ensure parent directories exist
+        if let Some(parent) = safe_file_path.parent()
+            && !parent.exists()
+            && let Err(e) = fs::create_dir_all(parent)
+        {
+            error!(
+                "Failed to create parent directories for {}: {}",
+                safe_file_path.display(),
+                e
+            );
+            return None;
+        }
+
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&safe_file_path)
+        {
+            Ok(file) => Some(file),
+            Err(e) => {
+                error!("Failed to create file {}: {}", safe_file_path.display(), e);
+                None
+            }
+        }
+    }
+
     /// Carve data and write it to a new file.
     ///
     /// ## Example
@@ -735,7 +803,7 @@ impl Chroot {
             }
         };
 
-        match fs::create_dir_all(safe_dir_path.clone()) {
+        match fs::create_dir_all(&safe_dir_path) {
             Ok(_) => {
                 return true;
             }
@@ -1930,5 +1998,154 @@ mod chroot_security_tests {
         assert!(chroot.create_directory("x/y"));
         assert!(chroot.create_file("x/y/z.txt", b"ok"));
         assert_eq!(fs::read(dir.path().join("x/y/z.txt")).unwrap(), b"ok");
+    }
+
+    // ── create_file_writer tests ─────────────────────────────────────
+
+    /// `create_file_writer` returns a writable `File` handle for a simple name.
+    #[test]
+    fn create_file_writer_returns_writable_handle() {
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+        let chroot = Chroot::new(dir.path());
+
+        let mut file = chroot.create_file_writer("hello.txt").expect("should return Some");
+        file.write_all(b"hello world").unwrap();
+        drop(file);
+
+        assert_eq!(fs::read(dir.path().join("hello.txt")).unwrap(), b"hello world");
+    }
+
+    /// `create_file_writer` automatically creates missing parent directories.
+    #[test]
+    fn create_file_writer_creates_parent_dirs() {
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+        let chroot = Chroot::new(dir.path());
+
+        let mut file = chroot
+            .create_file_writer("a/b/c/deep.txt")
+            .expect("should return Some for nested path");
+        file.write_all(b"nested").unwrap();
+        drop(file);
+
+        assert_eq!(
+            fs::read(dir.path().join("a/b/c/deep.txt")).unwrap(),
+            b"nested"
+        );
+    }
+
+    /// `create_file_writer` returns `None` when the file already exists.
+    #[test]
+    fn create_file_writer_fails_if_file_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let chroot = Chroot::new(dir.path());
+
+        // Create the file via the normal helper first.
+        assert!(chroot.create_file("existing.txt", b"first"));
+
+        // A second call must fail (create_new semantics).
+        assert!(chroot.create_file_writer("existing.txt").is_none());
+
+        // The original content is untouched.
+        assert_eq!(fs::read(dir.path().join("existing.txt")).unwrap(), b"first");
+    }
+
+    /// `..` components in the path are clamped at the chroot root, consistent
+    /// with the behaviour of the other write helpers.
+    #[test]
+    fn create_file_writer_clamps_dotdot_path() {
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+        let chroot = Chroot::new(dir.path());
+
+        let mut file = chroot
+            .create_file_writer("../../../escape.txt")
+            .expect("dotdot should be clamped, not refused");
+        file.write_all(b"clamped").unwrap();
+        drop(file);
+
+        // The file must land inside the chroot root, not above it.
+        assert_eq!(fs::read(dir.path().join("escape.txt")).unwrap(), b"clamped");
+        assert!(!dir.path().parent().unwrap().join("escape.txt").exists());
+    }
+
+    /// `create_file_writer` creates distinct files under the same directory
+    /// without interference between calls.
+    #[test]
+    fn create_file_writer_multiple_files_in_same_dir() {
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+        let chroot = Chroot::new(dir.path());
+
+        for name in &["one.txt", "two.txt", "three.txt"] {
+            let mut file = chroot
+                .create_file_writer(name)
+                .unwrap_or_else(|| panic!("should create {name}"));
+            file.write_all(name.as_bytes()).unwrap();
+        }
+
+        for name in &["one.txt", "two.txt", "three.txt"] {
+            assert_eq!(
+                fs::read(dir.path().join(name)).unwrap(),
+                name.as_bytes(),
+                "content mismatch for {name}"
+            );
+        }
+    }
+
+    /// A symlink whose final component points *outside* the chroot is refused
+    /// by `create_file_writer`, matching the behaviour of `create_file`.
+    #[cfg(unix)]
+    #[test]
+    fn create_file_writer_refuses_escaping_symlink() {
+        use std::os::unix::fs::symlink as raw_symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let chroot = Chroot::new(dir.path());
+        let root = &chroot.chroot_directory;
+
+        // Plant a raw symlink that escapes the chroot.
+        assert!(chroot.create_directory("sub"));
+        raw_symlink("../../../outside", root.join("sub/escape")).unwrap();
+
+        // create_file_writer must refuse the path that goes through it.
+        assert!(chroot.create_file_writer("sub/escape/file.txt").is_none());
+
+        // Nothing was written outside the chroot.
+        assert!(!root.parent().unwrap().join("outside").exists());
+    }
+
+    /// A symlink that resolves *inside* the chroot is allowed: `create_file_writer`
+    /// follows it and creates the file at the symlink's real target.
+    #[cfg(unix)]
+    #[test]
+    fn create_file_writer_allows_inside_pointing_symlink() {
+        use std::io::Write;
+        use std::os::unix::fs::symlink as raw_symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let chroot = Chroot::new(dir.path());
+        let root = &chroot.chroot_directory;
+
+        // realdir exists; linkdir is a symlink pointing at it.
+        assert!(chroot.create_directory("realdir"));
+        raw_symlink("realdir", root.join("linkdir")).unwrap();
+
+        let mut file = chroot
+            .create_file_writer("linkdir/via_link.txt")
+            .expect("inside-pointing symlink should be allowed");
+        file.write_all(b"through link").unwrap();
+        drop(file);
+
+        // The data lands at the real location.
+        assert_eq!(
+            fs::read(root.join("realdir/via_link.txt")).unwrap(),
+            b"through link"
+        );
     }
 }
