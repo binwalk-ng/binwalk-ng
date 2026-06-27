@@ -1,15 +1,21 @@
-use crate::extractors;
+use crate::extractors::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::signatures::{CONFIDENCE_MEDIUM, SignatureError, SignatureResult};
 use crate::structures::StructureError;
-use aho_corasick::AhoCorasick;
+
+use log::error;
+use std::io::{self, Write};
+use std::path::Path;
 use zerocopy::{FromBytes, Immutable, KnownLayout, Unaligned};
 
 /// Human readable description
 pub const DESCRIPTION: &str = "RAR archive";
 
-/// RAR magic bytes for both v4 and v5
+/// RAR magic bytes for all versions
 pub fn rar_magic() -> Vec<Vec<u8>> {
-    vec![b"Rar!\x1A\x07".to_vec()]
+    vec![
+        b"RE~^".to_vec(),         // RAR v1.3
+        b"Rar!\x1A\x07".to_vec(), // RAR v1.5/v4/v5
+    ]
 }
 
 /// Validate RAR signature
@@ -43,22 +49,20 @@ pub fn rar_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
     Err(SignatureError)
 }
 
+/// RAR v4 end-of-file marker
+const RAR4_EOF: &[u8] = b"\xC4\x3D\x7B\x00\x40\x07\x00";
+/// RAR v5 end-of-file marker
+const RAR5_EOF: &[u8] = b"\x1d\x77\x56\x51\x03\x05\x04\x00";
+
 /// Determine the size of the RAR file
 fn get_rar_size(file_data: &[u8], rar_version: usize) -> Result<usize, SignatureError> {
-    // EOF markers for Rar v4 and v5
     let eof_marker = match rar_version {
-        4 => vec![b"\xC4\x3D\x7B\x00\x40\x07\x00".to_vec()],
-        5 => vec![b"\x1d\x77\x56\x51\x03\x05\x04\x00".to_vec()],
+        4 => RAR4_EOF,
+        5 => RAR5_EOF,
         _ => return Err(SignatureError),
     };
-
-    // Need to grep the file for the EOF marker
-    let grep = AhoCorasick::new(eof_marker.clone()).unwrap();
-
-    // Search the file data for the EOF marker
-    if let Some(eof_match) = grep.find_overlapping_iter(file_data).next() {
-        // Accept the first match; total size is the start of the EOF marker plus the size of the EOF marker
-        return Ok(eof_match.start() + eof_marker[0].len());
+    if let Some(pos) = memchr::memmem::find(file_data, eof_marker) {
+        return Ok(pos + eof_marker.len());
     }
 
     Err(SignatureError)
@@ -79,6 +83,11 @@ struct RarHeaderBytes {
 
 /// Parse a RAR archive header
 pub fn parse_rar_archive_header(rar_data: &[u8]) -> Result<RarArchiveHeader, StructureError> {
+    // RAR v1.3 uses a different magic (RE~^)
+    if rar_data.starts_with(b"RE~^") {
+        return Ok(RarArchiveHeader { version: 13 });
+    }
+
     let (archive_header, _) =
         RarHeaderBytes::ref_from_prefix(rar_data).map_err(|_| StructureError)?;
 
@@ -92,39 +101,434 @@ pub fn parse_rar_archive_header(rar_data: &[u8]) -> Result<RarArchiveHeader, Str
     Ok(RarArchiveHeader { version })
 }
 
-/// Describes how to run the unrar utility to extract RAR archives
-///
-/// ```
-/// use std::io::ErrorKind;
-/// use std::process::Command;
-/// use binwalk_ng::extractors::ExtractorType;
-/// use binwalk_ng::formats::rar::rar_extractor;
-///
-/// match rar_extractor().utility {
-///     ExtractorType::None => panic!("Invalid extractor type of None"),
-///     ExtractorType::Internal(func) => println!("Internal extractor OK: {:?}", func),
-///     ExtractorType::External(cmd) => {
-///         if let Err(e) = Command::new(&cmd).output() {
-///             if e.kind() == ErrorKind::NotFound {
-///                 panic!("External extractor '{}' not found", cmd);
-///             } else {
-///                 panic!("Failed to execute external extractor '{}': {}", cmd, e);
-///             }
-///         }
-///     }
-/// }
-/// ```
-pub fn rar_extractor() -> extractors::Extractor {
-    extractors::Extractor {
-        utility: extractors::ExtractorType::External("unrar".to_string()),
-        extension: "rar".to_string(),
-        arguments: vec![
-            "x".to_string(),          // Perform extraction
-            "-y".to_string(),         // Answer yes to all questions
-            "-ppassword".to_string(), // Set the password to  'password' for password protected rar files
-            extractors::SOURCE_FILE_PLACEHOLDER.to_string(),
-        ],
-        exit_codes: vec![0],
+pub fn rar_extractor() -> Extractor {
+    Extractor {
+        utility: ExtractorType::Internal(extract_rar),
         ..Default::default()
+    }
+}
+
+pub fn extract_rar(
+    file_data: &[u8],
+    offset: usize,
+    output_directory: Option<&Path>,
+) -> ExtractionResult {
+    let mut result = ExtractionResult::default();
+
+    let Some(slice) = file_data.get(offset..) else {
+        error!("RAR extractor received invalid offset {offset}");
+        return result;
+    };
+
+    let archive = match rars::ArchiveReader::read(slice) {
+        Ok(arch) => arch,
+        Err(e) => {
+            error!("Failed to parse RAR archive: {}", e);
+            return result;
+        }
+    };
+
+    result.success = true;
+    result.size = parse_rar_archive_header(slice)
+        .ok()
+        .and_then(|header| get_rar_size(slice, header.version).ok());
+
+    let Some(chroot) = output_directory.map(Chroot::new) else {
+        return result;
+    };
+
+    let extraction_result = archive.extract_to(None, |meta| {
+        let name = meta.name_lossy();
+
+        if meta.is_directory {
+            if !chroot.create_directory(&name) {
+                result.success = false;
+            }
+            return Ok(Box::new(io::sink()) as Box<dyn Write>);
+        }
+
+        // Create writer for regular file
+        match chroot.create_file_writer(&name) {
+            Some(file) => Ok(Box::new(file) as Box<dyn Write>),
+            None => {
+                result.success = false;
+                error!("Failed to create writer for '{}'", name);
+                // Continue extraction (discard this file's data)
+                Ok(Box::new(io::sink()) as Box<dyn Write>)
+            }
+        }
+    });
+
+    if let Err(e) = extraction_result {
+        error!("RAR extraction error: {}", e);
+        result.success = false;
+    }
+
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_header_v4() {
+        let data = b"Rar!\x1A\x07\x00";
+        let header = parse_rar_archive_header(data).unwrap();
+        assert_eq!(header.version, 4);
+    }
+
+    #[test]
+    fn parse_header_v5() {
+        let data = b"Rar!\x1A\x07\x01";
+        let header = parse_rar_archive_header(data).unwrap();
+        assert_eq!(header.version, 5);
+    }
+
+    #[test]
+    fn parse_header_too_short() {
+        let data = b"Rar!";
+        assert!(parse_rar_archive_header(data).is_err());
+    }
+
+    #[test]
+    fn parse_header_unknown_version() {
+        let data = b"Rar!\x1A\x07\x02";
+        assert!(parse_rar_archive_header(data).is_err());
+    }
+
+    #[test]
+    fn parse_header_rar13() {
+        let data = b"RE~^";
+        let header = parse_rar_archive_header(data).unwrap();
+        assert_eq!(header.version, 13);
+    }
+
+    #[test]
+    fn rar_parser_detects_rar13_at_offset_0() {
+        let entries = [rars::rar13::StoredEntry {
+            name: b"a.txt",
+            data: b"test",
+            file_time: 0,
+            file_attr: 0x20,
+            password: None,
+            file_comment: None,
+        }];
+        let opts = rars::rar13::WriterOptions::new(
+            rars::ArchiveVersion::Rar13,
+            rars::FeatureSet::store_only(),
+        );
+        let bytes = rars::rar13::write_stored_archive(&entries, opts).unwrap();
+        let result = rar_parser(&bytes, 0).unwrap();
+        assert_eq!(result.offset, 0);
+        assert_eq!(result.size, 0);
+        assert!(result.description.contains("version: 13"));
+        assert!(result.description.contains("failed to locate RAR EOF"));
+    }
+
+    #[test]
+    fn rar_parser_detects_rar13_at_non_zero_offset() {
+        let entries = [rars::rar13::StoredEntry {
+            name: b"x.bin",
+            data: b"payload",
+            file_time: 0,
+            file_attr: 0x20,
+            password: None,
+            file_comment: None,
+        }];
+        let opts = rars::rar13::WriterOptions::new(
+            rars::ArchiveVersion::Rar13,
+            rars::FeatureSet::store_only(),
+        );
+        let rar_bytes = rars::rar13::write_stored_archive(&entries, opts).unwrap();
+        let mut container = b"LEADING_JUNK".to_vec();
+        container.extend_from_slice(&rar_bytes);
+        let result = rar_parser(&container, 12).unwrap();
+        assert_eq!(result.offset, 12);
+        assert_eq!(result.size, 0);
+        assert!(result.description.contains("version: 13"));
+        assert!(result.description.contains("failed to locate RAR EOF"));
+    }
+
+    #[test]
+    fn get_rar_size_v4_found() {
+        let mut data = b"Rar!\x1A\x07\x00".to_vec();
+        data.extend_from_slice(b"junk");
+        data.extend_from_slice(RAR4_EOF);
+        let size = get_rar_size(&data, 4).unwrap();
+        assert_eq!(size, data.len());
+    }
+
+    #[test]
+    fn get_rar_size_v5_found() {
+        let mut data = b"Rar!\x1A\x07\x01".to_vec();
+        data.extend_from_slice(b"junk");
+        data.extend_from_slice(RAR5_EOF);
+        let size = get_rar_size(&data, 5).unwrap();
+        assert_eq!(size, data.len());
+    }
+
+    #[test]
+    fn get_rar_size_v4_not_found() {
+        let data = b"Rar!\x1A\x07\x00";
+        assert!(get_rar_size(data, 4).is_err());
+    }
+
+    #[test]
+    fn get_rar_size_v5_not_found() {
+        let data = b"Rar!\x1A\x07\x01";
+        assert!(get_rar_size(data, 5).is_err());
+    }
+
+    #[test]
+    fn get_rar_size_unknown_version() {
+        let data = b"Rar!\x1A\x07\x00";
+        assert!(get_rar_size(data, 42).is_err());
+    }
+
+    #[test]
+    fn rar_parser_rejects_no_magic() {
+        let data = b"not a rar archive at all";
+        assert!(rar_parser(data, 0).is_err());
+    }
+
+    #[test]
+    fn get_rar_size_v4_data_shorter_than_marker() {
+        let data = b"short";
+        assert!(get_rar_size(data, 4).is_err());
+    }
+
+    #[test]
+    fn rar_parser_detects_v4_at_offset_0() {
+        let entries = [rars::rar15_40::StoredEntry {
+            name: b"a.txt",
+            data: b"test",
+            file_time: 0,
+            file_attr: 0x20,
+            host_os: 3,
+            password: None,
+            file_comment: None,
+        }];
+        let opts = rars::rar15_40::WriterOptions::new(
+            rars::ArchiveVersion::Rar29,
+            rars::FeatureSet::store_only(),
+        );
+        let mut bytes = rars::rar15_40::write_stored_archive(&entries, opts).unwrap();
+        bytes.extend_from_slice(RAR4_EOF);
+        let result = rar_parser(&bytes, 0).unwrap();
+        assert_eq!(result.size, bytes.len());
+        assert_eq!(result.confidence, CONFIDENCE_MEDIUM);
+        assert!(result.description.contains("version: 4"));
+    }
+
+    #[test]
+    fn rar_parser_detects_v5_at_offset_0() {
+        let entries = [rars::rar50::StoredEntry {
+            name: b"a.txt",
+            data: b"test",
+            mtime: None,
+            attributes: 0x20,
+            host_os: 3,
+        }];
+        let opts = rars::rar50::WriterOptions::new(
+            rars::ArchiveVersion::Rar50,
+            rars::FeatureSet::store_only(),
+        );
+        let mut bytes = rars::rar50::Rar50Writer::new(opts)
+            .stored_entries(&entries)
+            .finish()
+            .unwrap();
+        bytes.extend_from_slice(RAR5_EOF);
+        let result = rar_parser(&bytes, 0).unwrap();
+        assert_eq!(result.size, bytes.len());
+        assert_eq!(result.confidence, CONFIDENCE_MEDIUM);
+        assert!(result.description.contains("version: 5"));
+    }
+
+    #[test]
+    fn rar_parser_detects_at_non_zero_offset() {
+        let entries = [rars::rar15_40::StoredEntry {
+            name: b"x.bin",
+            data: b"payload",
+            file_time: 0,
+            file_attr: 0x20,
+            host_os: 3,
+            password: None,
+            file_comment: None,
+        }];
+        let opts = rars::rar15_40::WriterOptions::new(
+            rars::ArchiveVersion::Rar29,
+            rars::FeatureSet::store_only(),
+        );
+        let mut rar_bytes = rars::rar15_40::write_stored_archive(&entries, opts).unwrap();
+        rar_bytes.extend_from_slice(RAR4_EOF);
+        let mut container = b"LEADING_JUNK".to_vec();
+        container.extend_from_slice(&rar_bytes);
+        let result = rar_parser(&container, 12).unwrap();
+        assert_eq!(result.offset, 12);
+        assert_eq!(result.size, rar_bytes.len());
+    }
+
+    #[test]
+    fn extract_rar_dry_run_v4() {
+        let entries = [rars::rar15_40::StoredEntry {
+            name: b"dry.txt",
+            data: b"dry run data",
+            file_time: 0,
+            file_attr: 0x20,
+            host_os: 3,
+            password: None,
+            file_comment: None,
+        }];
+        let opts = rars::rar15_40::WriterOptions::new(
+            rars::ArchiveVersion::Rar29,
+            rars::FeatureSet::store_only(),
+        );
+        let mut bytes = rars::rar15_40::write_stored_archive(&entries, opts).unwrap();
+        bytes.extend_from_slice(RAR4_EOF);
+        let result = extract_rar(&bytes, 0, None);
+        assert!(result.success);
+        assert_eq!(result.size, Some(bytes.len()));
+    }
+
+    #[test]
+    fn extract_rar_dry_run_v5() {
+        let entries = [rars::rar50::StoredEntry {
+            name: b"dry.txt",
+            data: b"dry run data",
+            mtime: None,
+            attributes: 0x20,
+            host_os: 3,
+        }];
+        let opts = rars::rar50::WriterOptions::new(
+            rars::ArchiveVersion::Rar50,
+            rars::FeatureSet::store_only(),
+        );
+        let mut bytes = rars::rar50::Rar50Writer::new(opts)
+            .stored_entries(&entries)
+            .finish()
+            .unwrap();
+        bytes.extend_from_slice(RAR5_EOF);
+        let result = extract_rar(&bytes, 0, None);
+        assert!(result.success);
+        assert_eq!(result.size, Some(bytes.len()));
+    }
+
+    #[test]
+    fn extract_rar_dry_run_rar13() {
+        let entries = [rars::rar13::StoredEntry {
+            name: b"dry.txt",
+            data: b"dry run data",
+            file_time: 0,
+            file_attr: 0x20,
+            password: None,
+            file_comment: None,
+        }];
+        let opts = rars::rar13::WriterOptions::new(
+            rars::ArchiveVersion::Rar13,
+            rars::FeatureSet::store_only(),
+        );
+        let bytes = rars::rar13::write_stored_archive(&entries, opts).unwrap();
+        let result = extract_rar(&bytes, 0, None);
+        assert!(result.success);
+        assert_eq!(result.size, None);
+    }
+
+    #[test]
+    fn extract_rar_with_write_rar13() {
+        let entries = [rars::rar13::StoredEntry {
+            name: b"out.txt",
+            data: b"hello from rar13",
+            file_time: 0,
+            file_attr: 0x20,
+            password: None,
+            file_comment: None,
+        }];
+        let opts = rars::rar13::WriterOptions::new(
+            rars::ArchiveVersion::Rar13,
+            rars::FeatureSet::store_only(),
+        );
+        let bytes = rars::rar13::write_stored_archive(&entries, opts).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let result = extract_rar(&bytes, 0, Some(dir.path()));
+        assert!(result.success);
+        let p = dir.path().join("out.txt");
+        assert!(p.exists());
+        assert_eq!(std::fs::read(&p).unwrap(), b"hello from rar13");
+    }
+
+    #[test]
+    fn extract_rar_invalid_offset() {
+        let data = b"short";
+        let result = extract_rar(data, 100, None);
+        assert!(!result.success);
+        assert_eq!(result.size, None);
+    }
+
+    #[test]
+    fn extract_rar_truncated_data() {
+        let data = b"Rar!\x1A\x07\x00";
+        let dir = tempfile::tempdir().unwrap();
+        let result = extract_rar(data, 0, Some(dir.path()));
+        assert!(!result.success);
+    }
+
+    #[test]
+    fn extract_rar_truncated_rar13() {
+        let data = b"RE~^";
+        let dir = tempfile::tempdir().unwrap();
+        let result = extract_rar(data, 0, Some(dir.path()));
+        assert!(!result.success);
+    }
+
+    #[test]
+    fn extract_rar_with_write_v4() {
+        let entries = [rars::rar15_40::StoredEntry {
+            name: b"out.txt",
+            data: b"hello from rar",
+            file_time: 0,
+            file_attr: 0x20,
+            host_os: 3,
+            password: None,
+            file_comment: None,
+        }];
+        let opts = rars::rar15_40::WriterOptions::new(
+            rars::ArchiveVersion::Rar29,
+            rars::FeatureSet::store_only(),
+        );
+        let mut bytes = rars::rar15_40::write_stored_archive(&entries, opts).unwrap();
+        bytes.extend_from_slice(RAR4_EOF);
+        let dir = tempfile::tempdir().unwrap();
+        let result = extract_rar(&bytes, 0, Some(dir.path()));
+        assert!(result.success);
+        let p = dir.path().join("out.txt");
+        assert!(p.exists());
+        assert_eq!(std::fs::read(&p).unwrap(), b"hello from rar");
+    }
+
+    #[test]
+    fn extract_rar_with_write_v5() {
+        let entries = [rars::rar50::StoredEntry {
+            name: b"out.txt",
+            data: b"hello from rar5",
+            mtime: None,
+            attributes: 0x20,
+            host_os: 3,
+        }];
+        let opts = rars::rar50::WriterOptions::new(
+            rars::ArchiveVersion::Rar50,
+            rars::FeatureSet::store_only(),
+        );
+        let mut bytes = rars::rar50::Rar50Writer::new(opts)
+            .stored_entries(&entries)
+            .finish()
+            .unwrap();
+        bytes.extend_from_slice(RAR5_EOF);
+        let dir = tempfile::tempdir().unwrap();
+        let result = extract_rar(&bytes, 0, Some(dir.path()));
+        assert!(result.success);
+        let p = dir.path().join("out.txt");
+        assert!(p.exists());
+        assert_eq!(std::fs::read(&p).unwrap(), b"hello from rar5");
     }
 }
