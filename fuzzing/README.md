@@ -9,7 +9,7 @@ At the moment code coverage is not 100% complete, but exercises the file parsing
 You must have a C compiler and `make` installed, as well as the `cargo-afl` crate:
 
 ```
-sudo apt install build-essentials
+sudo apt install build-essential
 cargo install cargo-afl
 ```
 
