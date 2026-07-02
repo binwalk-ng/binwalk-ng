@@ -2,16 +2,18 @@ use binwalk_ng::extractors::Chroot;
 use binwalk_ng::{AnalysisResults, common, extractors};
 use clap::Parser;
 use log::{debug, error, info};
+use rayon::ThreadPool;
 use std::collections::VecDeque;
 use std::panic;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process;
 use std::process::ExitCode;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time;
-use threadpool::ThreadPool;
 
 mod cli_parser;
 mod display;
@@ -34,10 +36,8 @@ fn main() -> ExitCode {
     let mut output_directory: Option<PathBuf> = None;
 
     /*
-     * Maintain a queue of files waiting to be analyzed.
-     * Note that ThreadPool has its own internal queue so this may seem redundant, however,
-     * queuing a large number of jobs via the ThreadPool queue results in *massive* amounts
-     * of unnecessary memory consumption, especially when recursively analyzing many files.
+     * Queue of files waiting to be analyzed.
+     * Grows when matryoshka mode discovers nested files in extraction results.
      */
     let mut target_files = VecDeque::new();
 
@@ -139,7 +139,17 @@ fn main() -> ExitCode {
 
     // Initialize thread pool
     debug!("Initializing thread pool with {available_workers} workers");
-    let workers = ThreadPool::new(available_workers);
+    let workers = match rayon::ThreadPoolBuilder::new()
+        .num_threads(available_workers)
+        .build()
+    {
+        Ok(pool) => pool,
+        Err(e) => {
+            error!("Failed to create thread pool with {available_workers} workers: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let pending = Arc::new(AtomicUsize::new(0));
     let (worker_tx, worker_rx) = mpsc::channel();
 
     /*
@@ -165,15 +175,9 @@ fn main() -> ExitCode {
      * Main loop.
      * Loop until all pending thread jobs are complete and there are no more files in the queue.
      */
-    while !target_files.is_empty() || workers.active_count() > 0 {
-        // If there are files waiting to be analyzed and there is at least one free thread in the pool
-        if !target_files.is_empty() && workers.active_count() < workers.max_count() {
-            // Get the next file path from the target_files queue
-            let target_file = target_files
-                .pop_front()
-                .expect("Failed to retrieve next file from the queue");
-
-            // Spawn a new worker for the new file
+    loop {
+        // Drain any queued files into the thread pool
+        while let Some(target_file) = target_files.pop_front() {
             spawn_worker(
                 &workers,
                 binwalker.clone(),
@@ -181,6 +185,7 @@ fn main() -> ExitCode {
                 cli_args.extract,
                 cli_args.carve,
                 worker_tx.clone(),
+                pending.clone(),
             );
         }
 
@@ -193,45 +198,44 @@ fn main() -> ExitCode {
         // Some debug info on analysis progress
         if last_progress_interval.elapsed().as_secs() >= PROGRESS_INTERVAL {
             info!(
-                "Status: active worker threads: {}/{}, files waiting in queue: {}",
-                workers.active_count(),
-                workers.max_count(),
+                "Status: pending tasks: {}/{}, files waiting in queue: {}",
+                pending.load(Ordering::Acquire),
+                available_workers,
                 target_files.len()
             );
             last_progress_interval = time::Instant::now();
         }
 
-        // Get response from a worker thread, if any
-        if let Ok(results) = worker_rx.try_recv() {
-            // Keep a tally of how many files have been analyzed
-            file_count += 1;
+        // Drain all available results from the channel
+        while let Ok(results) = worker_rx.try_recv() {
+            process_analysis_results(
+                results,
+                &mut file_count,
+                &mut json_logger,
+                cli_args.verbose,
+                cli_args.quiet,
+                cli_args.extract,
+                cli_args.matryoshka,
+                &mut target_files,
+            );
+        }
 
-            // Log analysis results to JSON file
-            json_logger.log(json::JSONType::Analysis(results.clone()));
-
-            // Nothing found? Nothing else to do for this file.
-            if results.file_map.is_empty() {
-                debug!("Found no results for file {}", results.file_path.display());
-                continue;
-            }
-
-            // Print analysis results to screen
-            if should_display(&results, file_count, cli_args.verbose) {
-                display::print_analysis_results(cli_args.quiet, cli_args.extract, &results);
-            }
-
-            // If running recursively, add extraction results to list of files to analyze
-            if cli_args.matryoshka {
-                for (_signature_id, extraction_result) in results.extractions.into_iter() {
-                    if !extraction_result.do_not_recurse {
-                        for file_path in
-                            extractors::get_extracted_files(&extraction_result.output_directory)
-                        {
-                            debug!("Queuing {} for analysis", file_path.display());
-                            target_files.push_back(file_path);
-                        }
-                    }
+        // Exit only when no work remains and the channel is truly empty
+        if pending.load(Ordering::Acquire) == 0 && target_files.is_empty() {
+            match worker_rx.try_recv() {
+                Ok(results) => {
+                    process_analysis_results(
+                        results,
+                        &mut file_count,
+                        &mut json_logger,
+                        cli_args.verbose,
+                        cli_args.quiet,
+                        cli_args.extract,
+                        cli_args.matryoshka,
+                        &mut target_files,
+                    );
                 }
+                Err(_) => break,
             }
         }
     }
@@ -282,6 +286,43 @@ fn should_display(results: &AnalysisResults, file_count: usize, verbose: bool) -
     false
 }
 
+/// Process analysis results from a worker: log, display, and queue nested files.
+fn process_analysis_results(
+    results: AnalysisResults,
+    file_count: &mut usize,
+    json_logger: &mut json::JsonLogger,
+    verbose: bool,
+    quiet: bool,
+    do_extract: bool,
+    matryoshka: bool,
+    target_files: &mut VecDeque<PathBuf>,
+) {
+    *file_count += 1;
+    json_logger.log(json::JSONType::Analysis(results.clone()));
+
+    if results.file_map.is_empty() {
+        debug!("Found no results for file {}", results.file_path.display());
+        return;
+    }
+
+    if should_display(&results, *file_count, verbose) {
+        display::print_analysis_results(quiet, do_extract, &results);
+    }
+
+    if matryoshka {
+        for (_signature_id, extraction_result) in results.extractions.into_iter() {
+            if !extraction_result.do_not_recurse {
+                for file_path in
+                    extractors::get_extracted_files(&extraction_result.output_directory)
+                {
+                    debug!("Queuing {} for analysis", file_path.display());
+                    target_files.push_back(file_path);
+                }
+            }
+        }
+    }
+}
+
 /// Spawn a worker thread to analyze a file
 fn spawn_worker(
     pool: &ThreadPool,
@@ -290,9 +331,11 @@ fn spawn_worker(
     do_extraction: bool,
     do_carve: bool,
     worker_tx: mpsc::Sender<AnalysisResults>,
+    pending: Arc<AtomicUsize>,
 ) {
     let target_file = target_file.as_ref().to_path_buf();
-    pool.execute(move || {
+    pending.fetch_add(1, Ordering::Release);
+    pool.spawn(move || {
         // Read in file data
         let file_data = common::read_file(&target_file).unwrap_or_else(|_| {
             error!("Failed to read {} data", target_file.display());
@@ -318,6 +361,8 @@ fn spawn_worker(
                 target_file.display()
             );
         }
+
+        pending.fetch_sub(1, Ordering::Release);
     });
 }
 
