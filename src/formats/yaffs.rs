@@ -55,7 +55,7 @@ pub fn yaffs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
                 {
                     result.size = image_size;
                     result.description = format!(
-                        "{}, {} endian, page size: {}, spare size: {}, image size: {} bytes",
+                        "{}, {}, page size: {}, spare size: {}, image size: {} bytes",
                         result.description, endianness, page_size, spare_size, image_size
                     );
                     return Ok(result);
