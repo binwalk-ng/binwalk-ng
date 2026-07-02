@@ -46,8 +46,21 @@ fn main() -> ExitCode {
     let run_time = time::Instant::now();
     let mut last_progress_interval = time::Instant::now();
 
-    // Initialize logging
-    env_logger::init();
+    // Initialize logging with local timezone timestamps
+    env_logger::Builder::from_env(env_logger::Env::default())
+        .format(|buf, record| {
+            use std::io::Write;
+            let timestamp = jiff::Zoned::now().strftime("%Y-%m-%dT%H:%M:%S%:z");
+            writeln!(
+                buf,
+                "[{} {} {}] {}",
+                timestamp,
+                record.level(),
+                record.target(),
+                record.args()
+            )
+        })
+        .init();
 
     // Process command line arguments
     let cli_args = cli_parser::CliArgs::parse();
