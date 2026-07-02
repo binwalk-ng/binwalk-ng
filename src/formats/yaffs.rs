@@ -47,7 +47,7 @@ pub fn yaffs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
 
         // Determine the page
         if let Ok(page_size) = get_page_size(&file_data[offset..]) {
-            // Deterine the chunk size
+            // Determine the chunk size
             if let Ok(spare_size) = get_spare_size(&file_data[offset..], page_size, endianness) {
                 // Get the total image size
                 if let Ok(image_size) =

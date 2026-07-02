@@ -86,6 +86,6 @@ name = "binwalk"
 path = "src/main.rs"
 
 [dev-dependencies]
-tempfile = "3.25.0"
-insta = { version = "1.47", features = ["yaml", "redactions"] }
+tempfile = "3.27.0"
+insta = { version = "1.48", features = ["yaml", "redactions"] }
 walkdir = "2.5.0"
