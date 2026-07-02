@@ -7,7 +7,6 @@ ARG SASQUATCH_FILENAME="sasquatch_1.0.deb"
 ARG SASQUATCH_BASE_FILE_URL="https://github.com/onekey-sec/sasquatch/releases/download/sasquatch-v4.5.1-6/"
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=Etc/UTC
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 
@@ -66,7 +65,6 @@ ARG DEFAULT_WORKING_DIR="/analysis"
 ARG SASQUATCH_FILENAME="sasquatch_1.0.deb"
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=Etc/UTC
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 
