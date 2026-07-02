@@ -2,30 +2,21 @@
 # Install dependencies from source.
 # Requires that git and build tools (make, gcc, etc) are already installed.
 
+BUILD_DIR=$(mktemp -d)
+trap 'rm -rf "$BUILD_DIR"' EXIT
+
 # Install dumpifs
-cd /tmp
-git clone https://github.com/askac/dumpifs.git
-cd /tmp/dumpifs
-make dumpifs
-cp ./dumpifs /usr/local/bin/dumpifs
-cd /tmp
-rm -rf /tmp/dumpifs
+git -C "$BUILD_DIR" clone https://github.com/askac/dumpifs.git
+make -C "$BUILD_DIR/dumpifs" dumpifs
+cp "$BUILD_DIR/dumpifs/dumpifs" /usr/local/bin/dumpifs
 
 
 # Install LZFSE utility and library
-cd /tmp
-git clone https://github.com/lzfse/lzfse.git
-cd /tmp/lzfse
-make install
-cd /tmp
-rm -rf /tmp/lzfse
+git -C "$BUILD_DIR" clone https://github.com/lzfse/lzfse.git
+make -C "$BUILD_DIR/lzfse" install
 
 
 # Install dmg2img with LZFSE support
-cd /tmp
-git clone https://github.com/Lekensteyn/dmg2img.git
-cd /tmp/dmg2img
-make dmg2img HAVE_LZFSE=1
-make install
-cd /tmp
-rm -rf /tmp/dmg2img
+git -C "$BUILD_DIR" clone https://github.com/Lekensteyn/dmg2img.git
+make -C "$BUILD_DIR/dmg2img" dmg2img HAVE_LZFSE=1
+make -C "$BUILD_DIR/dmg2img" install
