@@ -316,15 +316,14 @@ fn process_analysis_results(
     }
 
     if flags.matryoshka {
-        for (_signature_id, extraction_result) in results.extractions.into_iter() {
-            if !extraction_result.do_not_recurse {
-                for file_path in
-                    extractors::get_extracted_files(&extraction_result.output_directory)
-                {
-                    debug!("Queuing {} for analysis", file_path.display());
-                    target_files.push_back(file_path);
-                }
-            }
+        for r in results
+            .extractions
+            .into_values()
+            .filter(|r| !r.do_not_recurse)
+        {
+            let files = extractors::get_extracted_files(&r.output_directory);
+            debug!("Queuing {} files for analysis", files.len());
+            target_files.extend(files);
         }
     }
 }
