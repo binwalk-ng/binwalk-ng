@@ -171,6 +171,13 @@ fn main() -> ExitCode {
     // Queue the initial file path
     target_files.push_back(binwalker.base_target_file.clone());
 
+    let flags = AnalysisFlags {
+        verbose: cli_args.verbose,
+        quiet: cli_args.quiet,
+        do_extract: cli_args.extract,
+        matryoshka: cli_args.matryoshka,
+    };
+
     /*
      * Main loop.
      * Loop until all pending thread jobs are complete and there are no more files in the queue.
@@ -212,10 +219,7 @@ fn main() -> ExitCode {
                 results,
                 &mut file_count,
                 &mut json_logger,
-                cli_args.verbose,
-                cli_args.quiet,
-                cli_args.extract,
-                cli_args.matryoshka,
+                flags,
                 &mut target_files,
             );
         }
@@ -228,10 +232,7 @@ fn main() -> ExitCode {
                         results,
                         &mut file_count,
                         &mut json_logger,
-                        cli_args.verbose,
-                        cli_args.quiet,
-                        cli_args.extract,
-                        cli_args.matryoshka,
+                        flags,
                         &mut target_files,
                     );
                 }
@@ -286,15 +287,20 @@ fn should_display(results: &AnalysisResults, file_count: usize, verbose: bool) -
     false
 }
 
+#[derive(Clone, Copy)]
+struct AnalysisFlags {
+    verbose: bool,
+    quiet: bool,
+    do_extract: bool,
+    matryoshka: bool,
+}
+
 /// Process analysis results from a worker: log, display, and queue nested files.
 fn process_analysis_results(
     results: AnalysisResults,
     file_count: &mut usize,
     json_logger: &mut json::JsonLogger,
-    verbose: bool,
-    quiet: bool,
-    do_extract: bool,
-    matryoshka: bool,
+    flags: AnalysisFlags,
     target_files: &mut VecDeque<PathBuf>,
 ) {
     *file_count += 1;
@@ -305,11 +311,11 @@ fn process_analysis_results(
         return;
     }
 
-    if should_display(&results, *file_count, verbose) {
-        display::print_analysis_results(quiet, do_extract, &results);
+    if should_display(&results, *file_count, flags.verbose) {
+        display::print_analysis_results(flags.quiet, flags.do_extract, &results);
     }
 
-    if matryoshka {
+    if flags.matryoshka {
         for (_signature_id, extraction_result) in results.extractions.into_iter() {
             if !extraction_result.do_not_recurse {
                 for file_path in
