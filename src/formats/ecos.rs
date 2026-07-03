@@ -1,4 +1,7 @@
-use crate::signatures::{CONFIDENCE_LOW, SignatureError, SignatureResult};
+use crate::{
+    signatures::{CONFIDENCE_LOW, SignatureError, SignatureResult},
+    structures::Endianness,
+};
 
 /// Human readable description
 pub const EXCEPTION_HANDLER_DESCRIPTION: &str = "eCos kernel exception handler";
@@ -39,11 +42,11 @@ pub fn exception_handler_parser(
     };
 
     let endianness = if file_data[offset] == 0 {
-        "little"
+        Endianness::Little
     } else {
-        "big"
+        Endianness::Big
     };
 
-    result.description = format!("{}, MIPS {} endian", result.description, endianness);
+    result.description = format!("{}, MIPS {}", result.description, endianness);
     Ok(result)
 }

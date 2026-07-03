@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::io;
 use std::io::Write;
 use std::time;
+use terminal_size::Width;
 
 const DELIM_CHARACTER: &str = "-";
 const DEFAULT_TERMINAL_WIDTH: u16 = 200;
@@ -16,7 +17,7 @@ const COLUMN1_WIDTH: usize = 35;
 const COLUMN2_WIDTH: usize = 35;
 
 fn terminal_width() -> usize {
-    termsize::get().map_or(DEFAULT_TERMINAL_WIDTH, |ts| ts.cols) as usize
+    terminal_size::terminal_size().map_or(DEFAULT_TERMINAL_WIDTH, |(Width(w), _)| w) as usize
 }
 
 fn line_delimiter() -> String {

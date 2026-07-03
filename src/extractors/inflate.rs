@@ -1,5 +1,5 @@
 use crate::extractors::Chroot;
-use adler32::RollingAdler32;
+use adler2::Adler32;
 use flate2::bufread::DeflateDecoder;
 use std::{io::Read, path::Path};
 
@@ -24,7 +24,7 @@ pub fn inflate_decompressor(
 
     let mut result = DeflateResult::default();
 
-    let mut adler32_checksum = RollingAdler32::new();
+    let mut adler32_checksum = Adler32::new();
     let mut decompressed_buffer = [0; BLOCK_SIZE];
     let mut decompressor = DeflateDecoder::new(&file_data[offset..]);
 
@@ -48,7 +48,7 @@ pub fn inflate_decompressor(
             Ok(n) => {
                 // Decompressed a block of data, update checksum and if extraction was requested write the decompressed block to the output file
                 if n > 0 {
-                    adler32_checksum.update_buffer(&decompressed_buffer[0..n]);
+                    adler32_checksum.write_slice(&decompressed_buffer[0..n]);
 
                     if let Some(output_directory) = output_directory {
                         let chroot = Chroot::new(output_directory);
@@ -64,7 +64,7 @@ pub fn inflate_decompressor(
                     // If some data was actually decompressed, report success and the number of input bytes consumed
                     if decompressor.total_out() > 0 {
                         result.success = true;
-                        result.adler32 = adler32_checksum.hash();
+                        result.adler32 = adler32_checksum.checksum();
                         result.size = decompressor.total_in() as usize;
                     }
 

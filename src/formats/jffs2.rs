@@ -2,7 +2,7 @@ use crate::extractors;
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
 use crate::structures::{Endianness, StructureError, dyn_endian};
 use aho_corasick::AhoCorasick;
-use crc32_v2;
+use crc32fast::Hasher;
 use zerocopy::{FromBytes, Immutable, KnownLayout, Unaligned};
 
 /// Human readable description
@@ -98,7 +98,7 @@ pub fn jffs2_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
             if node_count > MIN_VALID_NODE_COUNT {
                 result.size = jffs2_eof - result.offset;
                 result.description = format!(
-                    "{}, {} endian, nodes: {}, total size: {} bytes",
+                    "{}, {}, nodes: {}, total size: {} bytes",
                     result.description, first_node_header.endianness, node_count, result.size
                 );
                 return Ok(result);
@@ -172,7 +172,9 @@ pub fn parse_jffs2_node_header(node_data: &[u8]) -> Result<JFFS2Node, StructureE
 
 /// CRC calculation for JFFS
 fn jffs2_node_crc(file_data: &[u8]) -> u32 {
-    crc32_v2::crc32(0xFFFFFFFF, file_data) ^ 0xFFFFFFFF
+    let mut hasher = Hasher::new_with_initial(0xFFFFFFFF);
+    hasher.update(file_data);
+    hasher.finalize() ^ 0xFFFFFFFF
 }
 
 /// Describes how to run the jefferson utility to extract JFFS file systems

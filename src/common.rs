@@ -48,7 +48,7 @@ pub fn read_file(file: impl AsRef<Path>) -> Result<Vec<u8>, std::io::Error> {
 /// assert_eq!(my_data_crc, 0xDB1720A5);
 /// ```
 pub fn crc32(data: &[u8]) -> u32 {
-    crc32_v2::crc32(0, data)
+    crc32fast::hash(data)
 }
 
 /// Converts an epoch time to a formatted time string.

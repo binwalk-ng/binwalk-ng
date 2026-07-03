@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # Use the full path or ensure the binary is reachable
-CMD="./target/release/binwalk $@"
+CMD=(./target/release/binwalk "$@")
+QUOTED_CMD="${CMD[*]@Q}"
 
 # If no RUST_LOG level is defined, default to `info`
 if [[ -z "${RUST_LOG}" ]]; then
@@ -27,7 +28,7 @@ TTY=$(tmux display-message -t "$BOTTOM_PANE" -p "#{pane_tty}")
 # Send the command to the TOP pane, redirecting stderr to the BOTTOM pane's TTY
 # Added a 'clear' to make sure the prompt is visible
 tmux send-keys -t "$TOP_PANE" "clear" C-m
-tmux send-keys -t "$TOP_PANE" "$CMD 2> $TTY" C-m
+tmux send-keys -t "$TOP_PANE" "$QUOTED_CMD 2> $TTY" C-m
 
 # Attach
 tmux attach-session -t binwalk_split
