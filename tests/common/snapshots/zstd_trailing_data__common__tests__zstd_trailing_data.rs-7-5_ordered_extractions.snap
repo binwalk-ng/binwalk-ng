@@ -1,0 +1,10 @@
+---
+source: tests/common/mod.rs
+assertion_line: 49
+expression: ordered_extractions
+---
+- size: 300019
+  success: true
+  extractor: zstd_built_in
+  do_not_recurse: false
+  output_directory: "[output_directory]"
