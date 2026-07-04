@@ -276,26 +276,19 @@ fn zstd_decompress(
     const OUTPUT_FILE_NAME: &str = "decompressed.bin";
     let mut result = ExtractionResult::default();
 
-    let data = &file_data[offset..];
-    let cursor = std::io::Cursor::new(data);
+    let Some(data) = file_data.get(offset..) else {
+        return result;
+    };
 
-    match zstd::stream::Decoder::new(cursor) {
+    match zstd::stream::Decoder::with_buffer(data) {
         Ok(mut decoder) => {
             let mut decompressed = Vec::new();
             match decoder.read_to_end(&mut decompressed) {
                 Ok(0) => debug!("ZSTD decompression produced no output"),
                 Ok(_) => {
                     result.success = true;
-
-                    // Determine the exact number of compressed bytes consumed.
-                    // zstd::Decoder wraps the reader in a BufReader, which may have
-                    // read-ahead buffered data. Subtract the unconsumed buffer bytes
-                    // from the total bytes read from the cursor.
-                    let buf_reader = decoder.get_ref();
-                    let remaining = buf_reader.buffer().len();
-                    let cursor = buf_reader.get_ref();
-                    result.size = Some(cursor.position() as usize - remaining);
-
+                    let remaining = decoder.finish();
+                    result.size = Some(data.len() - remaining.len());
                     if let Some(output_directory) = output_directory {
                         let chroot = Chroot::new(output_directory);
                         result.success = chroot.create_file(OUTPUT_FILE_NAME, &decompressed);

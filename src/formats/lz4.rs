@@ -262,17 +262,18 @@ fn lz4_decompress(
     const OUTPUT_FILE_NAME: &str = "decompressed.bin";
     let mut result = ExtractionResult::default();
 
-    let data = &file_data[offset..];
-    let cursor = std::io::Cursor::new(data);
-    let mut decoder = FrameDecoder::new(cursor);
+    let Some(data) = file_data.get(offset..) else {
+        return result;
+    };
+    let mut decoder = FrameDecoder::new(data);
     let mut decompressed = Vec::new();
 
     match decoder.read_to_end(&mut decompressed) {
         Ok(0) => debug!("LZ4 decompression produced no output"),
         Ok(_) => {
             result.success = true;
-            let cursor = decoder.into_inner();
-            result.size = Some(cursor.position() as usize);
+            let remaining = decoder.into_inner();
+            result.size = Some(data.len() - remaining.len());
             if let Some(output_directory) = output_directory {
                 let chroot = Chroot::new(output_directory);
                 result.success = chroot.create_file(OUTPUT_FILE_NAME, &decompressed);
