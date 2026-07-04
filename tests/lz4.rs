@@ -6,3 +6,8 @@ fn integration_test() {
     const INPUT_FILE_NAME: &str = "lz4.bin";
     common::integration_test(SIGNATURE_TYPE, INPUT_FILE_NAME);
 }
+
+#[test]
+fn trailing_data() {
+    common::trailing_data_test("lz4", "lz4.bin");
+}

@@ -63,6 +63,37 @@ pub fn assert_results_ok(
     }
 }
 
+/// Run Binwalk, with extraction, against the specified file data with trailing garbage appended.
+/// This verifies that extractors properly bound decompression to the parsed range.
+#[allow(dead_code)]
+pub fn trailing_data_test(signature_filter: &str, file_name: &str) {
+    let mut data = std::fs::read(Path::new("tests").join("inputs").join(file_name)).unwrap();
+    data.extend_from_slice(b"TRAILING GARBAGE DATA THAT SHOULD BE IGNORED");
+
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    std::io::Write::write_all(&mut tmp, &data).unwrap();
+
+    let output_directory = tempfile::tempdir().unwrap();
+    let binwalker = Binwalk::configure(
+        Some(tmp.path()),
+        Some(output_directory.as_ref()),
+        vec![signature_filter.to_string()],
+        vec![],
+        None,
+        false,
+    )
+    .expect("Binwalk initialization failed");
+
+    let results = binwalker.analyze(&binwalker.base_target_file, true);
+
+    // Assert that there was a valid signature and successful extraction at offset 0
+    assert_eq!(results.file_map.len(), 1, "expected one signature result");
+    assert_eq!(results.extractions.len(), 1, "expected one extraction result");
+    let sig = &results.file_map[0];
+    assert_eq!(sig.offset, 0);
+    assert!(results.extractions[&sig.id].success, "extraction should succeed despite trailing garbage");
+}
+
 /// Run Binwalk, with extraction, against the specified file, with the provided signature filter
 pub fn run_binwalk(signature_filter: &str, file_name: impl AsRef<Path>) -> AnalysisResults {
     // Build the path to the input file

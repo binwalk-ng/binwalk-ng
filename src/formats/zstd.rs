@@ -276,7 +276,14 @@ fn zstd_decompress(
     const OUTPUT_FILE_NAME: &str = "decompressed.bin";
     let mut result = ExtractionResult::default();
 
-    let Some(data) = file_data.get(offset..) else {
+    // Use the parser to determine the exact compressed data range,
+    // so trailing garbage after the zstd frame doesn't cause errors.
+    let compressed_size = match zstd_parser(file_data, offset) {
+        Ok(sig) => sig.size,
+        Err(_) => return result,
+    };
+
+    let Some(data) = file_data.get(offset..offset + compressed_size) else {
         return result;
     };
 
