@@ -26,10 +26,10 @@ pub fn dpapi_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
 
     if let Ok(header) = parse_dpapi_blob_header(&file_data[offset..]) {
         result.description = format!(
-            "{}, header_size: {}, blob_size: {}, version: {}, provider_id: {}, master_key_version: {}, 
-             master_key_id: {}, flags: {}, description_len: {}, crypto_algorithm: {}, crypti_alg_len: {}, 
-             salt_len: {}, hmac_key_len: {}, hash_algorithm: {}, hash_alg_len: {}, hmac2_key_len: {}, 
-             data_len: {}, sign_len: {}", 
+            "{}, header_size: {}, blob_size: {}, version: {}, provider_id: {}, master_key_version: {},
+             master_key_id: {}, flags: {}, description_len: {}, crypto_algorithm: {}, crypti_alg_len: {},
+             salt_len: {}, hmac_key_len: {}, hash_algorithm: {}, hash_alg_len: {}, hmac2_key_len: {},
+             data_len: {}, sign_len: {}",
              result.description, header.header_size, header.blob_size, header.version, header.provider_id,
              header.master_key_version, header.master_key_id, header.flags, header.description_len,
              header.crypto_algorithm, header.crypto_alg_len, header.salt_len, header.hmac_key_len,

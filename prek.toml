@@ -1,0 +1,33 @@
+[[repos]]
+repo = "builtin"
+hooks = [
+  { id = "end-of-file-fixer" },
+  { id = "trailing-whitespace" },
+  { id = "check-yaml" },
+  { id = "check-toml" },
+  { id = "check-json" },
+  { id = "check-merge-conflict" },
+  { id = "check-added-large-files" },
+]
+
+[[repos]]
+repo = "local"
+hooks = [
+  {
+    id = "cargo-fmt",
+    name = "cargo fmt",
+    language = "system",
+    entry = "cargo fmt --all",
+    files = "\\.rs$",
+    pass_filenames = false,
+  },
+  {
+    id = "cargo-clippy",
+    name = "cargo clippy",
+    language = "system",
+    entry = "cargo clippy --locked --workspace --all-targets --all-features -- -D warnings",
+    types_or = ["rust"],
+    pass_filenames = false,
+    require_serial = true,
+  },
+]
