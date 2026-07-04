@@ -88,10 +88,17 @@ pub fn trailing_data_test(signature_filter: &str, file_name: &str) {
 
     // Assert that there was a valid signature and successful extraction at offset 0
     assert_eq!(results.file_map.len(), 1, "expected one signature result");
-    assert_eq!(results.extractions.len(), 1, "expected one extraction result");
+    assert_eq!(
+        results.extractions.len(),
+        1,
+        "expected one extraction result"
+    );
     let sig = &results.file_map[0];
     assert_eq!(sig.offset, 0);
-    assert!(results.extractions[&sig.id].success, "extraction should succeed despite trailing garbage");
+    assert!(
+        results.extractions[&sig.id].success,
+        "extraction should succeed despite trailing garbage"
+    );
 }
 
 /// Run Binwalk, with extraction, against the specified file, with the provided signature filter
