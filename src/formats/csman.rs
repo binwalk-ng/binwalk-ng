@@ -173,6 +173,11 @@ pub fn extract_csman_dat(
 ) -> ExtractionResult {
     const COMPRESSED_HEADER_SIZE: usize = 2;
 
+    // Maximum size, in bytes, that the compressed entry data is allowed to decompress to.
+    // This bounds memory allocation during decompression so that a small, maliciously-crafted
+    // file cannot trigger an unbounded allocation (decompression "bomb") and exhaust system memory.
+    const MAX_DECOMPRESSED_SIZE: usize = 100 * 1024 * 1024;
+
     // Return value
     let mut result = ExtractionResult::default();
 
@@ -186,7 +191,10 @@ pub fn extract_csman_dat(
         let Some(compressed_payload) = payload.get(COMPRESSED_HEADER_SIZE..) else {
             return result;
         };
-        match inflate::decompress_to_vec(compressed_payload) {
+        // Decompress with a hard upper bound on the output size; this prevents a
+        // crafted, highly-compressible payload from allocating an arbitrary amount
+        // of memory (decompression bomb / DoS). Exceeding the limit fails the extraction.
+        match inflate::decompress_to_vec_with_limit(compressed_payload, MAX_DECOMPRESSED_SIZE) {
             Ok(data) => decompressed_data = data,
             Err(_) => return result,
         }

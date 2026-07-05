@@ -32,4 +32,3 @@ tmux send-keys -t "$TOP_PANE" "$QUOTED_CMD 2> $TTY" C-m
 
 # Attach
 tmux attach-session -t binwalk_split
-

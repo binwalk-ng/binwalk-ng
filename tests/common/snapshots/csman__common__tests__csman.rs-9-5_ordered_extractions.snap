@@ -1,0 +1,9 @@
+---
+source: tests/common/mod.rs
+expression: ordered_extractions
+---
+- size: 36
+  success: true
+  extractor: csman_built_in
+  do_not_recurse: false
+  output_directory: "[output_directory]"
