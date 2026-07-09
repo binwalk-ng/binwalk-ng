@@ -1076,6 +1076,17 @@ pub fn patterns() -> Vec<signatures::Signature> {
             description: formats::dlink_tlv::DESCRIPTION.to_string(),
             extractor: Some(formats::encfw::encfw_extractor()),
         },
+        // D-Link firmware (ASCII model header)
+        signatures::Signature {
+            name: "dlink_fw".to_string(),
+            short: false,
+            magic_offset: 0,
+            always_display: false,
+            magic: formats::dlink_fw::dlink_fw_magic(),
+            parser: formats::dlink_fw::dlink_fw_parser,
+            description: formats::dlink_fw::DESCRIPTION.to_string(),
+            extractor: Some(formats::dlink_fw::dlink_fw_extractor()),
+        },
         // DLKE encrypted firmware
         signatures::Signature {
             name: "dlke".to_string(),
