@@ -98,7 +98,7 @@ pub fn jffs2_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
             if node_count > MIN_VALID_NODE_COUNT {
                 result.size = jffs2_eof - result.offset;
                 result.description = format!(
-                    "{}, {} endian, nodes: {}, total size: {} bytes",
+                    "{}, {}, nodes: {}, total size: {} bytes",
                     result.description, first_node_header.endianness, node_count, result.size
                 );
                 return Ok(result);

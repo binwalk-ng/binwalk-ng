@@ -1,4 +1,7 @@
-use crate::signatures::{SignatureError, SignatureResult};
+use crate::{
+    signatures::{SignatureError, SignatureResult},
+    structures::Endianness,
+};
 
 /// All hash magics here are the same size
 const HASH_MAGIC_LEN: usize = 16;
@@ -44,7 +47,7 @@ pub fn crc32_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
     // Just return a success with some extra description info
     let result = SignatureResult {
         description: format!(
-            "{}, {} endian",
+            "{}, {}",
             CRC32_DESCRIPTION,
             hash_endianness(file_data, offset, crc32_magic())
         ),
@@ -60,7 +63,7 @@ pub fn sha256_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult,
     // Just return a success with some extra description info
     let result = SignatureResult {
         description: format!(
-            "{}, {} endian",
+            "{}, {}",
             SHA256_DESCRIPTION,
             hash_endianness(file_data, offset, sha256_magic())
         ),
@@ -76,7 +79,7 @@ pub fn md5_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
     // Just return a success with some extra description info
     let result = SignatureResult {
         description: format!(
-            "{}, {} endian",
+            "{}, {}",
             MD5_DESCRIPTION,
             hash_endianness(file_data, offset, md5_magic())
         ),
@@ -89,12 +92,12 @@ pub fn md5_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
 }
 
 /// Detects hash constants endianness
-fn hash_endianness(file_data: &[u8], offset: usize, magics: Vec<Vec<u8>>) -> String {
+fn hash_endianness(file_data: &[u8], offset: usize, magics: Vec<Vec<u8>>) -> Endianness {
     let this_magic = &file_data[offset..offset + HASH_MAGIC_LEN];
 
     if *this_magic == magics[0] {
-        "big".to_string()
+        Endianness::Big
     } else {
-        "little".to_string()
+        Endianness::Little
     }
 }

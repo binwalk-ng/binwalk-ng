@@ -50,10 +50,7 @@ pub fn linux_arm_zimage_parser(
         if let Some(zimage_data) = file_data.get(result.offset..)
             && let Ok(zimage_header) = parse_linux_arm_zimage_header(zimage_data)
         {
-            result.description = format!(
-                "{}, {} endian",
-                result.description, zimage_header.endianness
-            );
+            result.description = format!("{}, {}", result.description, zimage_header.endianness);
             return Ok(result);
         }
     }
@@ -83,7 +80,7 @@ pub fn linux_arm64_boot_image_parser(
         if let Ok(image_header) = parse_linux_arm64_boot_image_header(&file_data[result.offset..]) {
             result.size = image_header.header_size;
             result.description = format!(
-                "{}, {} endian, effective image size: {} bytes",
+                "{}, {}, effective image size: {} bytes",
                 result.description, image_header.endianness, image_header.image_size
             );
             return Ok(result);
@@ -214,11 +211,11 @@ fn has_linux_symbol_table(file_data: &[u8]) -> bool {
 }
 
 /// Struct to store linux ARM64 boot image header info
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct LinuxARM64BootHeader {
     pub header_size: usize,
     pub image_size: usize,
-    pub endianness: String,
+    pub endianness: Endianness,
 }
 
 #[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
@@ -284,8 +281,6 @@ pub fn parse_linux_arm64_boot_image_header(
     const FLAGS_ENDIAN_MASK: u64 = 1;
     const BIG_ENDIAN: u64 = 1;
 
-    let mut result = LinuxARM64BootHeader::default();
-
     let (boot_image_header, _) =
         BootImageHeader::ref_from_prefix(img_data).map_err(|_| StructureError)?;
 
@@ -309,17 +304,18 @@ pub fn parse_linux_arm64_boot_image_header(
         // Make sure the reserved flag bits are not set
         if (boot_image_header.flags.get() & FLAGS_RESERVED_MASK) == 0 {
             // Determine the endianness from the flags field
-            if (boot_image_header.flags.get() & FLAGS_ENDIAN_MASK) == BIG_ENDIAN {
-                result.endianness = "big".to_string();
+
+            let endianness = if (boot_image_header.flags.get() & FLAGS_ENDIAN_MASK) == BIG_ENDIAN {
+                Endianness::Big
             } else {
-                result.endianness = "little".to_string();
-            }
+                Endianness::Little
+            };
 
-            // Report the kernel image and header sizes
-            result.image_size = boot_image_header.image_size.get() as usize;
-            result.header_size = std::mem::size_of::<BootImageHeader>();
-
-            return Ok(result);
+            return Ok(LinuxARM64BootHeader {
+                endianness,
+                header_size: std::mem::size_of::<BootImageHeader>(),
+                image_size: boot_image_header.image_size.get() as usize,
+            });
         }
     }
 

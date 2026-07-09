@@ -54,7 +54,7 @@ pub fn cramfs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult,
                 }
 
                 result.description = format!(
-                    "{}, {} endian, {} files, total size: {} bytes{}",
+                    "{}, {}, {} files, total size: {} bytes{}",
                     result.description,
                     cramfs_header.endianness,
                     cramfs_header.file_count,

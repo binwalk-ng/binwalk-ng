@@ -88,7 +88,7 @@ pub fn squashfs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResul
 
                     result.size = squashfs_header.image_size;
                     result.description = format!(
-                        "{}, {} endian, version: {}.{}, compression: {}, inode count: {}, block size: {}, image size: {} bytes, created: {}",
+                        "{}, {}, version: {}.{}, compression: {}, inode count: {}, block size: {}, image size: {} bytes, created: {}",
                         result.description,
                         squashfs_header.endianness,
                         squashfs_header.major_version,

@@ -45,7 +45,7 @@ serde_json = "1.0"
 env_logger = "0.11.5"
 flate2 = "1.1.2"
 adler2 = "2.0"
-md5 = "0.8.0"
+md-5 = "0.11"
 miniz_oxide = "0.9.0"
 aho-corasick = "1.1.3"
 memchr = "2.8.2"
@@ -63,13 +63,14 @@ zerocopy = { version = "0.8.28", features = ["derive"] }
 u24 = "0.6.0"
 rars = "0.4.0"
 tar = "0.4"
+zstd = "0.13.3"
+lz4_flex = "0.13.1"
 
 [dependencies.uuid]
-version = "1.17.0"
+version = "1.23.4"
 features = [
-    "v4",                # Lets you generate random UUIDs
-    "fast-rng",          # Use a faster (but still sufficiently random) RNG
-    "macro-diagnostics", # Enable better diagnostics for compile-time UUIDs
+    "v4",       # Lets you generate random UUIDs
+    "fast-rng", # Use a faster (but still sufficiently random) RNG
 ]
 
 [profile.dev.package.insta]
@@ -86,6 +87,6 @@ name = "binwalk"
 path = "src/main.rs"
 
 [dev-dependencies]
-tempfile = "3.25.0"
-insta = { version = "1.47", features = ["yaml", "redactions"] }
+tempfile = "3.27.0"
+insta = { version = "1.48", features = ["yaml", "redactions"] }
 walkdir = "2.5.0"

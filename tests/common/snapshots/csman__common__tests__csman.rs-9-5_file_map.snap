@@ -4,9 +4,9 @@ expression: results.file_map
 ---
 - offset: 0
   id: "[uuid]"
-  size: 4096
-  name: cramfs
+  size: 36
+  name: csman
   confidence: 250
-  description: "CramFS filesystem, Little Endian, 2 files, total size: 4096 bytes"
+  description: "CSman DAT file, total size: 36 bytes"
   always_display: false
   extraction_declined: false

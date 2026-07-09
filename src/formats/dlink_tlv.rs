@@ -2,6 +2,7 @@ use crate::common::get_cstring;
 use crate::formats::openssl::openssl_crypt_parser;
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
 use crate::structures::StructureError;
+use md5::{Digest, Md5};
 use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
 /// Human readable description
@@ -36,7 +37,7 @@ pub fn dlink_tlv_parser(
 
         // Get the payload data and calculate the MD5 hash
         if let Some(payload_data) = file_data.get(data_start..data_end) {
-            let payload_md5 = format!("{:x}", md5::compute(payload_data));
+            let payload_md5 = hex::encode(Md5::digest(payload_data));
 
             // If the MD5 checksum exists, make sure it matches
             if tlv_header.data_checksum.is_empty() || payload_md5 == tlv_header.data_checksum {
