@@ -63,6 +63,8 @@ zerocopy = { version = "0.8.28", features = ["derive"] }
 u24 = "0.6.0"
 rars = "0.4.0"
 tar = "0.4"
+zstd = "0.13.3"
+lz4_flex = "0.13.1"
 
 [dependencies.uuid]
 version = "1.23.4"

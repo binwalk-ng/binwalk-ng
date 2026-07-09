@@ -1,0 +1,13 @@
+---
+source: tests/common/mod.rs
+assertion_line: 40
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 300019
+  name: zstd
+  confidence: 250
+  description: "ZSTD compressed data, total size: 300019 bytes"
+  always_display: false
+  extraction_declined: false

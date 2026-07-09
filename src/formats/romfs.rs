@@ -415,9 +415,9 @@ fn process_romfs_entries(
 
                 // Directories have children; process them
                 if file_entry.directory {
-                    match process_romfs_entries(romfs_data, file_entry.info) {
-                        Err(e) => return Err(e),
-                        Ok(children) => file_entry.children = children,
+                    {
+                        let children = process_romfs_entries(romfs_data, file_entry.info)?;
+                        file_entry.children = children
                     }
                 }
 

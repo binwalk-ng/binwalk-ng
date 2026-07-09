@@ -1,8 +1,13 @@
+use std::io::Read;
+use std::path::Path;
+
 use crate::common::is_offset_safe;
-use crate::extractors;
+use crate::extractors::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::signatures::{CONFIDENCE_MEDIUM, SignatureError, SignatureResult};
 use crate::structures::StructureError;
-use xxhash_rust;
+use log::debug;
+use lz4_flex::frame::FrameDecoder;
+use xxhash_rust::xxh32;
 use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
 /// Human readable description
@@ -157,7 +162,7 @@ pub fn parse_lz4_file_header(lz4_data: &[u8]) -> Result<LZ4FileHeader, Structure
         // Grab the header CRC value stored in the file header (one byte only)
         if let Some(actual_crc) = lz4_data.get(crc_data_end) {
             // Calculate the header CRC, which is the second byte of the xxh32 hash. It is calculated over the header, excluding the magic bytes.
-            let calculated_crc: u8 = ((xxhash_rust::xxh32::xxh32(crc_data, 0) >> 8) & 0xFF) as u8;
+            let calculated_crc: u8 = ((xxh32::xxh32(crc_data, 0) >> 8) & 0xFF) as u8;
 
             // Make sure the CRC's match
             if *actual_crc == calculated_crc {
@@ -219,7 +224,7 @@ pub fn parse_lz4_block_header(
     Ok(lz4_block)
 }
 
-/// Describes how to run the lz4 utility to extract LZ4 compressed files
+/// Defines the internal extractor function for decompressing LZ4 data
 ///
 /// ```
 /// use std::io::ErrorKind;
@@ -241,17 +246,48 @@ pub fn parse_lz4_block_header(
 ///     }
 /// }
 /// ```
-pub fn lz4_extractor() -> extractors::Extractor {
-    extractors::Extractor {
-        utility: extractors::ExtractorType::External("lz4".to_string()),
-        extension: "lz4".to_string(),
-        arguments: vec![
-            "-f".to_string(), // Force overwirte if, for some reason, the output file exists
-            "-d".to_string(), // Perform a decompression
-            extractors::SOURCE_FILE_PLACEHOLDER.to_string(),
-            "decompressed.bin".to_string(), // Output file
-        ],
-        exit_codes: vec![0],
+pub fn lz4_extractor() -> Extractor {
+    Extractor {
+        utility: ExtractorType::Internal(lz4_decompress),
         ..Default::default()
     }
+}
+
+/// Internal extractor for LZ4 compressed data
+fn lz4_decompress(
+    file_data: &[u8],
+    offset: usize,
+    output_directory: Option<&Path>,
+) -> ExtractionResult {
+    const OUTPUT_FILE_NAME: &str = "decompressed.bin";
+    let mut result = ExtractionResult::default();
+
+    // Use the parser to determine the exact compressed data range,
+    // so trailing garbage after the LZ4 frame doesn't cause errors.
+    let compressed_size = match lz4_parser(file_data, offset) {
+        Ok(sig) => sig.size,
+        Err(_) => return result,
+    };
+
+    let Some(data) = file_data.get(offset..offset + compressed_size) else {
+        return result;
+    };
+    let mut decoder = FrameDecoder::new(data);
+    let mut decompressed = Vec::new();
+
+    match decoder.read_to_end(&mut decompressed) {
+        Ok(0) => debug!("LZ4 decompression produced no output"),
+        Ok(_) => {
+            result.success = true;
+            let remaining = decoder.into_inner();
+            result.size = Some(data.len() - remaining.len());
+            if let Some(output_directory) = output_directory {
+                let chroot = Chroot::new(output_directory);
+                result.success = chroot.create_file(OUTPUT_FILE_NAME, &decompressed);
+            }
+        }
+        Err(e) => debug!("LZ4 decompression failed: {e}"),
+    }
+
+    result
 }

@@ -1,7 +1,11 @@
+use std::io::Read;
+use std::path::Path;
+
 use crate::common::is_offset_safe;
-use crate::extractors;
+use crate::extractors::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
 use crate::structures::StructureError;
+use log::debug;
 use u24::U24;
 use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
@@ -234,7 +238,7 @@ pub fn parse_block_header(block_data: &[u8]) -> Result<ZSTDBlockHeader, Structur
     Err(StructureError)
 }
 
-/// Describes how to run the zstd utility to extract ZSTD compressed files
+/// Defines the internal extractor function for decompressing Zstandard data
 ///
 /// ```
 /// use std::io::ErrorKind;
@@ -256,17 +260,52 @@ pub fn parse_block_header(block_data: &[u8]) -> Result<ZSTDBlockHeader, Structur
 ///     }
 /// }
 /// ```
-pub fn zstd_extractor() -> extractors::Extractor {
-    extractors::Extractor {
-        utility: extractors::ExtractorType::External("zstd".to_string()),
-        extension: "zst".to_string(),
-        arguments: vec![
-            "-k".to_string(), // Don't delete input files (we do this ourselves)
-            "-f".to_string(), // Force overwrite if output file, for some reason, exists (disables y/n prompts)
-            "-d".to_string(), // Perform a decompression
-            extractors::SOURCE_FILE_PLACEHOLDER.to_string(),
-        ],
-        exit_codes: vec![0],
+pub fn zstd_extractor() -> Extractor {
+    Extractor {
+        utility: ExtractorType::Internal(zstd_decompress),
         ..Default::default()
     }
+}
+
+/// Internal extractor for Zstandard compressed data
+fn zstd_decompress(
+    file_data: &[u8],
+    offset: usize,
+    output_directory: Option<&Path>,
+) -> ExtractionResult {
+    const OUTPUT_FILE_NAME: &str = "decompressed.bin";
+    let mut result = ExtractionResult::default();
+
+    // Use the parser to determine the exact compressed data range,
+    // so trailing garbage after the zstd frame doesn't cause errors.
+    let compressed_size = match zstd_parser(file_data, offset) {
+        Ok(sig) => sig.size,
+        Err(_) => return result,
+    };
+
+    let Some(data) = file_data.get(offset..offset + compressed_size) else {
+        return result;
+    };
+
+    match zstd::stream::Decoder::with_buffer(data) {
+        Ok(mut decoder) => {
+            let mut decompressed = Vec::new();
+            match decoder.read_to_end(&mut decompressed) {
+                Ok(0) => debug!("ZSTD decompression produced no output"),
+                Ok(_) => {
+                    result.success = true;
+                    let remaining = decoder.finish();
+                    result.size = Some(data.len() - remaining.len());
+                    if let Some(output_directory) = output_directory {
+                        let chroot = Chroot::new(output_directory);
+                        result.success = chroot.create_file(OUTPUT_FILE_NAME, &decompressed);
+                    }
+                }
+                Err(e) => debug!("ZSTD decompression failed: {e}"),
+            }
+        }
+        Err(e) => debug!("ZSTD decoder initialization failed: {e}"),
+    }
+
+    result
 }

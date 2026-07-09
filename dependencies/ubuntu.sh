@@ -6,7 +6,6 @@ SCRIPT_DIRECTORY=$(dirname -- "$( readlink -f -- "$0"; )")
 # Install dependencies from apt repository
 DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get -y install \
     7zip \
-    zstd \
     srecord \
     unzip \
     sleuthkit \
@@ -14,7 +13,6 @@ DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get -y install \
     curl \
     wget \
     git \
-    lz4 \
     lzop \
     unyaffs \
     python3-pip \
