@@ -581,7 +581,7 @@ dependencies = [
 [[package]]
 name = "delink"
 version = "0.1.0"
-source = "git+https://github.com/binwalk-ng/delink#69f73043084c89509a5047c91d97a1a696218a3b"
+source = "git+https://github.com/binwalk-ng/delink#aa04b160e7b51109e2e07cdbcde0a0d5b2024a56"
 dependencies = [
  "aes 0.9.1",
  "cbc",
