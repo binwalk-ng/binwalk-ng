@@ -1,6 +1,5 @@
 ---
 source: tests/common/mod.rs
-assertion_line: 49
 expression: ordered_extractions
 ---
 - size: 220
