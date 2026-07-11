@@ -4,3 +4,4 @@
 *.exe binary
 *.png binary
 *.bin binary
+*.hex binary
