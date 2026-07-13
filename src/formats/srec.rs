@@ -1,7 +1,9 @@
 use crate::extractors::{self, Chroot, ExtractionResult};
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
-use aho_corasick::AhoCorasick;
+use std::io;
+use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
 /// Human readable descriptions
 pub const SREC_DESCRIPTION: &str = "Motorola S-record";
@@ -19,58 +21,46 @@ pub fn srec_magic() -> Vec<Vec<u8>> {
 
 /// Validates a SREC signature
 pub fn srec_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, SignatureError> {
-    // \r and \n line terminators
-    const UNIX_TERMINATING_CHARACTER: u8 = 0x0A;
-    const WINDOWS_TERMINATING_CHARACTER: u8 = 0x0D;
+    let file_data = &file_data[offset..];
+    let mut remaining = file_data;
 
-    // SREC termination records: S7 (4-byte addr), S8 (3-byte addr), S9 (2-byte addr).
-    // Each is preceded by a \n from the previous line, so we search for "\nS7/8/9".
-    let srec_footers: &[&[u8]] = &[b"\nS9", b"\nS8", b"\nS7"];
-    let grep = AhoCorasick::new(srec_footers).unwrap();
+    let mut os_type = None;
+    let mut saw_data = false;
+    while let Ok((record, rest)) = take_srec_record(remaining) {
+        if !record.checksum_valid() {
+            break;
+        }
+        remaining = rest;
 
-    // The last footer match in the data is the true termination record.
-    let srec_footer_match = grep
-        .find_overlapping_iter(&file_data[offset..])
-        .last()
-        .ok_or(SignatureError)?;
+        if !saw_data && record.ty.is_data() {
+            saw_data = true;
+        }
 
-    // Position past "\nS9/8/7" so we can walk through the rest of the
-    // record (byte-count, address, checksum) to find the line terminator.
-    let mut srec_eof = offset + srec_footer_match.start() + srec_footers[0].len();
-    let mut os_type = "Unix";
-
-    // Find the next \r or \n that terminates this record.
-    // Using position() avoids a byte-by-byte walk through the record body.
-    match file_data[srec_eof..]
-        .iter()
-        .position(|&b| b == b'\r' || b == b'\n')
-    {
-        Some(n) => srec_eof += n,
-        None => return Err(SignatureError),
+        // Require a terminal record at the end
+        if record.ty.is_terminal() {
+            os_type = Some(match record.line_end {
+                LineEnd::Lf => "Unix",
+                LineEnd::CrLf => "Windows",
+            });
+            break;
+        }
     }
 
-    if file_data[srec_eof] == WINDOWS_TERMINATING_CHARACTER {
-        srec_eof += 1;
-        os_type = "Windows";
+    let os_type: &str = os_type.ok_or(SignatureError)?;
+    if !saw_data {
+        return Err(SignatureError);
     }
 
-    if file_data.get(srec_eof) == Some(&UNIX_TERMINATING_CHARACTER) {
-        srec_eof += 1;
-        let mut result = SignatureResult {
-            offset,
-            description: SREC_DESCRIPTION.to_string(),
-            confidence: CONFIDENCE_HIGH,
-            ..Default::default()
-        };
-        result.size = srec_eof - offset;
-        result.description = format!(
-            "{}, origin OS: {}, total size: {} bytes",
-            result.description, os_type, result.size
-        );
-        Ok(result)
-    } else {
-        Err(SignatureError)
-    }
+    let size = file_data.len() - remaining.len();
+    let result = SignatureResult {
+        offset,
+        description: format!("{SREC_DESCRIPTION}, origin OS: {os_type}, total size: {size} bytes"),
+        confidence: CONFIDENCE_HIGH,
+        size,
+        ..Default::default()
+    };
+
+    Ok(result)
 }
 
 /// Describes the internal extractor used to convert Motorola S-records to binary
@@ -102,190 +92,256 @@ pub fn extract_srec(
 
     let mut result = ExtractionResult::default();
 
-    if let Some(srec_data) = file_data.get(offset..)
-        && let Ok((consumed, decoded)) = decode_srec(srec_data)
-    {
-        result.success = true;
-        result.size = Some(consumed);
-
-        if let Some(output_directory) = output_directory {
-            let chroot = Chroot::new(output_directory);
-            result.success = chroot.create_file(OUTPUT_FILE_NAME, &decoded);
+    let Some(srec_data) = file_data.get(offset..) else {
+        return result;
+    };
+    let mut file = None;
+    if let Some(output_directory) = output_directory {
+        let chroot = Chroot::new(output_directory);
+        file = chroot.create_file_writer(OUTPUT_FILE_NAME);
+        if file.is_none() {
+            return result;
         }
     }
+    let mut remaining = srec_data;
+    while let Ok((record, rest)) = take_srec_record(remaining) {
+        if !record.hex_data.is_empty()
+            && record.ty.is_data()
+            && let Some(f) = &mut file
+        {
+            let res = record.write(f);
+            if res.is_err() {
+                return result;
+            }
+        }
+        remaining = rest;
+
+        if record.ty.is_terminal() {
+            break;
+        }
+    }
+    let consumed = srec_data.len() - remaining.len();
+    result.size = Some(consumed);
+    result.success = consumed > 0;
 
     result
 }
 
-/// A chunk of decoded binary data and the memory address it should be placed at.
-struct DataRecord {
-    address: u64,
-    data: Vec<u8>,
-}
-
-/// Decodes the data payload of a Motorola S-record stream.
-/// Returns the number of input bytes consumed and the decoded binary data.
-///
-/// Record format (per Motorola M68000 Family Programmer's Reference Manual):
-///   S + Type(1) + ByteCount(2 hex) + Address(4/6/8 hex) + Data(0+) + Checksum(2 hex)
-///
-/// ByteCount = number of address + data + checksum bytes (excludes type and count fields).
-/// Checksum  = LSB of ones' complement of (ByteCount + Address + Data).
-fn decode_srec(srec_data: &[u8]) -> Result<(usize, Vec<u8>), SignatureError> {
-    const MIN_RECORD_LEN: usize = 6;
-
-    let mut consumed = 0usize;
-    let mut terminated = false;
-    let mut data_records: Vec<DataRecord> = Vec::new();
-
-    for line in srec_data.split_inclusive(|&b| b == b'\n') {
-        let record = strip_line_terminators(line);
-
-        if record.is_empty() {
-            consumed += line.len();
-            continue;
-        }
-
-        if record.len() < MIN_RECORD_LEN || record[0] != b'S' || !record[1].is_ascii_digit() {
-            break;
-        }
-
-        let record_type = record[1] - b'0';
-
-        // Decode the hex payload (byte_count + address + data + checksum)
-        let record_bytes = match hex::decode(&record[2..]) {
-            Ok(bytes) => bytes,
-            Err(_) => break,
-        };
-
-        // First decoded byte is the count of the bytes that follow (address + data + checksum)
-        let byte_count = record_bytes[0] as usize;
-        if record_bytes.len() != byte_count + 1 {
-            break;
-        }
-
-        // Validate checksum: sum of all bytes (count, address, data, checksum) must be 0xFF
-        let sum: u8 = record_bytes.iter().fold(0u8, |acc, &b| acc.wrapping_add(b));
-        if sum != 0xFF {
-            break;
-        }
-
-        // Each record type defines its address field size; byte_count must
-        // cover the address field plus at least the checksum byte.
-        let address_size = match record_type {
-            0 => 2,     // S0 header: 2-byte address (always 0x0000), optional data
-            1 => 2,     // S1 data: 2-byte address
-            2 => 3,     // S2 data: 3-byte address
-            3 => 4,     // S3 data: 4-byte address
-            5 => 2,     // S5 count: 2-byte field (holds S1/S2/S3 record count)
-            6 => 3,     // S6 count: 3-byte field (non-standard extension of S5)
-            7 => 4,     // S7 termination: 4-byte execution address
-            8 => 3,     // S8 termination: 3-byte execution address
-            9 => 2,     // S9 termination: 2-byte execution address
-            _ => break, // S4 is undefined in the official standard
-        };
-
-        if byte_count < address_size + 1 {
-            break;
-        }
-
-        // Non-data records: no payload to extract
-        match record_type {
-            0 | 5 | 6 => {
-                consumed += line.len();
-                continue;
-            }
-            7..=9 => {
-                consumed += line.len();
-                terminated = true;
-                break;
-            }
-            _ => {} // S1/S2/S3: fall through to data extraction
-        }
-
-        // Address lies after the byte-count field
-        let mut addr_buf = [0u8; 8];
-        addr_buf[8 - address_size..].copy_from_slice(&record_bytes[1..1 + address_size]);
-        let address = u64::from_be_bytes(addr_buf);
-
-        // Data lies between the address field and the trailing checksum byte
-        let data_start = 1 + address_size;
-        let data_end = record_bytes.len() - 1;
-        if data_start > data_end {
-            break;
-        }
-
-        data_records.push(DataRecord {
-            address,
-            data: record_bytes[data_start..data_end].to_vec(),
-        });
-        consumed += line.len();
-    }
-
-    if !terminated || data_records.is_empty() {
+fn take_srec_record(record_bytes: &[u8]) -> Result<(Record<'_>, &[u8]), SignatureError> {
+    let (header, rest) =
+        RecordHeaderBytes::try_ref_from_prefix(record_bytes).map_err(|_| SignatureError)?;
+    let addr_size = header.ty.addr_size();
+    let len = header.byte_count.get().ok_or(SignatureError)?;
+    // Requires at least the address and a checksum byte in the len,
+    // and we need at least that many hex bytes and a newline remaining
+    if usize::from(len) < addr_size + 1 || rest.len() < usize::from(len) * 2 + 1 {
         return Err(SignatureError);
     }
 
-    // Compute the full address span so the output buffer covers every data chunk
-    let min_addr = data_records.iter().map(|r| r.address).min().unwrap();
-    let max_end = data_records
-        .iter()
-        .map(|r| r.address + r.data.len() as u64)
-        .max()
-        .unwrap();
+    let mut computed_sum = len;
 
-    let mut decoded = vec![0xFFu8; (max_end - min_addr) as usize];
+    let (addr, rest) =
+        <[HexByte]>::try_ref_from_prefix_with_elems(rest, addr_size).map_err(|_| SignatureError)?;
+    let addr = read_addr(addr, &mut computed_sum).ok_or(SignatureError)?;
 
-    for record in &data_records {
-        let offset = (record.address - min_addr) as usize;
-        decoded[offset..offset + record.data.len()].copy_from_slice(&record.data);
+    let data_len = usize::from(len)
+        .checked_sub(addr_size + 1)
+        .ok_or(SignatureError)?;
+    let (hex_data, rest) =
+        <[HexByte]>::try_ref_from_prefix_with_elems(rest, data_len).map_err(|_| SignatureError)?;
+
+    let (checksum, rest) = HexByte::try_read_from_prefix(rest).map_err(|_| SignatureError)?;
+    computed_sum = computed_sum.wrapping_add(checksum.get().ok_or(SignatureError)?);
+
+    let (line_end, mut rest) = take_newline(rest).ok_or(SignatureError)?;
+    while let Some((_, r)) = take_newline(rest) {
+        rest = r;
     }
 
-    Ok((consumed, decoded))
+    Ok((
+        Record {
+            ty: header.ty,
+            sum_without_data: computed_sum,
+            addr,
+            hex_data,
+            line_end,
+        },
+        rest,
+    ))
 }
 
-/// Strip trailing `\n` and `\r` bytes from a record line
-fn strip_line_terminators(line: &[u8]) -> &[u8] {
-    let mut end = line.len();
-    while end > 0 && (line[end - 1] == b'\n' || line[end - 1] == b'\r') {
-        end -= 1;
+struct Record<'a> {
+    ty: RecordType,
+    /// sum of checksummed bytes, except for the data in hex_bytes
+    sum_without_data: u8,
+    addr: u32,
+    hex_data: &'a [HexByte],
+    line_end: LineEnd,
+}
+
+impl Record<'_> {
+    fn checksum_valid(&self) -> bool {
+        let mut checksum = self.sum_without_data;
+        for hex_byte in self.hex_data {
+            let Some(byte) = hex_byte.get() else {
+                return false;
+            };
+            checksum = checksum.wrapping_add(byte);
+        }
+        checksum == 0xFF
     }
-    &line[..end]
+
+    fn write<F>(&self, f: &mut F) -> io::Result<()>
+    where
+        F: Write + Seek,
+    {
+        f.seek(SeekFrom::Start(u64::from(self.addr)))?;
+        let decoded = hex::decode(self.hex_data.as_bytes())
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        f.write_all(&decoded)
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+enum LineEnd {
+    Lf,
+    CrLf,
+}
+
+#[derive(Debug, Copy, Clone, TryFromBytes, KnownLayout, Immutable)]
+#[repr(C)]
+struct RecordHeaderBytes {
+    _s: S,
+    ty: RecordType,
+    byte_count: HexByte,
+}
+
+#[derive(Debug, Copy, Clone, FromBytes, KnownLayout, Immutable, IntoBytes)]
+#[repr(transparent)]
+struct HexByte([u8; 2]);
+
+impl HexByte {
+    #[inline]
+    fn get(self) -> Option<u8> {
+        let [hi, lo] = self.0;
+        Some((decode_hex_digit(hi)? << 4) | decode_hex_digit(lo)?)
+    }
+}
+
+#[derive(Debug, Copy, Clone, TryFromBytes, Immutable)]
+#[repr(u8)]
+enum S {
+    _S = b'S',
+}
+
+#[allow(dead_code)] // Constructed only through zerocopy
+#[derive(Debug, Copy, Clone, TryFromBytes, Immutable)]
+#[repr(u8)]
+enum RecordType {
+    Header = b'0',
+    DataAt16 = b'1',
+    DataAt24 = b'2',
+    DataAt32 = b'3',
+    // note, '4' intentionally omitted
+    RecordCount16 = b'5',
+    RecordCount24 = b'6',
+    TerminateAt32 = b'7',
+    TerminateAt24 = b'8',
+    TerminateAt16 = b'9',
+}
+
+impl RecordType {
+    const fn addr_size(self) -> usize {
+        match self {
+            Self::Header | Self::DataAt16 | Self::RecordCount16 | Self::TerminateAt16 => 2,
+            Self::DataAt24 | Self::RecordCount24 | Self::TerminateAt24 => 3,
+            Self::DataAt32 | Self::TerminateAt32 => 4,
+        }
+    }
+
+    const fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::TerminateAt16 | Self::TerminateAt24 | Self::TerminateAt32
+        )
+    }
+
+    const fn is_data(self) -> bool {
+        matches!(self, Self::DataAt16 | Self::DataAt24 | Self::DataAt32)
+    }
+}
+
+#[inline]
+const fn decode_hex_digit(digit: u8) -> Option<u8> {
+    Some(match digit {
+        b'0'..=b'9' => digit - b'0',
+        b'A'..=b'F' => digit - b'A' + 10,
+        b'a'..=b'f' => digit - b'a' + 10,
+        _ => return None,
+    })
+}
+
+#[inline]
+fn read_addr(addr_digits: &[HexByte], checksum: &mut u8) -> Option<u32> {
+    assert!(addr_digits.len() <= 4);
+    let mut res = 0;
+
+    for digit in addr_digits {
+        res <<= 8;
+        let byte = digit.get()?;
+        *checksum = checksum.wrapping_add(byte);
+        res |= u32::from(byte);
+    }
+
+    Some(res)
+}
+
+#[inline]
+fn take_newline(rest: &[u8]) -> Option<(LineEnd, &[u8])> {
+    match rest {
+        [b'\n', rest @ ..] => Some((LineEnd::Lf, rest)),
+        [b'\r', b'\n', rest @ ..] => Some((LineEnd::CrLf, rest)),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use insta::assert_snapshot;
+
+    fn decode_srec(data: &[u8]) -> Result<Vec<u8>, &'static str> {
+        let dir = tempfile::tempdir().unwrap();
+        let res = extract_srec(data, 0, Some(dir.path()));
+        if !res.success {
+            return Err("failed to extract");
+        }
+        assert_eq!(res.size, Some(data.len()));
+        Ok(std::fs::read(dir.path().join("s-record.bin")).unwrap())
+    }
 
     #[test]
     fn decode_srec_with_address_gap() {
         // Records at 0x0000 and 0x0008 with a 4-byte gap.
-        // Records are placed at their target addresses with 0xFF padding in gaps.
+        // Records are placed at their target addresses with 0x00 padding in gaps.
         let srec = b"S107000000010203F2\n\
                       S107000804050607DA\n\
                       S9030000FC\n";
-        let (_consumed, decoded) = decode_srec(srec).unwrap();
-        assert_eq!(decoded.len(), 12);
-        assert_eq!(&decoded[0..4], &[0x00, 0x01, 0x02, 0x03]);
-        for &b in &decoded[4..8] {
-            assert_eq!(b, 0xFF);
-        }
-        assert_eq!(&decoded[8..12], &[0x04, 0x05, 0x06, 0x07]);
+        let decoded = decode_srec(srec).unwrap();
+        assert_snapshot!(hex::encode(&decoded), @"000102030000000004050607");
     }
 
     #[test]
     fn decode_srec_nonzero_base_with_gap() {
         // Non-zero base address and a gap between records.
-        let srec = b"S107010000010203F1\n\
-                      S107010C04050607D5\n\
+        let srec = b"S107001000010203E2\n\
+                      S107001C04050607C6\n\
                       S9030000FC\n";
-        let (_consumed, decoded) = decode_srec(srec).unwrap();
-        assert_eq!(decoded.len(), 16);
-        assert_eq!(&decoded[0..4], &[0x00, 0x01, 0x02, 0x03]);
-        for &b in &decoded[4..12] {
-            assert_eq!(b, 0xFF);
-        }
-        assert_eq!(&decoded[12..16], &[0x04, 0x05, 0x06, 0x07]);
+        let decoded = decode_srec(srec).unwrap();
+        assert_snapshot!(
+            hex::encode(&decoded),
+            @"0000000000000000000000000000000000010203000000000000000004050607"
+        );
     }
 
     #[test]
@@ -293,7 +349,7 @@ mod tests {
         // Correct checksum is 0xF2; 0xF3 is wrong.
         let srec = b"S107000000010203F3\n\
                       S9030000FC\n";
-        assert!(decode_srec(srec).is_err());
+        assert!(srec_parser(srec, 0).is_err());
     }
 
     #[test]
@@ -301,7 +357,7 @@ mod tests {
         // Too short to parse (fewer than 6 hex chars for type+count+address+checksum).
         let srec = b"S1\n\
                       S9030000FC\n";
-        assert!(decode_srec(srec).is_err());
+        assert!(srec_parser(srec, 0).is_err());
     }
 
     #[test]
@@ -309,7 +365,7 @@ mod tests {
         // S4 is undefined in the standard and should be rejected.
         let srec = b"S407000000010203F2\n\
                       S9030000FC\n";
-        assert!(decode_srec(srec).is_err());
+        assert!(srec_parser(srec, 0).is_err());
     }
 
     #[test]
@@ -317,6 +373,6 @@ mod tests {
         // Missing S7/S8/S9 termination record.
         let srec = b"S107000000010203F2\n\
                       S107000804050607DA\n";
-        assert!(decode_srec(srec).is_err());
+        assert!(srec_parser(srec, 0).is_err());
     }
 }
