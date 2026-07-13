@@ -137,6 +137,12 @@ pub fn extract_srec(
     result
 }
 
+/// A chunk of decoded binary data and the memory address it should be placed at.
+struct DataRecord {
+    address: u64,
+    data: Vec<u8>,
+}
+
 /// Decodes the data payload of a Motorola S-record stream.
 /// Returns the number of input bytes consumed and the decoded binary data.
 ///
@@ -146,13 +152,11 @@ pub fn extract_srec(
 /// ByteCount = number of address + data + checksum bytes (excludes type and count fields).
 /// Checksum  = LSB of ones' complement of (ByteCount + Address + Data).
 fn decode_srec(srec_data: &[u8]) -> Result<(usize, Vec<u8>), SignatureError> {
-    // A record has at minimum: type (2), count (2), and checksum (2) hex characters
     const MIN_RECORD_LEN: usize = 6;
 
-    let mut decoded: Vec<u8> = Vec::new();
-    let mut consumed: usize = 0;
-    let mut record_count: usize = 0;
+    let mut consumed = 0usize;
     let mut terminated = false;
+    let mut data_records: Vec<DataRecord> = Vec::new();
 
     for line in srec_data.split_inclusive(|&b| b == b'\n') {
         let record = strip_line_terminators(line);
@@ -168,6 +172,7 @@ fn decode_srec(srec_data: &[u8]) -> Result<(usize, Vec<u8>), SignatureError> {
 
         let record_type = record[1] - b'0';
 
+        // Decode the hex payload (byte_count + address + data + checksum)
         let record_bytes = match hex::decode(&record[2..]) {
             Ok(bytes) => bytes,
             Err(_) => break,
@@ -218,6 +223,11 @@ fn decode_srec(srec_data: &[u8]) -> Result<(usize, Vec<u8>), SignatureError> {
             _ => {} // S1/S2/S3: fall through to data extraction
         }
 
+        // Address lies after the byte-count field
+        let mut addr_buf = [0u8; 8];
+        addr_buf[8 - address_size..].copy_from_slice(&record_bytes[1..1 + address_size]);
+        let address = u64::from_be_bytes(addr_buf);
+
         // Data lies between the address field and the trailing checksum byte
         let data_start = 1 + address_size;
         let data_end = record_bytes.len() - 1;
@@ -225,16 +235,33 @@ fn decode_srec(srec_data: &[u8]) -> Result<(usize, Vec<u8>), SignatureError> {
             break;
         }
 
-        decoded.extend_from_slice(&record_bytes[data_start..data_end]);
-        record_count += 1;
+        data_records.push(DataRecord {
+            address,
+            data: record_bytes[data_start..data_end].to_vec(),
+        });
         consumed += line.len();
     }
 
-    if terminated && record_count > 0 && !decoded.is_empty() {
-        Ok((consumed, decoded))
-    } else {
-        Err(SignatureError)
+    if !terminated || data_records.is_empty() {
+        return Err(SignatureError);
     }
+
+    // Compute the full address span so the output buffer covers every data chunk
+    let min_addr = data_records.iter().map(|r| r.address).min().unwrap();
+    let max_end = data_records
+        .iter()
+        .map(|r| r.address + r.data.len() as u64)
+        .max()
+        .unwrap();
+
+    let mut decoded = vec![0xFFu8; (max_end - min_addr) as usize];
+
+    for record in &data_records {
+        let offset = (record.address - min_addr) as usize;
+        decoded[offset..offset + record.data.len()].copy_from_slice(&record.data);
+    }
+
+    Ok((consumed, decoded))
 }
 
 /// Strip trailing `\n` and `\r` bytes from a record line
@@ -244,4 +271,72 @@ fn strip_line_terminators(line: &[u8]) -> &[u8] {
         end -= 1;
     }
     &line[..end]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_srec_with_address_gap() {
+        // Records at 0x0000 and 0x0008 with a 4-byte gap.
+        // Records are placed at their target addresses with 0xFF padding in gaps.
+        let srec = b"S107000000010203F2\n\
+                      S107000804050607DA\n\
+                      S9030000FC\n";
+        let (_consumed, decoded) = decode_srec(srec).unwrap();
+        assert_eq!(decoded.len(), 12);
+        assert_eq!(&decoded[0..4], &[0x00, 0x01, 0x02, 0x03]);
+        for &b in &decoded[4..8] {
+            assert_eq!(b, 0xFF);
+        }
+        assert_eq!(&decoded[8..12], &[0x04, 0x05, 0x06, 0x07]);
+    }
+
+    #[test]
+    fn decode_srec_nonzero_base_with_gap() {
+        // Non-zero base address and a gap between records.
+        let srec = b"S107010000010203F1\n\
+                      S107010C04050607D5\n\
+                      S9030000FC\n";
+        let (_consumed, decoded) = decode_srec(srec).unwrap();
+        assert_eq!(decoded.len(), 16);
+        assert_eq!(&decoded[0..4], &[0x00, 0x01, 0x02, 0x03]);
+        for &b in &decoded[4..12] {
+            assert_eq!(b, 0xFF);
+        }
+        assert_eq!(&decoded[12..16], &[0x04, 0x05, 0x06, 0x07]);
+    }
+
+    #[test]
+    fn decode_srec_invalid_checksum() {
+        // Correct checksum is 0xF2; 0xF3 is wrong.
+        let srec = b"S107000000010203F3\n\
+                      S9030000FC\n";
+        assert!(decode_srec(srec).is_err());
+    }
+
+    #[test]
+    fn decode_srec_truncated_record() {
+        // Too short to parse (fewer than 6 hex chars for type+count+address+checksum).
+        let srec = b"S1\n\
+                      S9030000FC\n";
+        assert!(decode_srec(srec).is_err());
+    }
+
+    #[test]
+    fn decode_srec_unsupported_type() {
+        // S4 is undefined in the standard and should be rejected.
+        let srec = b"S407000000010203F2\n\
+                      S9030000FC\n";
+        assert!(decode_srec(srec).is_err());
+    }
+
+    #[test]
+    fn decode_srec_no_terminator() {
+        // Missing S7/S8/S9 termination record.
+        let srec = b"S107000000010203F2\n\
+                      S107000804050607DA\n";
+        assert!(decode_srec(srec).is_err());
+    }
 }
