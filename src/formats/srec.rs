@@ -28,10 +28,10 @@ pub fn srec_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
     let srec_footers: &[&[u8]] = &[b"\nS9", b"\nS8", b"\nS7"];
     let grep = AhoCorasick::new(srec_footers).unwrap();
 
-    // The last footer match in the data is the true termination record.
+    // The first footer match terminates this SRecord stream.
     let srec_footer_match = grep
         .find_overlapping_iter(&file_data[offset..])
-        .last()
+        .next()
         .ok_or(SignatureError)?;
 
     // Position past "\nS9/8/7" so we can walk through the rest of the
@@ -40,7 +40,6 @@ pub fn srec_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
     let mut os_type = "Unix";
 
     // Find the next \r or \n that terminates this record.
-    // Using position() avoids a byte-by-byte walk through the record body.
     match file_data[srec_eof..]
         .iter()
         .position(|&b| b == b'\r' || b == b'\n')
@@ -135,7 +134,6 @@ fn decode_srec(srec_data: &[u8]) -> Result<(usize, Vec<u8>), SignatureError> {
     const MIN_RECORD_LEN: usize = 6;
 
     let mut consumed = 0usize;
-    let mut terminated = false;
     let mut data_records: Vec<DataRecord> = Vec::new();
 
     for line in srec_data.split_inclusive(|&b| b == b'\n') {
@@ -197,7 +195,6 @@ fn decode_srec(srec_data: &[u8]) -> Result<(usize, Vec<u8>), SignatureError> {
             }
             7..=9 => {
                 consumed += line.len();
-                terminated = true;
                 break;
             }
             _ => {} // S1/S2/S3: fall through to data extraction
@@ -222,22 +219,32 @@ fn decode_srec(srec_data: &[u8]) -> Result<(usize, Vec<u8>), SignatureError> {
         consumed += line.len();
     }
 
-    if !terminated || data_records.is_empty() {
+    if data_records.is_empty() {
         return Err(SignatureError);
     }
 
     // Compute the full address span so the output buffer covers every data chunk
-    let min_addr = data_records.iter().map(|r| r.address).min().unwrap();
-    let max_end = data_records
-        .iter()
-        .map(|r| r.address + r.data.len() as u64)
-        .max()
-        .unwrap();
+    const MAX_SREC_DECODED_SIZE: u64 = 500 * 1024 * 1024; // 500 MiB
 
-    let mut decoded = vec![0xFFu8; (max_end - min_addr) as usize];
+    let mut max_end = 0u64;
+    for record in &data_records {
+        let end = record
+            .address
+            .checked_add(record.data.len() as u64)
+            .ok_or(SignatureError)?;
+        if end > max_end {
+            max_end = end;
+        }
+    }
+
+    if max_end > MAX_SREC_DECODED_SIZE {
+        return Err(SignatureError);
+    }
+
+    let mut decoded = vec![0x00u8; max_end as usize];
 
     for record in &data_records {
-        let offset = (record.address - min_addr) as usize;
+        let offset = record.address as usize;
         decoded[offset..offset + record.data.len()].copy_from_slice(&record.data);
     }
 
@@ -260,7 +267,7 @@ mod tests {
     #[test]
     fn decode_srec_with_address_gap() {
         // Records at 0x0000 and 0x0008 with a 4-byte gap.
-        // Records are placed at their target addresses with 0xFF padding in gaps.
+        // Records are placed at their target addresses with 0x00 padding in gaps.
         let srec = b"S107000000010203F2\n\
                       S107000804050607DA\n\
                       S9030000FC\n";
@@ -268,7 +275,7 @@ mod tests {
         assert_eq!(decoded.len(), 12);
         assert_eq!(&decoded[0..4], &[0x00, 0x01, 0x02, 0x03]);
         for &b in &decoded[4..8] {
-            assert_eq!(b, 0xFF);
+            assert_eq!(b, 0x00);
         }
         assert_eq!(&decoded[8..12], &[0x04, 0x05, 0x06, 0x07]);
     }
@@ -280,12 +287,12 @@ mod tests {
                       S107010C04050607D5\n\
                       S9030000FC\n";
         let (_consumed, decoded) = decode_srec(srec).unwrap();
-        assert_eq!(decoded.len(), 16);
-        assert_eq!(&decoded[0..4], &[0x00, 0x01, 0x02, 0x03]);
-        for &b in &decoded[4..12] {
-            assert_eq!(b, 0xFF);
+        assert_eq!(decoded.len(), 0x0110);
+        assert_eq!(&decoded[0x0100..0x0104], &[0x00, 0x01, 0x02, 0x03]);
+        for &b in &decoded[0x0104..0x010C] {
+            assert_eq!(b, 0x00);
         }
-        assert_eq!(&decoded[12..16], &[0x04, 0x05, 0x06, 0x07]);
+        assert_eq!(&decoded[0x010C..0x0110], &[0x04, 0x05, 0x06, 0x07]);
     }
 
     #[test]
@@ -314,9 +321,21 @@ mod tests {
 
     #[test]
     fn decode_srec_no_terminator() {
-        // Missing S7/S8/S9 termination record.
+        // Missing S7/S8/S9 termination record — should still decode data records.
         let srec = b"S107000000010203F2\n\
                       S107000804050607DA\n";
+        let (_consumed, decoded) = decode_srec(srec).unwrap();
+        assert_eq!(decoded.len(), 12);
+        assert_eq!(&decoded[0..4], &[0x00, 0x01, 0x02, 0x03]);
+        assert_eq!(&decoded[8..12], &[0x04, 0x05, 0x06, 0x07]);
+    }
+    #[test]
+    fn decode_srec_rejects_oversized_span() {
+        // S3 record at 0x00000000 and another at 0x1F400000 (500 MiB),
+        // producing a span that exceeds MAX_SREC_DECODED_SIZE.
+        let srec = b"S31300000000000102030405060708090A0B0C0D0E0F72\n\
+                      S3061F4000009A\n\
+                      S70500000000FA\n";
         assert!(decode_srec(srec).is_err());
     }
 }
