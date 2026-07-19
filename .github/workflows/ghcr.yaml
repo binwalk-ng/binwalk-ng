@@ -107,20 +107,19 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
+      # The digest is taken from the create result rather than resolved from a
+      # tag afterward, so a concurrent run moving the tag can't change what
+      # gets attested.
       - name: Create and push multi-arch manifest
+        id: manifest
         working-directory: ${{ runner.temp }}/digests
         run: |
           # shellcheck disable=SC2046 # splitting into "-t <tag>" pairs and digest refs is intentional
           docker buildx imagetools create \
+            --metadata-file "${{ runner.temp }}/metadata.json" \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
-
-      - name: Resolve manifest digest
-        id: manifest
-        run: |
-          digest=$(docker buildx imagetools inspect \
-            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}" \
-            --format '{{ .Manifest.Digest }}')
+          digest=$(jq -r '."containerimage.descriptor".digest' "${{ runner.temp }}/metadata.json")
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Generate artifact attestation
