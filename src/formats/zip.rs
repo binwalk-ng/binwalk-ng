@@ -43,6 +43,7 @@ pub fn zip_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
                 let mut previous_file_header_offset = None;
                 let mut next_file_header_offset = offset + zip_file_header.total_size;
 
+                // Walk, consuming zip entries until we find an invalid one, or end of file
                 while is_offset_safe(
                     available_data,
                     next_file_header_offset,
@@ -53,19 +54,18 @@ pub fn zip_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
                             previous_file_header_offset = Some(next_file_header_offset);
                             next_file_header_offset += zip_header.total_size;
                         }
-                        Err(_) => {
-                            result.size = next_file_header_offset - offset;
-                            result.description = format!(
-                                "{}, version: {}.{}, missing end-of-central-directory header, total size: {} bytes",
-                                result.description,
-                                zip_file_header.version_major,
-                                zip_file_header.version_minor,
-                                result.size
-                            );
-                            break;
-                        }
+                        Err(_) => break,
                     }
                 }
+
+                result.size = next_file_header_offset.min(file_data.len()) - offset;
+                result.description = format!(
+                    "{}, version: {}.{}, missing end-of-central-directory header, total size: {} bytes",
+                    result.description,
+                    zip_file_header.version_major,
+                    zip_file_header.version_minor,
+                    result.size
+                );
             }
         }
 
@@ -123,7 +123,7 @@ pub struct ZipFileHeader {
 #[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
 struct ZipHeaderBytes {
-    magic: zerocopy::U32<LE>,
+    magic: [u8; 4],
     version: zerocopy::U16<LE>,
     flags: zerocopy::U16<LE>,
     compression: zerocopy::U16<LE>,
@@ -138,6 +138,12 @@ struct ZipHeaderBytes {
 
 /// Validate a ZIP file header
 pub fn parse_zip_header(zip_data: &[u8]) -> Result<ZipFileHeader, StructureError> {
+    // Local file header magic bytes, "PK\x03\x04"
+    const ZIP_LOCAL_FILE_MAGIC: [u8; 4] = *b"PK\x03\x04";
+
+    // Dahua ZIP files replace the magic bytes of the first local file header with "DH\x03\x04"
+    const DAHUA_ZIP_LOCAL_FILE_MAGIC: [u8; 4] = *b"DH\x03\x04";
+
     // Unused flag bits
     const UNUSED_FLAGS_MASK: u16 = 0b11010111_10000000;
 
@@ -174,6 +180,12 @@ pub fn parse_zip_header(zip_data: &[u8]) -> Result<ZipFileHeader, StructureError
     // Parse the ZIP local file structure
     let (zip_local_file_header, _) =
         ZipHeaderBytes::ref_from_prefix(zip_data).map_err(|_| StructureError)?;
+
+    // The magic bytes must match a ZIP local file header (or the Dahua ZIP variant)
+    let magic = zip_local_file_header.magic;
+    if magic != ZIP_LOCAL_FILE_MAGIC && magic != DAHUA_ZIP_LOCAL_FILE_MAGIC {
+        return Err(StructureError);
+    }
 
     // Unused/reserved flag bits should be 0
     if (zip_local_file_header.flags & UNUSED_FLAGS_MASK) == 0 {
