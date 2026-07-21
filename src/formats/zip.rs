@@ -39,7 +39,7 @@ pub fn zip_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
             }
             // If the ZIP file is corrupted and no EOCD header exists, attempt to parse all the individual ZIP file headers
             Err(_) => {
-                let available_data = file_data.len() - offset;
+                let available_data = file_data.len();
                 let mut previous_file_header_offset = None;
                 let mut next_file_header_offset = offset + zip_file_header.total_size;
 
