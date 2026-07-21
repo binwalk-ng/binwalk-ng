@@ -44,12 +44,16 @@ RUN apt-get update -y \
 
 FROM base_build AS build
 
+ARG TARGETARCH
 ARG BUILD_DIR="/tmp"
 ARG BINWALK_BUILD_DIR="${BUILD_DIR}/binwalk"
 COPY --link . ${BINWALK_BUILD_DIR}
 WORKDIR ${BINWALK_BUILD_DIR}
 
-RUN --mount=type=cache,target=./target,sharing=locked \
+# The target dir cache is keyed by arch so concurrent multi-platform builds
+# on one builder don't clobber each other's artifacts; the cargo registry
+# cache is arch-independent and stays shared.
+RUN --mount=type=cache,target=./target,sharing=locked,id=cargo-target-${TARGETARCH} \
     --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
     . /root/.cargo/env \
     && cargo build --release \
