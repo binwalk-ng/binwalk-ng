@@ -88,9 +88,18 @@ lzop -1 -c /tmp/testdata.bin > lzop_dotbin.bin
 echo "Created lzop_dotbin.bin ($(wc -c < lzop_dotbin.bin) bytes)"
 
 # ======================================================================
+# 9. CRC32 checksums (lzop --crc32)
+#    Stored filename: lzop_crc32.txt
+# ======================================================================
+
+gen_content > /tmp/lzop_crc32.txt
+lzop --crc32 -1 -c /tmp/lzop_crc32.txt > lzop_crc32.bin
+echo "Created lzop_crc32.bin ($(wc -c < lzop_crc32.bin) bytes)"
+
+# ======================================================================
 # Clean up temp files
 # ======================================================================
 
 rm -f /tmp/lzop_std.txt /tmp/lzop_single.txt /tmp/lzop_highcomp.txt \
       /tmp/lzop_noname.txt /tmp/lzop_path_data.txt /tmp/lzop_longname.txt \
-      /tmp/lzop_empty.txt /tmp/testdata.bin
+      /tmp/lzop_empty.txt /tmp/testdata.bin /tmp/lzop_crc32.txt

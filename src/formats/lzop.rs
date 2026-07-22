@@ -1,7 +1,8 @@
-use crate::common::is_offset_safe;
+use crate::common::{crc32, is_offset_safe};
 use crate::extractors::{self, Chroot, ExtractionResult, ExtractorType};
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
 use crate::structures::StructureError;
+use adler2::Adler32;
 use log::debug;
 use std::ffi::OsStr;
 use std::path::Path;
@@ -95,6 +96,8 @@ const LZO_CHECKSUM_SIZE: usize = 4;
 pub struct LZOPFileHeader {
     pub header_size: usize,
     pub block_checksum_present: bool,
+    pub compressed_checksum_crc32: bool,
+    pub uncompressed_checksum_crc32: bool,
     pub original_filename: Option<String>,
 }
 
@@ -131,9 +134,8 @@ pub fn parse_lzop_file_header(lzop_data: &[u8]) -> Result<LZOPFileHeader, Struct
     const FILTER_SIZE: usize = 4;
 
     const FLAG_FILTER: u32 = 0x000_00800;
-    //const FLAG_CRC32_D: usize = 0x0000_0100;
+    const FLAG_CRC32_D: u32 = 0x0000_0100;
     const FLAG_CRC32_C: u32 = 0x0000_0200;
-    //const FLAG_ADLER32_D: usize = 0x0000_0001;
     const FLAG_ADLER32_C: u32 = 0x0000_0002;
 
     let allowed_methods = [1, 2, 3];
@@ -178,7 +180,9 @@ pub fn parse_lzop_file_header(lzop_data: &[u8]) -> Result<LZOPFileHeader, Struct
                         Some(String::from_utf8_lossy(filename_bytes).to_string());
                 }
 
-                // Check if block headers include an optional compressed data checksum field
+                // Determine checksum types
+                lzop_info.uncompressed_checksum_crc32 = (lzo_header_p1.flags & FLAG_CRC32_D) != 0;
+                lzop_info.compressed_checksum_crc32 = (lzo_header_p1.flags & FLAG_CRC32_C) != 0;
                 lzop_info.block_checksum_present =
                     (lzo_header_p1.flags & (FLAG_ADLER32_C | FLAG_CRC32_C)) != 0;
 
@@ -199,6 +203,7 @@ pub struct LZOPBlockHeader {
     pub header_size: usize,
     pub compressed_size: usize,
     pub uncompressed_size: usize,
+    pub uncompressed_checksum: u32,
     pub checksum_size: usize,
 }
 
@@ -230,6 +235,7 @@ pub fn parse_lzop_block_header(
             header_size: BLOCK_HEADER_SIZE,
             compressed_size: block_header.compressed_size.get() as usize,
             uncompressed_size: block_header.uncompressed_size.get() as usize,
+            uncompressed_checksum: block_header.uncompressed_checksum.get(),
             ..Default::default()
         };
 
@@ -320,14 +326,57 @@ fn extract_lzo_data(
 
         let output_size = block_header.uncompressed_size;
 
-        if block_header.compressed_size >= output_size {
-            // Block is stored uncompressed (lzop stores non-compressible data as-is)
+        // Validate compressed data checksum if present
+        if lzop_header.block_checksum_present {
+            let checksum_start = compressed_end;
+            let checksum_end = checksum_start + block_header.checksum_size;
+            if let Some(stored_checksum_bytes) = lzo_data.get(checksum_start..checksum_end) {
+                let stored_checksum = u32::from_be_bytes(stored_checksum_bytes.try_into().unwrap());
+                let computed_checksum = if lzop_header.compressed_checksum_crc32 {
+                    crc32(compressed_block)
+                } else {
+                    let mut hasher = Adler32::new();
+                    hasher.write_slice(compressed_block);
+                    hasher.checksum()
+                };
+                if stored_checksum != computed_checksum {
+                    debug!("LZOP block {} compressed checksum mismatch", block_count);
+                    return result;
+                }
+            }
+        }
+
+        if block_header.compressed_size == output_size {
+            // Validate uncompressed data checksum for stored blocks
+            let checksum_valid = if lzop_header.uncompressed_checksum_crc32 {
+                crc32(compressed_block) == block_header.uncompressed_checksum
+            } else {
+                let mut hasher = Adler32::new();
+                hasher.write_slice(compressed_block);
+                hasher.checksum() == block_header.uncompressed_checksum
+            };
+            if !checksum_valid {
+                debug!("LZOP block {} uncompressed checksum mismatch", block_count);
+                return result;
+            }
             decompressed.extend_from_slice(compressed_block);
             data_offset = compressed_end + block_header.checksum_size;
         } else {
             let mut out_buf = vec![0u8; output_size];
             match lzo::decompress_into(compressed_block, &mut out_buf) {
                 Ok(n) => {
+                    // Validate uncompressed data checksum
+                    let checksum_valid = if lzop_header.uncompressed_checksum_crc32 {
+                        crc32(&out_buf[..n]) == block_header.uncompressed_checksum
+                    } else {
+                        let mut hasher = Adler32::new();
+                        hasher.write_slice(&out_buf[..n]);
+                        hasher.checksum() == block_header.uncompressed_checksum
+                    };
+                    if !checksum_valid {
+                        debug!("LZOP block {} uncompressed checksum mismatch", block_count);
+                        return result;
+                    }
                     decompressed.extend_from_slice(&out_buf[..n]);
                     data_offset = compressed_end + block_header.checksum_size;
                 }
@@ -344,12 +393,18 @@ fn extract_lzo_data(
         return result;
     }
 
-    // We don't validate the EOF marker for extraction — successful
-    // block decompression is sufficient.  Include it in the reported
-    // size so it matches what the parser computed.
-    const EOF_MARKER_SIZE: usize = 4;
-    result.size = Some(lzop_header.header_size + data_offset + EOF_MARKER_SIZE);
-    result.success = true;
+    // Validate the EOF marker to confirm clean termination
+    let eof_offset = data_offset;
+    match parse_lzop_eof_marker(lzo_data.get(eof_offset..).unwrap_or_default()) {
+        Ok(eof_size) => {
+            result.size = Some(lzop_header.header_size + eof_offset + eof_size);
+            result.success = true;
+        }
+        Err(_) => {
+            debug!("LZOP: invalid or missing EOF marker");
+            return result;
+        }
+    }
 
     if let Some(chroot) = output_directory.map(Chroot::new) {
         const OUTPUT_FILE_NAME: &str = "decompressed.bin";

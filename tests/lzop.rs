@@ -58,6 +58,12 @@ fn dot_bin_suffix() {
     common::integration_test("lzop", "lzop_dotbin.bin");
 }
 
+/// LZOP with CRC32 checksums (lzop --crc32).
+#[test]
+fn crc32_checksums() {
+    common::integration_test("lzop", "lzop_crc32.bin");
+}
+
 // ── Edge cases ───────────────────────────────────────────────────────
 
 /// Trailing garbage after the LZOP blocks must not break extraction.
