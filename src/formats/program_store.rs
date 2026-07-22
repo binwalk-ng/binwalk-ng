@@ -176,16 +176,21 @@ pub fn parse_program_store_header(data: &[u8]) -> Result<ProgramStoreHeader, Str
         return Err(StructureError);
     };
 
+    let payload_len = raw.len.get() as usize;
+    if payload_len == 0 || payload_len > rest.len() {
+        return Err(StructureError);
+    }
+
+    // name must be non-empty, but null terminated
+    if raw.name[0] == b'\0' || *raw.name.last().unwrap() != 0 {
+        return Err(StructureError);
+    }
+
     let Some(compression) = parse_compression(raw.ctrl_compression) else {
         return Err(StructureError);
     };
 
     if ![0, 1].contains(&raw.ctrl_split) {
-        return Err(StructureError);
-    }
-
-    // Last byte of the name field must be NUL
-    if *raw.name.last().unwrap() != 0 {
         return Err(StructureError);
     }
 
@@ -196,14 +201,6 @@ pub fn parse_program_store_header(data: &[u8]) -> Result<ProgramStoreHeader, Str
     }
 
     if raw.reserved != 0 {
-        return Err(StructureError);
-    }
-
-    let payload_len = raw.len.get() as usize;
-    if payload_len == 0 {
-        return Err(StructureError);
-    }
-    if payload_len > rest.len() {
         return Err(StructureError);
     }
 
@@ -261,9 +258,6 @@ pub fn parse_program_store_header(data: &[u8]) -> Result<ProgramStoreHeader, Str
     }
 
     let filename = get_cstring(&raw.name);
-    if filename.is_empty() {
-        return Err(StructureError);
-    }
 
     Ok(ProgramStoreHeader {
         sig: raw.sig,
