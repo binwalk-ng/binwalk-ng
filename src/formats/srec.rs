@@ -24,7 +24,7 @@ pub fn srec_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
     let file_data = &file_data[offset..];
     let mut remaining = file_data;
 
-    let mut os_type = None;
+    let mut os_type = "Unknown";
     let mut saw_data = false;
     while let Ok((record, rest)) = take_srec_record(remaining) {
         if !record.checksum_valid() {
@@ -36,17 +36,16 @@ pub fn srec_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
             saw_data = true;
         }
 
-        // Require a terminal record at the end
+        // If there is a terminal record, infer the OS and break
         if record.ty.is_terminal() {
-            os_type = Some(match record.line_end {
+            os_type = match record.line_end {
                 LineEnd::Lf => "Unix",
                 LineEnd::CrLf => "Windows",
-            });
+            };
             break;
         }
     }
 
-    let os_type: &str = os_type.ok_or(SignatureError)?;
     if !saw_data {
         return Err(SignatureError);
     }
@@ -373,6 +372,10 @@ mod tests {
         // Missing S7/S8/S9 termination record.
         let srec = b"S107000000010203F2\n\
                       S107000804050607DA\n";
-        assert!(srec_parser(srec, 0).is_err());
+        let decoded = decode_srec(srec).unwrap();
+        assert_snapshot!(
+            hex::encode(&decoded),
+            @"000102030000000004050607"
+        );
     }
 }
