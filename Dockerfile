@@ -90,7 +90,6 @@ RUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv,target=/bin/uv \
     tzdata \
     python3 \
     7zip \
-    srecord \
     sleuthkit \
     cabextract \
     lzop \
@@ -116,8 +115,8 @@ RUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv,target=/bin/uv \
     && chmod 777 ${DEFAULT_WORKING_DIR}
 
 # Container with all build dependencies, as well as all runtime dependencies, for tests
-# e.g. `docker build --target dev . --tag 'binwalk:dev'`
-# `docker run --rm -it -v $(pwd):/tmp/binwalk binwalk:dev cargo insta test --review --unreferenced=delete`
+# e.g. `docker build --target dev . --tag 'binwalk-ng:dev'`
+# `docker run --rm -it -v $(pwd):/tmp/binwalk binwalk-ng:dev cargo insta test --review --unreferenced=delete`
 FROM runtime_build AS dev
 # Copy the build artifacts from the scratch build stage
 COPY --link --from=base_build \

@@ -6,7 +6,6 @@ SCRIPT_DIRECTORY=$(dirname -- "$( readlink -f -- "$0"; )")
 # Install dependencies from apt repository
 DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get -y install \
     7zip \
-    srecord \
     unzip \
     sleuthkit \
     cabextract \

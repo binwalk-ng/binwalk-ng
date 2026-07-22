@@ -1,7 +1,7 @@
 name: Quality Checks
 on:
   pull_request:
-    branches: [ main ]
+    branches: [ '*' ]
   push:
     branches: [ main ]
 
