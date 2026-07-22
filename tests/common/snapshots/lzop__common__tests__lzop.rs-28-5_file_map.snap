@@ -1,0 +1,12 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 28229
+  name: lzop
+  confidence: 250
+  description: "LZO compressed data, total size: 28229 bytes"
+  always_display: false
+  extraction_declined: false

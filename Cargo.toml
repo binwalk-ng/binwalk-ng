@@ -65,6 +65,7 @@ rars = "0.4.0"
 tar = "0.4"
 zstd = "0.13.3"
 lz4_flex = "0.14.0"
+lzo = "0.1.1"
 
 [dependencies.uuid]
 version = "1.23.4"
