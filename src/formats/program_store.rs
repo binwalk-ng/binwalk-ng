@@ -9,7 +9,7 @@ use zerocopy::{BE, FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
 /// Offset of the magic within the header: the NUL terminator of the 48-byte
 /// `name` field (byte 67) followed by 8 zero `pad` bytes (bytes 68–75).
-pub const MAGIC_OFFSET: usize = 67;
+pub const MAGIC_OFFSET: usize = offset_of!(ProgramStoreHeaderRaw, pad) - 1;
 const MAGIC_SIZE: usize = 8 + 1;
 
 /// Distance back from the magic to `name[0]`, which a valid header requires to be non-zero.
