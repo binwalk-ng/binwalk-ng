@@ -1,7 +1,8 @@
 use crate::extractors::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
 use crate::structures::StructureError;
-use liblzma::stream::{Action, Status, Stream};
+use liblzma::stream::Stream;
+use std::io;
 use std::path::Path;
 use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
@@ -176,91 +177,86 @@ pub fn lzma_decompress(
 ) -> ExtractionResult {
     // Output file name
     const OUTPUT_FILE_NAME: &str = "decompressed.bin";
-    // Output buffer size
-    const BLOCK_SIZE: usize = 8192;
     // Maximum memory limit: 4GB
     const MEM_LIMIT: u64 = 4 * 1024 * 1024 * 1024;
 
     let mut result = ExtractionResult::default();
 
-    // Output buffer
-    let mut output_buf = [0; BLOCK_SIZE];
-
     // Input compression stream
     let lzma_stream = &file_data[offset..];
 
     // Instantiate a new decoder, auto-detect LZMA or XZ
-    if let Ok(mut decompressor) = Stream::new_auto_decoder(MEM_LIMIT, 0) {
-        // Tracks number of bytes written to disk
-        let mut bytes_written: usize = 0;
-        // Tracks current position of bytes consumed from input stream
-        let mut stream_position: usize = 0;
-
-        /*
-         * Loop through all compressed data and decompress it.
-         *
-         * This has a significant performance hit since 1) decompression takes time, and 2) data is
-         * decompressed once during signature validation and a second time during extraction (if extraction
-         * was requested).
-         *
-         * The advantage is that not only are we 100% sure that this data is a valid LZMA stream, but we
-         * can also determine the exact size of the LZMA data.
-         */
-        loop {
-            // Decompress data into output_buf
-            match decompressor.process(
-                &lzma_stream[stream_position..],
-                &mut output_buf,
-                Action::Run,
-            ) {
-                Err(_) => {
-                    // Decompression error, break
-                    break;
-                }
-                Ok(status) => {
-                    // Check reported status
-                    match status {
-                        Status::GetCheck => break,
-                        Status::MemNeeded => break,
-                        Status::Ok => {
-                            // Decompression OK, but there is still more data to decompress
-                            stream_position = decompressor.total_in() as usize;
-                        }
-                        Status::StreamEnd => {
-                            // Decompression complete. If some data was decompressed, report success, else break.
-                            if decompressor.total_out() > 0 {
-                                result.success = true;
-                                result.size = Some(decompressor.total_in() as usize);
-                            } else {
-                                break;
-                            }
-                        }
-                    }
-
-                    // Some data was decompressed successfully; if extraction was requested, write the data to disk.
-                    if let Some(output_directory) = output_directory {
-                        // Number of decompressed bytes in the output buffer
-                        let n = (decompressor.total_out() as usize) - bytes_written;
-
-                        let chroot = Chroot::new(output_directory);
-                        if !chroot.append_to_file(OUTPUT_FILE_NAME, &output_buf[0..n]) {
-                            // If writing data to disk fails, report failure and break
-                            result.success = false;
-                            break;
-                        }
-
-                        // Remember how much data has been written to disk
-                        bytes_written += n;
-                    }
-
-                    // If result.success is true, then everything has been processed and written to disk successfully.
-                    if result.success {
-                        break;
-                    }
+    if let Ok(stream) = Stream::new_auto_decoder(MEM_LIMIT, 0) {
+        let mut decoder = liblzma::bufread::XzDecoder::new_stream(lzma_stream, stream);
+        match output_directory {
+            Some(output_directory) => {
+                let Some(mut file) =
+                    Chroot::new(output_directory).create_file_writer(OUTPUT_FILE_NAME)
+                else {
+                    return result;
+                };
+                if io::copy(&mut decoder, &mut file).is_err() {
+                    return result;
                 }
             }
-        }
+            None => {
+                if io::copy(&mut decoder, &mut io::sink()).is_err() {
+                    return result;
+                }
+            }
+        };
+
+        result.success = true;
+        result.size = Some(decoder.total_in() as usize);
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use liblzma::stream::LzmaOptions;
+    use std::fs::File;
+    use std::io::{Read, Write};
+
+    /// Compress `data` into the legacy LZMA-alone format used by this module's signatures.
+    fn lzma_compress(data: &[u8]) -> Vec<u8> {
+        let options = LzmaOptions::new_preset(6).unwrap();
+        let encoder_stream = Stream::new_lzma_encoder(&options).unwrap();
+        let mut encoder = liblzma::write::XzEncoder::new_stream(Vec::new(), encoder_stream);
+        encoder.write_all(data).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    #[test]
+    fn decompresses_stream_with_trailing_data() {
+        // A payload large enough to satisfy the header's minimum decompressed size.
+        let payload: Vec<u8> = (0..2048u32).map(|n| n as u8).collect();
+        let compressed = lzma_compress(&payload);
+
+        // The LZMA stream followed by unrelated trailing bytes.
+        let mut file_data = compressed.clone();
+        file_data.extend(std::iter::repeat_n(0xAB, 512));
+
+        // Dry run: must succeed and report exactly the compressed stream size,
+        // excluding the trailing data.
+        let dry_run = lzma_decompress(&file_data, 0, None);
+        assert!(dry_run.success);
+        assert_eq!(dry_run.size, Some(compressed.len()));
+
+        // Extraction: the decompressed output must match the original payload,
+        // and the trailing data must not affect the result.
+        let output_dir = tempfile::tempdir().unwrap();
+        let extraction = lzma_decompress(&file_data, 0, Some(output_dir.path()));
+        assert!(extraction.success);
+        assert_eq!(extraction.size, Some(compressed.len()));
+
+        let mut extracted = Vec::new();
+        File::open(output_dir.path().join("decompressed.bin"))
+            .unwrap()
+            .read_to_end(&mut extracted)
+            .unwrap();
+        assert_eq!(extracted, payload);
+    }
 }
