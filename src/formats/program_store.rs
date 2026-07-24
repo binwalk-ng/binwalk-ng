@@ -5,12 +5,19 @@ use crate::structures::StructureError;
 use std::fmt;
 use std::mem::offset_of;
 use std::path::Path;
-use zerocopy::{BE, FromBytes, Immutable, KnownLayout, Unaligned};
+use zerocopy::{BE, FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
 /// Offset of the magic within the header: the NUL terminator of the 48-byte
 /// `name` field (byte 67) followed by 8 zero `pad` bytes (bytes 68–75).
-pub const MAGIC_OFFSET: usize = 67;
+pub const MAGIC_OFFSET: usize = offset_of!(ProgramStoreHeaderRaw, pad) - 1;
 const MAGIC_SIZE: usize = 8 + 1;
+
+/// Distance back from the magic to `name[0]`, which a valid header requires to be non-zero.
+///
+/// The magic is all zeros, so this is the only thing that constrains where a valid header can
+/// begin within a run of zero bytes.
+pub(crate) const NONZERO_BEFORE_MAGIC: usize =
+    MAGIC_OFFSET - offset_of!(ProgramStoreHeaderRaw, name);
 
 pub const DESCRIPTION: &str = "Broadcom ProgramStore firmware image";
 
@@ -119,7 +126,7 @@ pub struct ProgramStoreHeader {
     pub filename: String,
 }
 
-#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C)]
 struct ProgramStoreHeaderRaw {
     sig: [u8; 2],
@@ -176,16 +183,21 @@ pub fn parse_program_store_header(data: &[u8]) -> Result<ProgramStoreHeader, Str
         return Err(StructureError);
     };
 
+    let payload_len = raw.len.get() as usize;
+    if payload_len == 0 || payload_len > rest.len() {
+        return Err(StructureError);
+    }
+
+    // name must be non-empty, but null terminated
+    if raw.name[0] == b'\0' || *raw.name.last().unwrap() != 0 {
+        return Err(StructureError);
+    }
+
     let Some(compression) = parse_compression(raw.ctrl_compression) else {
         return Err(StructureError);
     };
 
     if ![0, 1].contains(&raw.ctrl_split) {
-        return Err(StructureError);
-    }
-
-    // Last byte of the name field must be NUL
-    if *raw.name.last().unwrap() != 0 {
         return Err(StructureError);
     }
 
@@ -196,14 +208,6 @@ pub fn parse_program_store_header(data: &[u8]) -> Result<ProgramStoreHeader, Str
     }
 
     if raw.reserved != 0 {
-        return Err(StructureError);
-    }
-
-    let payload_len = raw.len.get() as usize;
-    if payload_len == 0 {
-        return Err(StructureError);
-    }
-    if payload_len > rest.len() {
         return Err(StructureError);
     }
 
@@ -261,9 +265,6 @@ pub fn parse_program_store_header(data: &[u8]) -> Result<ProgramStoreHeader, Str
     }
 
     let filename = get_cstring(&raw.name);
-    if filename.is_empty() {
-        return Err(StructureError);
-    }
 
     Ok(ProgramStoreHeader {
         sig: raw.sig,
@@ -361,6 +362,7 @@ pub fn extract_program_store(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Binwalk;
 
     static VALID: &[u8] = include_bytes!("../../tests/inputs/program_store.bin");
     static VALID_SPLIT: &[u8] = include_bytes!("../../tests/inputs/program_store_dual.bin");
@@ -377,6 +379,57 @@ mod tests {
         let mut v = fixture.to_vec();
         v[offset] = byte;
         v
+    }
+
+    // Place an image after a run of zero bytes, so that the scanner encounters all-zero magic
+    // matches that fail to parse before it reaches this one. Returns the data and the offset
+    // the image was placed at.
+    fn embed_in_zeros(image: &[u8]) -> (Vec<u8>, usize) {
+        let mut data = vec![0u8; 4096];
+        let offset = data.len();
+        data.extend_from_slice(image);
+        (data, offset)
+    }
+
+    #[test]
+    fn scan_finds_image_after_zero_region() {
+        let (data, offset) = embed_in_zeros(VALID);
+        let file_map = Binwalk::new().scan(&data);
+        assert!(
+            file_map
+                .iter()
+                .any(|r| r.name == "program_store" && r.offset == offset)
+        );
+    }
+
+    #[test]
+    fn scan_finds_image_with_zero_hcs() {
+        let payload = [0u8; 8];
+
+        // `sig` is unvalidated, so it can be chosen to drive `hcs` to zero. With `len1`, `len2`
+        // and `chk` also zero, this is the longest run of zeros a valid image can have starting
+        // at its magic, which is what bounds how far the scanner may skip ahead.
+        let mut image = vec![0u8; HEADER_SIZE];
+        let header = ProgramStoreHeaderRaw::mut_from_bytes(&mut image).unwrap();
+        header.sig = [0xDB, 0x63];
+        header.len.set(payload.len() as u32);
+        header.name[0] = b'a';
+        image.extend_from_slice(&payload);
+
+        assert_eq!(
+            crc16_genibus(&image[..offset_of!(ProgramStoreHeaderRaw, hcs)]),
+            0,
+            "sig value no longer drives hcs to zero"
+        );
+        assert!(parse_program_store_header(&image).is_ok());
+
+        let file_map = Binwalk::new().scan(&image);
+        assert!(
+            file_map
+                .iter()
+                .any(|r| r.name == "program_store" && r.offset == 0),
+            "{file_map:?}"
+        );
     }
 
     #[test]
