@@ -1,4 +1,5 @@
 use crate::common::is_offset_safe;
+use crate::formats::dahua_zip::DAHUA_ZIP_LOCAL_FILE_MAGIC;
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
 use crate::structures::StructureError;
 use aho_corasick::AhoCorasick;
@@ -7,9 +8,11 @@ use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 /// Human readable description
 pub const DESCRIPTION: &str = "ZIP archive";
 
+const ZIP_LOCAL_FILE_MAGIC: [u8; 4] = *b"PK\x03\x04";
+
 /// ZIP file entry magic bytes
 pub fn zip_magic() -> Vec<Vec<u8>> {
-    vec![b"PK\x03\x04".to_vec()]
+    vec![ZIP_LOCAL_FILE_MAGIC.to_vec()]
 }
 
 /// Validates a ZIP file entry signature
@@ -138,12 +141,6 @@ struct ZipHeaderBytes {
 
 /// Validate a ZIP file header
 pub fn parse_zip_header(zip_data: &[u8]) -> Result<ZipFileHeader, StructureError> {
-    // Local file header magic bytes, "PK\x03\x04"
-    const ZIP_LOCAL_FILE_MAGIC: [u8; 4] = *b"PK\x03\x04";
-
-    // Dahua ZIP files replace the magic bytes of the first local file header with "DH\x03\x04"
-    const DAHUA_ZIP_LOCAL_FILE_MAGIC: [u8; 4] = *b"DH\x03\x04";
-
     // Unused flag bits
     const UNUSED_FLAGS_MASK: u16 = 0b11010111_10000000;
 
