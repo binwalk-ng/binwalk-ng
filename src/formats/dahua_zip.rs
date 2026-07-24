@@ -7,11 +7,13 @@ use std::path::Path;
 /// Human readable description
 pub const DESCRIPTION: &str = "Dahua ZIP archive";
 
+// The first ZIP file entry in the Dahua ZIP file is has "DH" instead of "PK".
+// Otherwise, it is a normal ZIP file.
+pub(crate) const DAHUA_ZIP_LOCAL_FILE_MAGIC: [u8; 4] = *b"DH\x03\x04";
+
 /// Dahua ZIP file entry magic bytes
 pub fn dahua_zip_magic() -> Vec<Vec<u8>> {
-    // The first ZIP file entry in the Dahua ZIP file is has "DH" instead of "PK".
-    // Otherwise, it is a normal ZIP file.
-    vec![b"DH\x03\x04".to_vec()]
+    vec![DAHUA_ZIP_LOCAL_FILE_MAGIC.to_vec()]
 }
 
 /// Validates a Dahua ZIP file entry signature
