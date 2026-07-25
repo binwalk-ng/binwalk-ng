@@ -28,6 +28,7 @@ fn single_block_file() {
 fn no_name_file() {
     let results = common::run_binwalk("lzop", "lzop_noname.bin");
     assert_eq!(results.file_map.len(), 1);
+    assert_eq!(results.extractions.len(), 1);
     assert!(results.extractions.values().all(|e| e.success));
 }
 
@@ -36,6 +37,7 @@ fn no_name_file() {
 fn with_path_file() {
     let results = common::run_binwalk("lzop", "lzop_withpath.bin");
     assert_eq!(results.file_map.len(), 1);
+    assert_eq!(results.extractions.len(), 1);
     assert!(results.extractions.values().all(|e| e.success));
 }
 
@@ -44,6 +46,7 @@ fn with_path_file() {
 fn long_filename() {
     let results = common::run_binwalk("lzop", "lzop_longname.bin");
     assert_eq!(results.file_map.len(), 1);
+    assert_eq!(results.extractions.len(), 1);
     assert!(results.extractions.values().all(|e| e.success));
 }
 
@@ -135,7 +138,7 @@ fn bad_magic_rejected() {
 fn truncated_rejected() {
     let raw = read_test_file("lzop.bin");
     // Keep only the header, cut off before the first block.
-    let header_only = &raw[..59];
+    let header_only = &raw[..62];
     let results = run_binwalk_data("lzop", header_only);
     assert!(results.file_map.is_empty());
 }
@@ -154,6 +157,10 @@ fn corrupted_data_fails_extraction() {
         !results.file_map.is_empty(),
         "signature should still be detected"
     );
+    assert!(
+        !results.extractions.is_empty(),
+        "no extraction result recorded"
+    );
     for ext in results.extractions.values() {
         assert!(!ext.success, "extraction should fail on corrupted data");
     }
@@ -171,13 +178,15 @@ fn extraction_verification() {
     });
 }
 
-/// Verify extraction succeeds for FLAG_FILTER fixture
-/// (content is filtered, so we skip byte-for-byte comparison).
+/// Verify decompressed output for FLAG_FILTER fixture.
 #[test]
 fn filter_extraction_verification() {
-    let results = common::run_binwalk("lzop", "lzop_filter.bin");
-    assert_eq!(results.file_map.len(), 1);
-    assert!(results.extractions.values().all(|e| e.success));
+    let expected = fs::read(DECOMPRESSED_REFERENCE).unwrap();
+    extract_and_verify("lzop_filter.bin", |root| {
+        let extracted = root.join("lzop_filter_src.txt");
+        assert!(extracted.exists());
+        assert_eq!(fs::read(&extracted).unwrap(), expected);
+    });
 }
 
 /// Verify decompressed output for method 1 fixture.

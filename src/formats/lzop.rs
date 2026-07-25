@@ -104,6 +104,7 @@ const FLAG_FILTER: u32 = 0x0000_0800;
 pub struct LZOPFileHeader {
     pub header_size: usize,
     pub flags: u32,
+    pub filter_id: u32,
     pub original_filename: Option<String>,
 }
 
@@ -156,6 +157,13 @@ pub fn parse_lzop_file_header(lzop_data: &[u8]) -> Result<LZOPFileHeader, Struct
 
             // Next part of the header may or may not have an optional filter field
             if (lzo_header_p1.flags & FLAG_FILTER) != 0 {
+                if let Some(filter_data) =
+                    lzop_data.get(LZO_HEADER_SIZE_P1..LZO_HEADER_SIZE_P1 + FILTER_SIZE)
+                {
+                    let (filter_id_field, _) = zerocopy::U32::<BE>::ref_from_prefix(filter_data)
+                        .map_err(|_| StructureError)?;
+                    lzop_info.filter_id = filter_id_field.get();
+                }
                 header_p2_start += FILTER_SIZE;
             }
 
@@ -320,6 +328,7 @@ pub fn extract_lzo_data(
     let mut data_offset: usize = 0;
     let mut block_count: usize = 0;
     let mut decompressed = Vec::new();
+    let has_filter = (lzop_header.flags & FLAG_FILTER) != 0;
 
     while let Some(block_data) = lzo_data.get(data_offset..) {
         let block_header = match parse_lzop_block_header(block_data, lzop_header.flags) {
@@ -342,7 +351,6 @@ pub fn extract_lzo_data(
         };
 
         let uncompressed_size = block_header.uncompressed_size;
-        let is_filtered = (lzop_header.flags & FLAG_FILTER) != 0;
 
         // Validate compressed data checksum if present (stored before the data in the stream)
         if block_header.compressed_checksum_present {
@@ -362,54 +370,59 @@ pub fn extract_lzo_data(
             }
         }
 
-        if block_header.compressed_size == uncompressed_size {
-            if !is_filtered {
-                if (lzop_header.flags & FLAG_CRC32_D) != 0
-                    && crc32(compressed_block) != block_header.uncompressed_checksum
-                {
-                    debug!("LZOP block {} uncompressed CRC32 mismatch", block_count);
+        let block_data = if block_header.compressed_size == uncompressed_size {
+            let mut buf = compressed_block.to_vec();
+            if has_filter {
+                reverse_filter_block(&mut buf, lzop_header.filter_id);
+            }
+            if (lzop_header.flags & FLAG_CRC32_D) != 0
+                && crc32(&buf) != block_header.uncompressed_checksum
+            {
+                debug!("LZOP block {} uncompressed CRC32 mismatch", block_count);
+                return result;
+            }
+            if (lzop_header.flags & FLAG_ADLER32_D) != 0 {
+                let mut hasher = Adler32::new();
+                hasher.write_slice(&buf);
+                if hasher.checksum() != block_header.uncompressed_checksum {
+                    debug!("LZOP block {} uncompressed Adler32 mismatch", block_count);
                     return result;
                 }
-                if (lzop_header.flags & FLAG_ADLER32_D) != 0 {
-                    let mut hasher = Adler32::new();
-                    hasher.write_slice(compressed_block);
-                    if hasher.checksum() != block_header.uncompressed_checksum {
-                        debug!("LZOP block {} uncompressed Adler32 mismatch", block_count);
-                        return result;
-                    }
-                }
             }
-            decompressed.extend_from_slice(compressed_block);
-            data_offset = compressed_end;
+            buf
         } else {
             let mut out_buf = vec![0u8; uncompressed_size];
             match lzo::decompress_into(compressed_block, &mut out_buf) {
                 Ok(n) => {
-                    if !is_filtered {
-                        if (lzop_header.flags & FLAG_CRC32_D) != 0
-                            && crc32(&out_buf[..n]) != block_header.uncompressed_checksum
-                        {
-                            debug!("LZOP block {} uncompressed CRC32 mismatch", block_count);
+                    let buf = &mut out_buf[..n];
+                    if has_filter {
+                        reverse_filter_block(buf, lzop_header.filter_id);
+                    }
+                    if (lzop_header.flags & FLAG_CRC32_D) != 0
+                        && crc32(buf) != block_header.uncompressed_checksum
+                    {
+                        debug!("LZOP block {} uncompressed CRC32 mismatch", block_count);
+                        return result;
+                    }
+                    if (lzop_header.flags & FLAG_ADLER32_D) != 0 {
+                        let mut hasher = Adler32::new();
+                        hasher.write_slice(buf);
+                        if hasher.checksum() != block_header.uncompressed_checksum {
+                            debug!("LZOP block {} uncompressed Adler32 mismatch", block_count);
                             return result;
                         }
-                        if (lzop_header.flags & FLAG_ADLER32_D) != 0 {
-                            let mut hasher = Adler32::new();
-                            hasher.write_slice(&out_buf[..n]);
-                            if hasher.checksum() != block_header.uncompressed_checksum {
-                                debug!("LZOP block {} uncompressed Adler32 mismatch", block_count);
-                                return result;
-                            }
-                        }
                     }
-                    decompressed.extend_from_slice(&out_buf[..n]);
-                    data_offset = compressed_end;
+                    out_buf[..n].to_vec()
                 }
                 Err(e) => {
                     debug!("LZO block {} decompression failed: {e:?}", block_count);
                     return result;
                 }
             }
-        }
+        };
+
+        decompressed.extend_from_slice(&block_data);
+        data_offset = compressed_end;
     }
 
     if block_count == 0 {
@@ -444,4 +457,42 @@ pub fn extract_lzo_data(
     }
 
     result
+}
+
+/// Reverse the LZOP pre-compression filter on one block of decompressed data.
+/// Each block was independently filtered during compression and must be
+/// independently reversed with a fresh initial state.
+/// Filter ID 0 = no-op (passthrough). Filter ID 1 = UR filter. Unknown
+/// filter IDs are treated as a no-op.
+fn reverse_filter_block(data: &mut [u8], filter_id: u32) {
+    match filter_id {
+        0 => {}
+        1 => {
+            // t_add1: cumulative sum (applied during decompression to undo t_sub1)
+            let mut b: u8 = 0;
+            for byte in data.iter_mut() {
+                b = b.wrapping_add(*byte);
+                *byte = b;
+            }
+        }
+        2..=16 => {
+            // t_add: multi-byte delta decoding (applied during decompression to undo t_sub)
+            let n = filter_id as usize;
+            if data.len() <= n {
+                return;
+            }
+            let mut circ = vec![0u8; n];
+            let mut i = n - 1;
+            for byte in data.iter_mut() {
+                circ[i] = circ[i].wrapping_add(*byte);
+                *byte = circ[i];
+                if i == 0 {
+                    i = n - 1;
+                } else {
+                    i -= 1;
+                }
+            }
+        }
+        _ => {}
+    }
 }

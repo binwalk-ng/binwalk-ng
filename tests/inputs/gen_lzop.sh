@@ -22,13 +22,15 @@ if [ ! -f extraction_reference.txt ]; then
 fi
 
 REF="extraction_reference.txt"
+FIXED_MTIME="@0"
 
 # ======================================================================
 # 1. Standard multi-block LZOP file (compression level 1)
 #    Stored filename: extraction_reference.txt
 # ======================================================================
 
-cp -p "$REF" "$TMPDIR"/extraction_reference.txt
+cp "$REF" "$TMPDIR"/extraction_reference.txt
+touch -d "$FIXED_MTIME" "$TMPDIR"/extraction_reference.txt
 lzop -1 -c "$TMPDIR"/extraction_reference.txt > lzop.bin
 echo "Created lzop.bin ($(wc -c < lzop.bin) bytes)"
 
@@ -38,7 +40,7 @@ echo "Created lzop.bin ($(wc -c < lzop.bin) bytes)"
 # ======================================================================
 
 echo "This is a small file for single-block testing." > "$TMPDIR"/lzop_single.txt
-touch -r "$REF" "$TMPDIR"/lzop_single.txt
+touch -d "$FIXED_MTIME" "$TMPDIR"/lzop_single.txt
 lzop -1 -c "$TMPDIR"/lzop_single.txt > lzop_single.bin
 echo "Created lzop_single.bin ($(wc -c < lzop_single.bin) bytes)"
 
@@ -47,7 +49,8 @@ echo "Created lzop_single.bin ($(wc -c < lzop_single.bin) bytes)"
 #    Stored filename: (empty)
 # ======================================================================
 
-cp -p "$REF" "$TMPDIR"/lzop_noname_src.txt
+cp "$REF" "$TMPDIR"/lzop_noname_src.txt
+touch -d "$FIXED_MTIME" "$TMPDIR"/lzop_noname_src.txt
 lzop -1 -n -c "$TMPDIR"/lzop_noname_src.txt > lzop_noname.bin
 echo "Created lzop_noname.bin ($(wc -c < lzop_noname.bin) bytes)"
 
@@ -60,7 +63,8 @@ echo "Created lzop_noname.bin ($(wc -c < lzop_noname.bin) bytes)"
 # ======================================================================
 
 mkdir -p ./lzop_fixed_path
-cp -p "$REF" ./lzop_fixed_path/lzop_withpath_src.txt
+cp "$REF" ./lzop_fixed_path/lzop_withpath_src.txt
+touch -d "$FIXED_MTIME" ./lzop_fixed_path/lzop_withpath_src.txt
 lzop -1 -P -c ./lzop_fixed_path/lzop_withpath_src.txt > lzop_withpath.bin
 rm -rf ./lzop_fixed_path
 echo "Created lzop_withpath.bin ($(wc -c < lzop_withpath.bin) bytes)"
@@ -69,9 +73,10 @@ echo "Created lzop_withpath.bin ($(wc -c < lzop_withpath.bin) bytes)"
 # 5. Very long filename (255 char name)
 # ======================================================================
 
-printf '%*s' 255 '' | tr ' ' 'a' > "$TMPDIR"/lzop_longname.txt
-touch -r "$REF" "$TMPDIR"/lzop_longname.txt
-lzop -1 -c "$TMPDIR"/lzop_longname.txt > lzop_longname.bin
+LONG_NAME=$(printf '%*s' 255 '' | tr ' ' 'a')
+printf 'long filename fixture\n' > "$TMPDIR/$LONG_NAME"
+touch -d "$FIXED_MTIME" "$TMPDIR/$LONG_NAME"
+lzop -1 -c "$TMPDIR/$LONG_NAME" > lzop_longname.bin
 echo "Created lzop_longname.bin ($(wc -c < lzop_longname.bin) bytes)"
 
 # ======================================================================
@@ -79,7 +84,7 @@ echo "Created lzop_longname.bin ($(wc -c < lzop_longname.bin) bytes)"
 # ======================================================================
 
 : > "$TMPDIR"/lzop_empty.txt
-touch -r "$REF" "$TMPDIR"/lzop_empty.txt
+touch -d "$FIXED_MTIME" "$TMPDIR"/lzop_empty.txt
 lzop -1 -c "$TMPDIR"/lzop_empty.txt > lzop_empty.bin 2>/dev/null
 echo "Created lzop_empty.bin ($(wc -c < lzop_empty.bin) bytes)"
 
@@ -89,7 +94,7 @@ echo "Created lzop_empty.bin ($(wc -c < lzop_empty.bin) bytes)"
 # ======================================================================
 
 echo "Hello from a .bin file" > "$TMPDIR"/testdata.bin
-touch -r "$REF" "$TMPDIR"/testdata.bin
+touch -d "$FIXED_MTIME" "$TMPDIR"/testdata.bin
 lzop -1 -c "$TMPDIR"/testdata.bin > lzop_dotbin.bin
 echo "Created lzop_dotbin.bin ($(wc -c < lzop_dotbin.bin) bytes)"
 
@@ -98,7 +103,8 @@ echo "Created lzop_dotbin.bin ($(wc -c < lzop_dotbin.bin) bytes)"
 #    Stored filename: extraction_reference.txt
 # ======================================================================
 
-cp -p "$REF" "$TMPDIR"/extraction_reference.txt
+cp "$REF" "$TMPDIR"/extraction_reference.txt
+touch -d "$FIXED_MTIME" "$TMPDIR"/extraction_reference.txt
 lzop --crc32 -1 -c "$TMPDIR"/extraction_reference.txt > lzop_crc32.bin
 echo "Created lzop_crc32.bin ($(wc -c < lzop_crc32.bin) bytes)"
 
@@ -107,7 +113,8 @@ echo "Created lzop_crc32.bin ($(wc -c < lzop_crc32.bin) bytes)"
 #    Stored filename: extraction_reference.txt
 # ======================================================================
 
-cp -p "$REF" "$TMPDIR"/lzop_filter_src.txt
+cp "$REF" "$TMPDIR"/lzop_filter_src.txt
+touch -d "$FIXED_MTIME" "$TMPDIR"/lzop_filter_src.txt
 lzop --filter=1 -1 -c "$TMPDIR"/lzop_filter_src.txt > lzop_filter.bin
 echo "Created lzop_filter.bin ($(wc -c < lzop_filter.bin) bytes)"
 
@@ -116,7 +123,8 @@ echo "Created lzop_filter.bin ($(wc -c < lzop_filter.bin) bytes)"
 #     Stored filename: extraction_reference.txt
 # ======================================================================
 
-cp -p "$REF" "$TMPDIR"/lzop_method1_src.txt
+cp "$REF" "$TMPDIR"/lzop_method1_src.txt
+touch -d "$FIXED_MTIME" "$TMPDIR"/lzop_method1_src.txt
 lzop -2 -c "$TMPDIR"/lzop_method1_src.txt > lzop_method1.bin
 echo "Created lzop_method1.bin ($(wc -c < lzop_method1.bin) bytes)"
 
@@ -125,7 +133,8 @@ echo "Created lzop_method1.bin ($(wc -c < lzop_method1.bin) bytes)"
 #     Stored filename: extraction_reference.txt
 # ======================================================================
 
-cp -p "$REF" "$TMPDIR"/lzop_method3_src.txt
+cp "$REF" "$TMPDIR"/lzop_method3_src.txt
+touch -d "$FIXED_MTIME" "$TMPDIR"/lzop_method3_src.txt
 lzop -99 -c "$TMPDIR"/lzop_method3_src.txt > lzop_method3.bin
 echo "Created lzop_method3.bin ($(wc -c < lzop_method3.bin) bytes)"
 
