@@ -92,7 +92,6 @@ RUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv,target=/bin/uv \
     7zip \
     sleuthkit \
     cabextract \
-    lzop \
     unyaffs \
     zlib1g \
     zlib1g-dev \

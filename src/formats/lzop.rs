@@ -1,7 +1,11 @@
-use crate::common::is_offset_safe;
-use crate::extractors;
+use crate::common::{crc32, is_offset_safe};
+use crate::extractors::{self, Chroot, ExtractionResult, ExtractorType};
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
 use crate::structures::StructureError;
+use adler2::Adler32;
+use log::debug;
+use std::ffi::OsStr;
+use std::path::Path;
 use zerocopy::{BE, FromBytes, Immutable, KnownLayout, Unaligned};
 
 /// Human readable description
@@ -14,7 +18,7 @@ pub fn lzop_magic() -> Vec<Vec<u8>> {
 
 /// Validate an LZOP signature
 pub fn lzop_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, SignatureError> {
-    // Success retrun value
+    // Success return value
     let mut result = SignatureResult {
         offset,
         description: DESCRIPTION.to_string(),
@@ -27,7 +31,7 @@ pub fn lzop_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
         && let Some(lzop_data) = file_data.get(offset + lzop_header.header_size..)
     {
         // Get the size of the compressed LZO data
-        if let Ok(data_size) = get_lzo_data_size(lzop_data, lzop_header.block_checksum_present) {
+        if let Ok(data_size) = get_lzo_data_size(lzop_data, lzop_header.flags) {
             // Update the total size to include the LZO data
             result.size = lzop_header.header_size + data_size;
             result.description =
@@ -40,12 +44,8 @@ pub fn lzop_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
 }
 
 // Parse the LZO blocks to determine the size of the compressed data, including the terminating EOF marker
-fn get_lzo_data_size(
-    lzo_data: &[u8],
-    compressed_checksum_present: bool,
-) -> Result<usize, SignatureError> {
-    // Technially LZOP could have one block, but this would seem uncommon
-    const MIN_BLOCK_COUNT: usize = 2;
+fn get_lzo_data_size(lzo_data: &[u8], flags: u32) -> Result<usize, SignatureError> {
+    const MIN_BLOCK_COUNT: usize = 1;
 
     let available_data = lzo_data.len();
     let mut last_offset = None;
@@ -55,7 +55,7 @@ fn get_lzo_data_size(
     // Loop until we run out of data or an invalid block header is encountered
     while is_offset_safe(available_data, data_size, last_offset) {
         // Parse the next block header
-        match parse_lzop_block_header(&lzo_data[data_size..], compressed_checksum_present) {
+        match parse_lzop_block_header(&lzo_data[data_size..], flags) {
             Err(_) => {
                 break;
             }
@@ -64,9 +64,14 @@ fn get_lzo_data_size(
                 // Update block count, offset, and size
                 block_count += 1;
                 last_offset = Some(data_size);
+                let compressed_checksum_size = if block_header.compressed_checksum_present {
+                    LZO_CHECKSUM_SIZE
+                } else {
+                    0
+                };
                 data_size += block_header.header_size
-                    + block_header.compressed_size
-                    + block_header.checksum_size;
+                    + compressed_checksum_size
+                    + block_header.compressed_size;
             }
         }
     }
@@ -88,11 +93,18 @@ fn get_lzo_data_size(
 /// LZO checksums are 4-bytes long
 const LZO_CHECKSUM_SIZE: usize = 4;
 
+const FLAG_ADLER32_D: u32 = 0x0000_0001;
+const FLAG_ADLER32_C: u32 = 0x0000_0002;
+const FLAG_CRC32_D: u32 = 0x0000_0100;
+const FLAG_CRC32_C: u32 = 0x0000_0200;
+const FLAG_FILTER: u32 = 0x0000_0800;
+
 /// Struct to store LZOP file header info
 #[derive(Debug, Default, Clone)]
 pub struct LZOPFileHeader {
     pub header_size: usize,
-    pub block_checksum_present: bool,
+    pub flags: u32,
+    pub original_filename: Option<String>,
 }
 
 #[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
@@ -127,12 +139,6 @@ pub fn parse_lzop_file_header(lzop_data: &[u8]) -> Result<LZOPFileHeader, Struct
 
     const FILTER_SIZE: usize = 4;
 
-    const FLAG_FILTER: u32 = 0x000_00800;
-    //const FLAG_CRC32_D: usize = 0x0000_0100;
-    const FLAG_CRC32_C: u32 = 0x0000_0200;
-    //const FLAG_ADLER32_D: usize = 0x0000_0001;
-    const FLAG_ADLER32_C: u32 = 0x0000_0002;
-
     let allowed_methods = [1, 2, 3];
 
     let mut lzop_info = LZOPFileHeader::default();
@@ -165,9 +171,17 @@ pub fn parse_lzop_file_header(lzop_data: &[u8]) -> Result<LZOPFileHeader, Struct
                 lzop_info.header_size =
                     header_p2_end + lzo_header_p2.file_name_length as usize + LZO_CHECKSUM_SIZE;
 
-                // Check if block headers include an optional compressed data checksum field
-                lzop_info.block_checksum_present =
-                    (lzo_header_p1.flags & (FLAG_ADLER32_C | FLAG_CRC32_C)) != 0;
+                // Extract the original filename stored in the header
+                let filename_start = header_p2_end;
+                let filename_end = filename_start + lzo_header_p2.file_name_length as usize;
+                if let Some(filename_bytes) = lzop_data.get(filename_start..filename_end)
+                    && !filename_bytes.is_empty()
+                {
+                    lzop_info.original_filename = Some(crate::common::get_cstring(filename_bytes));
+                }
+
+                // Determine checksum types
+                lzop_info.flags = lzo_header_p1.flags.get();
 
                 // Sanity check on the calculated header size
                 if lzop_info.header_size <= lzop_data.len() {
@@ -185,7 +199,10 @@ pub fn parse_lzop_file_header(lzop_data: &[u8]) -> Result<LZOPFileHeader, Struct
 pub struct LZOPBlockHeader {
     pub header_size: usize,
     pub compressed_size: usize,
-    pub checksum_size: usize,
+    pub uncompressed_size: usize,
+    pub uncompressed_checksum: u32,
+    pub compressed_checksum: u32,
+    pub compressed_checksum_present: bool,
 }
 
 #[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
@@ -199,34 +216,51 @@ struct LZOPBlockHeaderBytes {
 /// Parse an LZO block header
 pub fn parse_lzop_block_header(
     lzo_data: &[u8],
-    compressed_checksum_present: bool,
+    flags: u32,
 ) -> Result<LZOPBlockHeader, StructureError> {
-    const BLOCK_HEADER_SIZE: usize = 12;
     const MAX_UNCOMPRESSED_BLOCK_SIZE: u32 = 64 * 1024 * 1024;
 
-    let (block_header, _) =
+    let (fields, _) =
         LZOPBlockHeaderBytes::ref_from_prefix(lzo_data).map_err(|_| StructureError)?;
-    // Basic sanity check on the block header values
-    if block_header.compressed_size != 0
-        && block_header.uncompressed_size != 0
-        && block_header.uncompressed_checksum != 0
-        && block_header.uncompressed_size <= MAX_UNCOMPRESSED_BLOCK_SIZE
-    {
-        let mut block_hdr_info = LZOPBlockHeader {
-            header_size: BLOCK_HEADER_SIZE,
-            compressed_size: block_header.compressed_size.get() as usize,
-            ..Default::default()
-        };
+    let uncompressed = fields.uncompressed_size.get();
+    let compressed = fields.compressed_size.get();
 
-        // Checksum field is optional
-        if compressed_checksum_present {
-            block_hdr_info.checksum_size = LZO_CHECKSUM_SIZE;
-        }
-
-        return Ok(block_hdr_info);
+    if uncompressed == 0 || uncompressed > MAX_UNCOMPRESSED_BLOCK_SIZE {
+        return Err(StructureError);
+    }
+    if compressed == 0 || compressed > uncompressed {
+        return Err(StructureError);
     }
 
-    Err(StructureError)
+    let has_uncompressed_checksum = (flags & (FLAG_ADLER32_D | FLAG_CRC32_D)) != 0;
+    let header_size = if has_uncompressed_checksum { 12 } else { 8 };
+
+    let uncompressed_checksum = if has_uncompressed_checksum {
+        fields.uncompressed_checksum.get()
+    } else {
+        0
+    };
+
+    let is_stored = compressed == uncompressed;
+    let compressed_checksum_present = !is_stored && (flags & (FLAG_ADLER32_C | FLAG_CRC32_C)) != 0;
+
+    let compressed_checksum = if compressed_checksum_present {
+        let remaining = lzo_data.get(header_size..).ok_or(StructureError)?;
+        let (checksum, _) =
+            zerocopy::U32::<BE>::ref_from_prefix(remaining).map_err(|_| StructureError)?;
+        checksum.get()
+    } else {
+        0
+    };
+
+    Ok(LZOPBlockHeader {
+        header_size,
+        compressed_size: compressed as usize,
+        uncompressed_size: uncompressed as usize,
+        uncompressed_checksum,
+        compressed_checksum,
+        compressed_checksum_present,
+    })
 }
 
 /// Parse an LZOP EOF marker, returns the size of the EOF marker (always 4 bytes)
@@ -245,39 +279,169 @@ pub fn parse_lzop_eof_marker(eof_data: &[u8]) -> Result<usize, StructureError> {
     }
 }
 
-/// Describes how to run the lzop utility to extract LZO compressed files
+/// Internal extractor for LZOP compressed data
 ///
 /// ```
-/// use std::io::ErrorKind;
-/// use std::process::Command;
 /// use binwalk_ng::extractors::ExtractorType;
 /// use binwalk_ng::formats::lzop::lzop_extractor;
 ///
 /// match lzop_extractor().utility {
 ///     ExtractorType::None => panic!("Invalid extractor type of None"),
 ///     ExtractorType::Internal(func) => println!("Internal extractor OK: {:?}", func),
-///     ExtractorType::External(cmd) => {
-///         if let Err(e) = Command::new(&cmd).output() {
-///             if e.kind() == ErrorKind::NotFound {
-///                 panic!("External extractor '{}' not found", cmd);
-///             } else {
-///                 panic!("Failed to execute external extractor '{}': {}", cmd, e);
-///             }
-///         }
-///     }
+///     ExtractorType::External(cmd) => panic!("Unexpected external extractor '{}'", cmd),
 /// }
 /// ```
 pub fn lzop_extractor() -> extractors::Extractor {
     extractors::Extractor {
-        utility: extractors::ExtractorType::External("lzop".to_string()),
-        extension: "lzo".to_string(),
-        arguments: vec![
-            "-p".to_string(), // Output to the current directory
-            "-N".to_string(), // Restore original file name
-            "-d".to_string(), // Perform a decompression
-            extractors::SOURCE_FILE_PLACEHOLDER.to_string(),
-        ],
-        exit_codes: vec![0],
+        utility: ExtractorType::Internal(extract_lzo_data),
         ..Default::default()
     }
+}
+
+/// Internal extractor for LZO compressed files
+pub fn extract_lzo_data(
+    file_data: &[u8],
+    offset: usize,
+    output_directory: Option<&Path>,
+) -> ExtractionResult {
+    let mut result = ExtractionResult::default();
+
+    // Parse the LZOP header
+    let lzop_header = match parse_lzop_file_header(&file_data[offset..]) {
+        Ok(h) => h,
+        Err(_) => return result,
+    };
+
+    let Some(lzo_data) = file_data.get(offset + lzop_header.header_size..) else {
+        return result;
+    };
+
+    // Iterate through blocks and decompress each one
+    let mut data_offset: usize = 0;
+    let mut block_count: usize = 0;
+    let mut decompressed = Vec::new();
+
+    while let Some(block_data) = lzo_data.get(data_offset..) {
+        let block_header = match parse_lzop_block_header(block_data, lzop_header.flags) {
+            Ok(h) => h,
+            Err(_) => break,
+        };
+
+        block_count += 1;
+
+        let compressed_checksum_size = if block_header.compressed_checksum_present {
+            LZO_CHECKSUM_SIZE
+        } else {
+            0
+        };
+        let compressed_start = data_offset + block_header.header_size + compressed_checksum_size;
+        let compressed_end = compressed_start + block_header.compressed_size;
+
+        let Some(compressed_block) = lzo_data.get(compressed_start..compressed_end) else {
+            break;
+        };
+
+        let uncompressed_size = block_header.uncompressed_size;
+        let is_filtered = (lzop_header.flags & FLAG_FILTER) != 0;
+
+        // Validate compressed data checksum if present (stored before the data in the stream)
+        if block_header.compressed_checksum_present {
+            if (lzop_header.flags & FLAG_CRC32_C) != 0
+                && crc32(compressed_block) != block_header.compressed_checksum
+            {
+                debug!("LZOP block {} compressed CRC32 mismatch", block_count);
+                return result;
+            }
+            if (lzop_header.flags & FLAG_ADLER32_C) != 0 {
+                let mut hasher = Adler32::new();
+                hasher.write_slice(compressed_block);
+                if hasher.checksum() != block_header.compressed_checksum {
+                    debug!("LZOP block {} compressed Adler32 mismatch", block_count);
+                    return result;
+                }
+            }
+        }
+
+        if block_header.compressed_size == uncompressed_size {
+            if !is_filtered {
+                if (lzop_header.flags & FLAG_CRC32_D) != 0
+                    && crc32(compressed_block) != block_header.uncompressed_checksum
+                {
+                    debug!("LZOP block {} uncompressed CRC32 mismatch", block_count);
+                    return result;
+                }
+                if (lzop_header.flags & FLAG_ADLER32_D) != 0 {
+                    let mut hasher = Adler32::new();
+                    hasher.write_slice(compressed_block);
+                    if hasher.checksum() != block_header.uncompressed_checksum {
+                        debug!("LZOP block {} uncompressed Adler32 mismatch", block_count);
+                        return result;
+                    }
+                }
+            }
+            decompressed.extend_from_slice(compressed_block);
+            data_offset = compressed_end;
+        } else {
+            let mut out_buf = vec![0u8; uncompressed_size];
+            match lzo::decompress_into(compressed_block, &mut out_buf) {
+                Ok(n) => {
+                    if !is_filtered {
+                        if (lzop_header.flags & FLAG_CRC32_D) != 0
+                            && crc32(&out_buf[..n]) != block_header.uncompressed_checksum
+                        {
+                            debug!("LZOP block {} uncompressed CRC32 mismatch", block_count);
+                            return result;
+                        }
+                        if (lzop_header.flags & FLAG_ADLER32_D) != 0 {
+                            let mut hasher = Adler32::new();
+                            hasher.write_slice(&out_buf[..n]);
+                            if hasher.checksum() != block_header.uncompressed_checksum {
+                                debug!("LZOP block {} uncompressed Adler32 mismatch", block_count);
+                                return result;
+                            }
+                        }
+                    }
+                    decompressed.extend_from_slice(&out_buf[..n]);
+                    data_offset = compressed_end;
+                }
+                Err(e) => {
+                    debug!("LZO block {} decompression failed: {e:?}", block_count);
+                    return result;
+                }
+            }
+        }
+    }
+
+    if block_count == 0 {
+        debug!("LZOP: no valid blocks found");
+        return result;
+    }
+
+    // Validate the EOF marker to confirm clean termination
+    let eof_offset = data_offset;
+    let eof_size = match parse_lzop_eof_marker(lzo_data.get(eof_offset..).unwrap_or_default()) {
+        Ok(s) => s,
+        Err(_) => {
+            debug!(
+                "LZOP: invalid or missing EOF marker (offset={}, remaining={})",
+                eof_offset,
+                lzo_data.len().saturating_sub(eof_offset)
+            );
+            return result;
+        }
+    };
+
+    result.success = true;
+    result.size = Some(lzop_header.header_size + eof_offset + eof_size);
+    if let Some(chroot) = output_directory.map(Chroot::new) {
+        const OUTPUT_FILE_NAME: &str = "decompressed.bin";
+        let output_name = lzop_header
+            .original_filename
+            .as_deref()
+            .and_then(|name| Path::new(name).file_name())
+            .unwrap_or_else(|| OsStr::new(OUTPUT_FILE_NAME));
+        result.success = chroot.create_file(output_name, &decompressed);
+    }
+
+    result
 }
