@@ -1,6 +1,8 @@
 # binwalk-ng
 
-A Rust re-implementation of the [ReFirmLabs/binwalk](https://github.com/ReFirmLabs/binwalk) firmware analysis tool. Identifies and extracts files and data embedded inside other files — compressed archives, file systems, boot images, executables, and more.
+A firmware analysis tool. Identifies and extracts files and data embedded inside other files — compressed archives, file systems, boot images, executables, and more.
+
+This repository is a fork of the [ReFirmLabs/binwalk](https://github.com/ReFirmLabs/binwalk) project.
 
 ## Features
 
