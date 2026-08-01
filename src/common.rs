@@ -174,3 +174,90 @@ pub fn is_offset_safe(
 
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn epoch_to_string_zero_epoch() {
+        assert_eq!(epoch_to_string(0), "1970-01-01 00:00:00");
+    }
+
+    #[test]
+    fn epoch_to_string_positive_epoch() {
+        assert_eq!(epoch_to_string(86400), "1970-01-02 00:00:00");
+    }
+
+    #[test]
+    fn epoch_to_string_negative_epoch() {
+        assert_eq!(epoch_to_string(-1), "1969-12-31 23:59:59");
+    }
+
+    #[test]
+    fn epoch_to_string_out_of_range_returns_empty_string() {
+        assert_eq!(epoch_to_string(i64::MAX), "");
+        assert_eq!(epoch_to_string(i64::MIN), "");
+    }
+
+    #[test]
+    fn epoch_to_string_accepts_signed_and_unsigned_types() {
+        assert_eq!(epoch_to_string(0u32), "1970-01-01 00:00:00");
+    }
+
+    #[test]
+    fn is_offset_safe_zero_length_data() {
+        assert!(!is_offset_safe(0, 0, None));
+        assert!(!is_offset_safe(0, 1, None));
+    }
+
+    #[test]
+    fn is_offset_safe_next_offset_at_eof_is_unsafe() {
+        assert!(!is_offset_safe(4, 4, None));
+        assert!(!is_offset_safe(4, 5, None));
+    }
+
+    #[test]
+    fn is_offset_safe_valid_next_offset_without_previous() {
+        assert!(is_offset_safe(4, 0, None));
+        assert!(is_offset_safe(4, 3, None));
+    }
+
+    #[test]
+    fn is_offset_safe_previous_offset_must_be_less_than_next() {
+        assert!(is_offset_safe(4, 2, Some(1)));
+        assert!(!is_offset_safe(4, 2, Some(2)));
+        assert!(!is_offset_safe(4, 1, Some(2)));
+        assert!(!is_offset_safe(4, 2, Some(3)));
+    }
+
+    #[test]
+    fn read_or_map_file_returns_file_contents() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(b"test data").unwrap();
+
+        let mapped = read_or_map_file(tmp.path(), true).unwrap();
+        let read = read_or_map_file(tmp.path(), false).unwrap();
+
+        assert_eq!(mapped.as_ref(), b"test data");
+        assert_eq!(read.as_ref(), b"test data");
+    }
+
+    #[test]
+    fn read_or_map_file_empty_file() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+
+        let mapped = read_or_map_file(tmp.path(), true).unwrap();
+        let read = read_or_map_file(tmp.path(), false).unwrap();
+
+        assert_eq!(mapped.as_ref(), b"");
+        assert_eq!(read.as_ref(), b"");
+    }
+
+    #[test]
+    fn read_or_map_file_missing_file_returns_error() {
+        assert!(read_or_map_file(Path::new("/nonexistent/file"), true).is_err());
+        assert!(read_or_map_file(Path::new("/nonexistent/file"), false).is_err());
+    }
+}
