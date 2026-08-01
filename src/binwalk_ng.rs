@@ -572,13 +572,12 @@ impl Binwalk {
                 break;
             }
 
-            let this_signature = file_map[i].clone();
-            let remaining_available_size = file_data.len() - this_signature.offset;
+            let this_signature = &file_map[i];
 
             // Check if the previous file map entry had the same reported starting offset as this one
             if i > 0 && this_signature.offset == file_map[i - 1].offset {
                 // Get the previous signature in the file map
-                let previous_signature = file_map[i - 1].clone();
+                let previous_signature = &file_map[i - 1];
 
                 // If this file map entry and the conflicting entry do not have the same confidence level, default to the one with highest confidence
                 if this_signature.confidence != previous_signature.confidence {
@@ -591,6 +590,8 @@ impl Binwalk {
                     if this_signature.confidence > previous_signature.confidence {
                         file_map.remove(i - 1);
                         index_adjustment += 1;
+                        // This signature was not removed, but it shifted down to index i - 1
+                        i -= 1;
 
                     // Else, this signature has a lower confidence; invalidate this signature and continue to the next signature in the list
                     } else {
@@ -620,6 +621,10 @@ impl Binwalk {
                 index_adjustment += 1;
                 continue;
             }
+
+            // The signature being examined may have shifted down in the file map; get a fresh reference to it at its current index
+            let this_signature = &file_map[i];
+            let remaining_available_size = file_data.len() - this_signature.offset;
 
             // If we've made it this far, make sure this signature's data doesn't extend beyond EOF and that the file data doesn't wrap around
             if this_signature.size > remaining_available_size
