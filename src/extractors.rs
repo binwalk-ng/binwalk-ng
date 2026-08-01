@@ -2125,4 +2125,37 @@ mod execution_tests {
         let output_file = Path::new(&result.output_directory).join("extracted.txt");
         assert_eq!(std::fs::read(output_file).unwrap(), b"hello");
     }
+
+    /// A signature may specify a preferred extractor, which overrides the default one.
+    #[test]
+    fn preferred_extractor_overrides_the_default_extractor() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let file_data = vec![0xAA; 32];
+
+        let extractor_definition = |script: &str| Extractor {
+            utility: ExtractorType::External("sh".to_string()),
+            extension: "bin".to_string(),
+            arguments: vec![
+                "-c".to_string(),
+                script.to_string(),
+                SOURCE_FILE_PLACEHOLDER.to_string(),
+            ],
+            exit_codes: vec![0],
+            ..Default::default()
+        };
+
+        let mut signature = make_signature("preferred", 16);
+        signature.preferred_extractor =
+            Some(extractor_definition("echo preferred > preferred.txt"));
+        let default_extractor = extractor_definition("echo default > default.txt");
+
+        let result = execute(&file_data, tmp.path(), &signature, &Some(default_extractor));
+        assert!(result.success);
+        let output_directory = Path::new(&result.output_directory);
+        assert!(
+            output_directory.join("preferred.txt").exists(),
+            "the preferred extractor must be used instead of the default one"
+        );
+        assert!(!output_directory.join("default.txt").exists());
+    }
 }

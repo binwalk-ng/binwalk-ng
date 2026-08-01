@@ -1894,4 +1894,34 @@ mod tests {
         assert_eq!(file_map.len(), 1, "{file_map:?}");
         assert_eq!(file_map[0].name, "exact_len");
     }
+
+    /// Every default signature table entry must be structurally sound: a unique non-empty name
+    /// (it keys the extractor lookup table and the include/exclude name filters, so duplicates or
+    /// empty names silently misbehave) and at least one non-empty magic pattern.
+    #[test]
+    fn default_signatures_have_unique_names_and_non_empty_magic() {
+        let patterns = magic::patterns();
+
+        let mut names = std::collections::HashSet::new();
+        for signature in &patterns {
+            assert!(!signature.name.is_empty(), "signature has an empty name");
+            assert!(
+                names.insert(signature.name.to_ascii_lowercase()),
+                "duplicate signature name: {}",
+                signature.name,
+            );
+            assert!(
+                !signature.magic.is_empty(),
+                "signature {} has no magic patterns",
+                signature.name,
+            );
+            for magic_pattern in &signature.magic {
+                assert!(
+                    !magic_pattern.is_empty(),
+                    "signature {} has an empty magic pattern",
+                    signature.name,
+                );
+            }
+        }
+    }
 }
