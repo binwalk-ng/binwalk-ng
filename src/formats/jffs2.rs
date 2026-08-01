@@ -64,7 +64,7 @@ pub fn jffs2_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
             let grep = AhoCorasick::new(vec![node_magic]).unwrap();
 
             // Find all matching JFFS2 node magic bytes
-            for magic_match in grep.find_overlapping_iter(&file_data[grep_offset..].to_vec()) {
+            for magic_match in grep.find_overlapping_iter(&file_data[grep_offset..]) {
                 // Calculate the start and end of the node header inside the file data
                 let header_start: usize = grep_offset + magic_match.start();
                 let header_end: usize = header_start + JFFS2_NODE_STRUCT_SIZE;
