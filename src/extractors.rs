@@ -1531,6 +1531,7 @@ fn spawn(
         }
     }
 
+    // Replace all "%e" (SOURCE_FILE_PLACEHOLDER) command arguments with the path to the carved file
     let arguments: Vec<&str> = extractor
         .arguments
         .iter()
