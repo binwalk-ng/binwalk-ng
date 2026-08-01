@@ -61,7 +61,7 @@ pub struct CliArgs {
 
     /// Manually specify the number of threads to use
     #[arg(short, long, value_name = "INT", value_parser = clap::value_parser!(u64).range(1..))]
-    pub threads: Option<usize>,
+    pub threads: Option<u64>,
 
     /// Do not scan for these signatures
     #[arg(
@@ -87,4 +87,11 @@ pub struct CliArgs {
     /// Extract files/folders to a custom directory
     #[arg(short, long, default_value = "extractions", value_hint = clap::ValueHint::DirPath)]
     pub directory: PathBuf,
+
+    /// Disable the use of memory maps
+    ///
+    /// binwalk may abort unexpectedly when memory maps are used if it searches a file that is
+    /// simultaneously truncated. Users can opt out of this possibility by disabling memory maps.
+    #[arg(long)]
+    pub no_mmap: bool,
 }

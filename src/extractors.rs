@@ -1402,7 +1402,13 @@ pub fn execute(
                     }
 
                     ExtractorType::Internal(func) => {
-                        debug!("Executing internal {} extractor", signature.name);
+                        debug!(
+                            "Executing internal {} extractor on {} @ {} (size:{})",
+                            signature.name,
+                            file_path.as_ref().display(),
+                            signature.offset,
+                            signature.size,
+                        );
                         // Run the internal extractor function
                         result = func(file_data, signature.offset, Some(&output_directory));
                         // Set the extractor name to "<signature name>_built_in"

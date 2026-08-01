@@ -1,5 +1,8 @@
 //! Common Functions
+
 use log::{debug, error};
+use memmap2::Mmap;
+use std::io::Read;
 use std::path::Path;
 
 /// Read a file data into memory and return its contents.
@@ -28,6 +31,31 @@ pub fn read_file(file: impl AsRef<Path>) -> Result<Vec<u8>, std::io::Error> {
     let file_size = file_data.len();
     debug!("Loaded {file_size} bytes from {}", file_path.display());
     Ok(file_data)
+}
+
+pub fn read_or_map_file(file: &Path, allow_mmap: bool) -> std::io::Result<impl AsRef<[u8]>> {
+    let mut f = std::fs::File::open(file)?;
+    if allow_mmap && let Ok(map) = unsafe { Mmap::map(&f) } {
+        Ok(VecOrMmap::Mmap(map))
+    } else {
+        let mut v = Vec::new();
+        f.read_to_end(&mut v)?;
+        Ok(VecOrMmap::Vec(v))
+    }
+}
+
+enum VecOrMmap {
+    Vec(Vec<u8>),
+    Mmap(Mmap),
+}
+
+impl AsRef<[u8]> for VecOrMmap {
+    fn as_ref(&self) -> &[u8] {
+        match self {
+            Self::Vec(v) => v,
+            Self::Mmap(map) => map,
+        }
+    }
 }
 
 /// Calculates the CRC32 checksum of the given data.

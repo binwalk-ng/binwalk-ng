@@ -16,8 +16,9 @@ use std::os::windows;
 #[cfg(unix)]
 use std::os::unix;
 
-use crate::common::{is_offset_safe, read_file};
+use crate::common::{is_offset_safe, read_or_map_file};
 use crate::extractors;
+use crate::formats::program_store;
 use crate::magic;
 use crate::signatures;
 
@@ -79,10 +80,57 @@ pub struct Binwalk {
     pub short_signatures: Vec<signatures::Signature>,
     /// A list of magic bytes to search for throughout the entire file
     pub patterns: Vec<Vec<u8>>,
-    /// Maps patterns to their corresponding signature
-    pub pattern_signature_table: HashMap<usize, signatures::Signature>,
+    /// Signatures, with same indices as patterns
+    pub signatures: Vec<signatures::Signature>,
     /// Maps signatures to their corresponding extractors
     pub extractor_lookup_table: HashMap<String, Option<extractors::Extractor>>,
+    /// If the mmap call is allowed to be used for reading files
+    ///
+    /// Binwalk may abort unexpectedly if mmap is used and the analyzed file(s) are simultaneously
+    /// truncated.
+    pub allow_mmap: bool,
+    /// The most leading zero bytes in any magic pattern that has a non-zero byte
+    ///
+    /// A pattern match can begin at most this many bytes before the pattern's first non-zero
+    /// byte, which bounds how far a scan may skip ahead through a run of zero bytes. An all-zero
+    /// magic has no first non-zero byte and so is not counted here; see
+    /// [`Binwalk::zero_run_pattern_len`] for how one is accounted for instead.
+    max_leading_zeros: usize,
+    /// Length of the synthetic all-zero pattern that [`Binwalk::scan`] searches for in order to
+    /// spot a run of zero bytes it can skip past, or `None` if no run can be skipped
+    ///
+    /// Runs of zero bytes are common padding, and a magic pattern of all zero bytes matches at
+    /// every offset in one, so a scan would otherwise validate a candidate per byte of padding.
+    /// Searching for a longer run of zeros alongside the real patterns says when the scan has
+    /// reached one, and [`Binwalk::resume_offset_after_zero_run`] says where it may resume.
+    ///
+    /// A match of this pattern makes the scan abandon the current Aho-Corasick search, which is
+    /// only safe if every real match overlapping it is either already reported or re-found by the
+    /// search that resumes. Matches are reported in order of where they end, so a real match that
+    /// is not yet reported ends after this pattern's match, and is one of two shapes:
+    ///
+    /// - it starts at or before the run, and so contains the whole of it. Making this pattern
+    ///   longer than the longest run of zero bytes within any pattern being searched puts that out
+    ///   of reach, so no such match exists.
+    /// - it starts inside the run, and so its own leading zeros have to reach the next non-zero
+    ///   byte in the file. That puts its start at or after the offset
+    ///   [`Binwalk::resume_offset_after_zero_run`] returns, which re-finds it. Note this is what
+    ///   `max_leading_zeros` is for; a resume that did not rewind would lose it.
+    ///
+    /// An all-zero magic has no first non-zero byte and so fits neither shape: it matches at every
+    /// offset in the run, and nothing but a byte its signature requires to be non-zero can rule
+    /// one out. Making this pattern longer than any such magic plus the distance back to that byte
+    /// keeps the byte inside the run, and so zero, for every match of it not reported first.
+    zero_run_pattern_len: Option<usize>,
+}
+
+/// The longest run of consecutive zero bytes anywhere in `pattern`
+fn longest_zero_run(pattern: &[u8]) -> usize {
+    pattern
+        .split(|&byte| byte != 0)
+        .map(<[u8]>::len)
+        .max()
+        .unwrap_or(0)
 }
 
 impl Binwalk {
@@ -137,7 +185,11 @@ impl Binwalk {
         signatures: Option<Vec<signatures::Signature>>,
         full_search: bool,
     ) -> Result<Self, BinwalkError> {
-        let mut new_instance = Self::default();
+        let mut new_instance = Self {
+            allow_mmap: true,
+            zero_run_pattern_len: Some(0),
+            ..Default::default()
+        };
 
         // Target file is optional, especially if being called via the library
         if let Some(target_file) = target_file_name {
@@ -198,7 +250,7 @@ impl Binwalk {
         }
 
         // Load magic signatures
-        for signature in signature_patterns.clone() {
+        for signature in signature_patterns {
             // Check if this signature should be included
             if !include_signature(&signature, &include, &exclude) {
                 continue;
@@ -216,28 +268,89 @@ impl Binwalk {
                 .insert(signature.name.clone(), signature.extractor.clone());
 
             // Each signature may have multiple magic bytes associated with it
-            for pattern in signature.magic.clone() {
+            for pattern in &signature.magic {
                 if signature.short && !full_search {
                     // These are short patterns, and should only be searched for at the very beginning of a file
                     new_instance.short_signatures.push(signature.clone());
                     break;
-                } else {
-                    /*
-                     * Need to keep a mapping of the pattern index and its associated signature
-                     * so that when a match is found it can be resolved back to the signature from
-                     * which it came.
-                     */
-                    new_instance
-                        .pattern_signature_table
-                        .insert(new_instance.patterns.len(), signature.clone());
-
-                    // Add these magic bytes to the list of patterns
-                    new_instance.patterns.push(pattern.to_vec());
                 }
+
+                // How long a run of zeros has to be for this pattern not to stand in the way of
+                // skipping it; see Binwalk::zero_run_pattern_len.
+                let longest_matching_zeros = match pattern.iter().position(|&b| b != 0) {
+                    Some(leading_zeros) => {
+                        new_instance.max_leading_zeros =
+                            new_instance.max_leading_zeros.max(leading_zeros);
+                        Some(longest_zero_run(pattern))
+                    }
+                    // An all-zero magic says nothing about where a valid signature can begin,
+                    // since it matches at every offset in a run of zeros. However, we know
+                    // something about program_store (the only built-in signature with all zero
+                    // magic): a valid header requires a non-zero byte `NONZERO_BEFORE_MAGIC` bytes
+                    // before the magic. Matches within a longer run of zeros still occur, but that
+                    // byte is itself a zero from the run, so none of them can be a valid header.
+                    None if signature.name == "program_store" => {
+                        Some(pattern.len() + program_store::NONZERO_BEFORE_MAGIC)
+                    }
+                    // If a user-provided Signature specifies an all-zero pattern, we have no info
+                    // on the max run of zeros which could match their pattern.
+                    None => {
+                        warn!(
+                            "pattern for {} contains only zeros, this may slow down scanning",
+                            signature.name,
+                        );
+                        None
+                    }
+                };
+                new_instance.zero_run_pattern_len =
+                    match (new_instance.zero_run_pattern_len, longest_matching_zeros) {
+                        (Some(len), Some(matchable_zeros)) => Some(len.max(matchable_zeros + 1)),
+                        _ => None,
+                    };
+
+                new_instance.signatures.push(signature.clone());
+
+                // Add these magic bytes to the list of patterns
+                new_instance.patterns.push(pattern.to_vec());
             }
         }
 
         Ok(new_instance)
+    }
+
+    /// Where to resume scanning after the synthetic all-zero pattern matched, between
+    /// `synth_zeros_start` and `synth_zeros_end`
+    ///
+    /// A magic pattern can begin at most `max_leading_zeros` bytes before its first non-zero byte,
+    /// so nothing between here and that far ahead of the next non-zero byte could begin a *valid*
+    /// match. An all-zero magic does still match in there, but a byte its signature requires to be
+    /// non-zero lands inside the run; see [`Binwalk::zero_run_pattern_len`].
+    ///
+    /// The result is always past the start of the matched zeros, and so past the offset the
+    /// current search began at: a pattern's leading zeros are a run of zeros within it, and the
+    /// synthetic pattern is longer than every such run, hence longer than `max_leading_zeros`.
+    fn resume_offset_after_zero_run(
+        &self,
+        file_data: &[u8],
+        synth_zeros_start: usize,
+        synth_zeros_end: usize,
+    ) -> usize {
+        debug_assert!(
+            file_data[synth_zeros_start..synth_zeros_end]
+                .iter()
+                .all(|&b| b == 0)
+        );
+        debug_assert!(synth_zeros_end - synth_zeros_start > self.max_leading_zeros);
+        let Some(next_non_zero) = file_data[synth_zeros_end..]
+            .iter()
+            .position(|&byte| byte != 0)
+        else {
+            // Every pattern needs a non-zero byte, either in the pattern itself or, for an
+            // all-zero magic, in the data its signature requires to be non-zero nearby. With none
+            // left in the file, nothing can match from here on.
+            return file_data.len();
+        };
+        synth_zeros_end + next_non_zero - self.max_leading_zeros
     }
 
     /// Scan a file for magic signatures.
@@ -324,7 +437,16 @@ impl Binwalk {
          * This will search for all magic byte patterns in the file data, all at once.
          * https://en.wikipedia.org/wiki/Aho–Corasick_algorithm
          */
-        let grep = AhoCorasick::new(self.patterns.clone()).unwrap();
+        // Searched alongside the real patterns to spot runs of zero bytes that can be skipped
+        // past. The length is only zero when there are no real patterns to search for at all, and
+        // an empty pattern would match at every offset.
+        let zero_run_pattern = self
+            .zero_run_pattern_len
+            .filter(|&len| len > 0)
+            .map(|len| vec![0u8; len]);
+        let zero_run_pattern_index = self.patterns.len();
+
+        let grep = AhoCorasick::new(self.patterns.iter().chain(&zero_run_pattern)).unwrap();
 
         debug!("Running Aho-Corasick scan");
 
@@ -354,13 +476,25 @@ impl Binwalk {
                 // Get the location of the magic bytes inside the file data
                 let magic_offset: usize = next_valid_offset + magic_match.start();
 
-                // Get the signature associated with this magic signature
                 let magic_pattern_index = magic_match.pattern().as_usize();
-                let signature: signatures::Signature = self
-                    .pattern_signature_table
-                    .get(&magic_pattern_index)
-                    .unwrap()
-                    .clone();
+
+                // The synthetic all-zero pattern has no signature to validate; it means the scan
+                // has reached a run of zero bytes long enough to skip past. Every real match that
+                // overlaps it has either been reported already or starts at or after the offset
+                // the scan resumes from, so abandoning this search loses nothing; see
+                // Binwalk::zero_run_pattern_len.
+                if magic_pattern_index == zero_run_pattern_index {
+                    let zeros_end = next_valid_offset + magic_match.end();
+                    next_valid_offset =
+                        self.resume_offset_after_zero_run(file_data, magic_offset, zeros_end);
+                    debug!(
+                        "Skipping run of zero bytes, jumping from {zeros_end:#X} to {next_valid_offset:#X}"
+                    );
+                    break;
+                }
+
+                // Get the signature associated with this magic signature
+                let signature = &self.signatures[magic_pattern_index];
 
                 debug!(
                     "Found {} magic match at offset {:#X}",
@@ -383,7 +517,7 @@ impl Binwalk {
                     }
 
                     // Auto populate some signature result fields
-                    signature_result_auto_populate(&mut signature_result, &signature);
+                    signature_result_auto_populate(&mut signature_result, signature);
 
                     // Add this signature to the file map
                     file_map.push(signature_result.clone());
@@ -776,12 +910,16 @@ impl Binwalk {
     pub fn analyze(&self, target_file: impl AsRef<Path>, do_extraction: bool) -> AnalysisResults {
         let file_path = target_file.as_ref();
 
-        let file_data = read_file(file_path).unwrap_or_else(|_| {
-            error!("Failed to read data from {}", file_path.display());
-            b"".to_vec()
-        });
+        let file_data = read_or_map_file(file_path, self.allow_mmap);
+        let file_data: &[u8] = file_data
+            .as_ref()
+            .map(|data| data.as_ref())
+            .unwrap_or_else(|_| {
+                error!("Failed to read data from {}", file_path.display());
+                b""
+            });
 
-        self.analyze_buf(&file_data, file_path, do_extraction)
+        self.analyze_buf(file_data, file_path, do_extraction)
     }
 }
 
@@ -895,4 +1033,148 @@ fn signature_result_auto_populate(
     signature_result.id = Uuid::new_v4().to_string();
     signature_result.name = signature.name.clone();
     signature_result.always_display = signature.always_display;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn longest_zero_run_finds_runs_anywhere() {
+        assert_eq!(longest_zero_run(b""), 0);
+        assert_eq!(longest_zero_run(b"\x01\x02\x03"), 0);
+        assert_eq!(longest_zero_run(b"\x00\x00\x00\x01\x00"), 3);
+        assert_eq!(longest_zero_run(b"\x01\x00\x00\x00\x02\x00"), 3);
+        assert_eq!(longest_zero_run(b"\x01\x00\x00\x00"), 3);
+        assert_eq!(longest_zero_run(&[0; 9]), 9);
+    }
+
+    #[test]
+    fn zero_run_pattern_is_longer_than_any_run_of_zeros_in_a_pattern() {
+        let binwalker = Binwalk::new();
+        let zero_run_pattern_len = binwalker
+            .zero_run_pattern_len
+            .expect("the default signatures should allow skipping runs of zeros");
+
+        for pattern in &binwalker.patterns {
+            assert!(
+                zero_run_pattern_len > longest_zero_run(pattern),
+                "{pattern:02X?} could hide a match across a run of zeros"
+            );
+        }
+        // Which also means it is longer than any pattern's leading zeros, so a skip always moves
+        // the scan forwards.
+        assert!(zero_run_pattern_len > binwalker.max_leading_zeros);
+    }
+
+    #[test]
+    fn resume_offset_after_zero_run_stops_short_of_the_next_non_zero_byte() {
+        let binwalker = Binwalk {
+            max_leading_zeros: 3,
+            ..Binwalk::default()
+        };
+
+        // A pattern with 3 leading zeros could begin 3 bytes before the 9, so the scan may resume
+        // no later than that, even though the zeros are known to continue until then.
+        let mut file_data = [0; 16];
+        // With nothing but zeros ahead there is nothing left to match, so the scan is finished.
+        assert_eq!(
+            binwalker.resume_offset_after_zero_run(&file_data, 0, 11),
+            file_data.len()
+        );
+
+        *file_data.last_mut().unwrap() = 9;
+        //  |--zeros known to the caller--|     |-----|<-max_leading_zeros
+        //  v                             v     v     v
+        // [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9]
+        //                                      ^
+        //                                      possible match: 3 leading zeros before a non-zero
+        assert_eq!(
+            binwalker.resume_offset_after_zero_run(&file_data, 0, 11),
+            12
+        );
+        file_data[13] = 2;
+        //  |--zeros known to the caller--|
+        //  |                          |--+--|<-max_leading_zeros
+        //  v                          v  v  v
+        // [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 9]
+        //                             ^
+        //                             possible match: 3 leading zeros before a non-zero
+        assert_eq!(
+            binwalker.resume_offset_after_zero_run(&file_data, 0, 11),
+            10
+        );
+    }
+
+    #[test]
+    fn scan_with_no_signatures_at_all_terminates() {
+        // No signature is named "", so nothing is included and there is no pattern to search for,
+        // let alone a run of zeros worth skipping.
+        let binwalker = Binwalk::configure(
+            None,
+            None,
+            vec![String::new()],
+            vec![],
+            None,
+            /* full_search */ true,
+        )
+        .unwrap();
+        assert!(binwalker.patterns.is_empty());
+
+        assert!(binwalker.scan(&[0, 1, 0, 1, 0, 1, 0, 1]).is_empty());
+    }
+
+    #[test]
+    fn scan_finds_a_magic_whose_own_zeros_outlast_an_all_zero_magic_match() {
+        // A magic that ends in more zero bytes than the all-zero program_store magic is long, but
+        // fewer than the synthetic zero-run pattern. Aho-Corasick reports matches in order of
+        // where they end, so program_store matches inside this magic's own zeros are reported
+        // before it; none of them may derail the scan, and the run is too short to trigger a skip.
+        // The leading pad below does trigger one, so this also pins that the scan resumes early
+        // enough to still reach the magic.
+        let mut magic = vec![0u8; 21];
+        magic[0] = 0xAA;
+
+        fn parser(
+            _file_data: &[u8],
+            offset: usize,
+        ) -> Result<signatures::SignatureResult, signatures::SignatureError> {
+            Ok(signatures::SignatureResult {
+                offset,
+                size: 21,
+                confidence: signatures::CONFIDENCE_HIGH,
+                description: "trailing zeros test signature".to_string(),
+                ..Default::default()
+            })
+        }
+
+        let signature = signatures::Signature {
+            name: "trailing_zeros".to_string(),
+            short: false,
+            magic: vec![magic.clone()],
+            magic_offset: 0,
+            description: "trailing zeros test signature".to_string(),
+            always_display: false,
+            parser,
+            extractor: None,
+        };
+
+        // Place it after a run of zeros long enough to be skipped, with a non-zero byte behind it
+        // so that the run it ends with is not the last thing in the file either.
+        let offset = 4096;
+        let mut file_data = vec![0u8; offset];
+        file_data.extend_from_slice(&magic);
+        file_data.extend_from_slice(&[0xFF; 16]);
+
+        let binwalker =
+            Binwalk::configure(None, None, vec![], vec![], Some(vec![signature]), false).unwrap();
+        let file_map = binwalker.scan(&file_data);
+
+        assert!(
+            file_map
+                .iter()
+                .any(|result| result.name == "trailing_zeros" && result.offset == offset),
+            "{file_map:?}"
+        );
+    }
 }

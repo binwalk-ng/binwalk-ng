@@ -1,0 +1,84 @@
+---
+source: tests/full_scan.rs
+expression: file_map
+---
+- offset: 467508
+  id: "[uuid]"
+  size: 40228
+  name: pe
+  confidence: 128
+  description: "Windows PE binary, machine type: Intel x86-64"
+  always_display: false
+  extraction_declined: false
+- offset: 507736
+  id: "[uuid]"
+  size: 32872
+  name: pe
+  confidence: 128
+  description: "Windows PE binary, machine type: Intel x86-64"
+  always_display: false
+  extraction_declined: false
+- offset: 540608
+  id: "[uuid]"
+  size: 155764
+  name: pe
+  confidence: 128
+  description: "Windows PE binary, machine type: Intel x86-64"
+  always_display: false
+  extraction_declined: false
+- offset: 696372
+  id: "[uuid]"
+  size: 45
+  name: copyright
+  confidence: 250
+  description: "Copyright text: \"Copyright (C) 1983-2011 Insyde Software Corp.\""
+  always_display: false
+  extraction_declined: false
+- offset: 753556
+  id: "[uuid]"
+  size: 270056
+  name: bmp
+  confidence: 128
+  description: "BMP image, total size: 270056"
+  always_display: false
+  extraction_declined: false
+- offset: 1023644
+  id: "[uuid]"
+  size: 27729
+  name: jpeg
+  confidence: 128
+  description: "JPEG image, total size: 27729 bytes"
+  always_display: false
+  extraction_declined: false
+- offset: 1093612
+  id: "[uuid]"
+  size: 33236
+  name: bmp
+  confidence: 128
+  description: "BMP image, total size: 33236"
+  always_display: false
+  extraction_declined: false
+- offset: 1157780
+  id: "[uuid]"
+  size: 14208
+  name: pe
+  confidence: 128
+  description: "Windows PE binary, machine type: Intel x86-64"
+  always_display: false
+  extraction_declined: false
+- offset: 1171988
+  id: "[uuid]"
+  size: 17576
+  name: pe
+  confidence: 128
+  description: "Windows PE binary, machine type: Intel x86-64"
+  always_display: false
+  extraction_declined: false
+- offset: 1189564
+  id: "[uuid]"
+  size: 10436
+  name: pe
+  confidence: 128
+  description: "Windows PE binary, machine type: Intel x86-64"
+  always_display: false
+  extraction_declined: false

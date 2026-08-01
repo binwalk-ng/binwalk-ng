@@ -30,7 +30,7 @@ entropy-plot = ["dep:plotly", "dep:entropy"]
 
 [dependencies]
 log = "0.4.22"
-base64 = "0.22.1"
+base64 = "0.23.0"
 walkdir = "2.5.0"
 entropy = { version = "0.4.2", optional = true }
 colored = "3.0.0"
@@ -66,6 +66,7 @@ tar = "0.4"
 zstd = "0.13.3"
 lz4_flex = "0.14.0"
 lzo = "0.1.1"
+memmap2 = "0.9.9"
 
 [dependencies.uuid]
 version = "1.23.4"
