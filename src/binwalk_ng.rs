@@ -409,7 +409,11 @@ impl Binwalk {
                         signature_result_auto_populate(&mut signature_result, signature);
 
                         // Add this signature to the file map
-                        file_map.push(signature_result.clone());
+                        file_map.push(signature_result);
+
+                        // Reference to the entry just added, for logging and updating next_valid_offset
+                        let signature_result = file_map.last().unwrap();
+
                         info!(
                             "Found valid {} short signature at offset {:#X}",
                             signature_result.name, FILE_START_OFFSET
@@ -520,7 +524,10 @@ impl Binwalk {
                     signature_result_auto_populate(&mut signature_result, signature);
 
                     // Add this signature to the file map
-                    file_map.push(signature_result.clone());
+                    file_map.push(signature_result);
+
+                    // Reference to the entry just added, for logging and updating next_valid_offset
+                    let signature_result = file_map.last().unwrap();
 
                     info!(
                         "Found valid {} signature at offset {:#X}",
