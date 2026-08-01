@@ -1374,99 +1374,96 @@ pub fn execute(
 ) -> ExtractionResult {
     let mut result = ExtractionResult::default();
 
+    // Make sure a default extractor was actually defined (this function should not be called if signature.extractor is None)
+    let Some(default_extractor) = &extractor else {
+        error!(
+            "Attempted to extract {} data, but no extractor is defined!",
+            signature.name
+        );
+        return result;
+    };
+
     // Create an output directory for the extraction
     if let Ok(output_directory) = create_output_directory(&file_path, signature.offset) {
-        // Make sure a default extractor was actually defined (this function should not be called if signature.extractor is None)
-        match &extractor {
-            None => {
+        // If the signature result specified a preferred extractor, use that instead of the default signature extractor
+        let extractor_definition = signature.preferred_extractor.as_ref().map_or_else(
+            || default_extractor,
+            |preferred_extractor| preferred_extractor,
+        );
+
+        // Decide how to execute the extractor depending on the extractor type
+        match &extractor_definition.utility {
+            ExtractorType::None => {
                 error!(
-                    "Attempted to extract {} data, but no extractor is defined!",
+                    "Signature {}: an extractor of type None is invalid!",
                     signature.name
                 );
             }
 
-            Some(default_extractor) => {
-                // If the signature result specified a preferred extractor, use that instead of the default signature extractor
-                let extractor_definition = signature.preferred_extractor.as_ref().map_or_else(
-                    || default_extractor,
-                    |preferred_extractor| preferred_extractor,
+            ExtractorType::Internal(func) => {
+                debug!(
+                    "Executing internal {} extractor on {} @ {} (size:{})",
+                    signature.name,
+                    file_path.as_ref().display(),
+                    signature.offset,
+                    signature.size,
                 );
+                // Run the internal extractor function
+                result = func(file_data, signature.offset, Some(&output_directory));
+                // Set the extractor name to "<signature name>_built_in"
+                result.extractor = format!("{}_built_in", signature.name);
+            }
 
-                // Decide how to execute the extractor depending on the extractor type
-                match &extractor_definition.utility {
-                    ExtractorType::None => {
+            ExtractorType::External(cmd) => {
+                // Spawn the external extractor command
+                match spawn(
+                    file_data,
+                    file_path,
+                    &output_directory,
+                    signature,
+                    extractor_definition,
+                ) {
+                    Err(e) => {
                         error!(
-                            "Signature {}: an extractor of type None is invalid!",
-                            signature.name
+                            "Failed to spawn external extractor for '{}' signature: {}",
+                            signature.name, e
                         );
                     }
 
-                    ExtractorType::Internal(func) => {
-                        debug!(
-                            "Executing internal {} extractor on {} @ {} (size:{})",
-                            signature.name,
-                            file_path.as_ref().display(),
-                            signature.offset,
-                            signature.size,
-                        );
-                        // Run the internal extractor function
-                        result = func(file_data, signature.offset, Some(&output_directory));
-                        // Set the extractor name to "<signature name>_built_in"
-                        result.extractor = format!("{}_built_in", signature.name);
-                    }
-
-                    ExtractorType::External(cmd) => {
-                        // Spawn the external extractor command
-                        match spawn(
-                            file_data,
-                            file_path,
-                            &output_directory,
-                            signature,
-                            extractor_definition,
-                        ) {
-                            Err(e) => {
-                                error!(
-                                    "Failed to spawn external extractor for '{}' signature: {}",
-                                    signature.name, e
-                                );
+                    Ok(proc_info) => {
+                        // Wait for the external process to exit
+                        match proc_wait(proc_info) {
+                            Err(_) => {
+                                warn!("External extractor failed!");
                             }
-
-                            Ok(proc_info) => {
-                                // Wait for the external process to exit
-                                match proc_wait(proc_info) {
-                                    Err(_) => {
-                                        warn!("External extractor failed!");
-                                    }
-                                    Ok(ext_result) => {
-                                        result = ext_result;
-                                        // Set the extractor name to the name of the extraction utility
-                                        result.extractor = cmd.to_string();
-                                    }
-                                }
+                            Ok(ext_result) => {
+                                result = ext_result;
+                                // Set the extractor name to the name of the extraction utility
+                                result.extractor = cmd.to_string();
                             }
                         }
                     }
                 }
-
-                // Populate these ExtractionResult fields automatically for all extractors
-                result.output_directory = output_directory.clone();
-                result.do_not_recurse = extractor_definition.do_not_recurse;
-
-                // If the extractor reported success, make sure it extracted something other than just an empty file
-                if result.success && !was_something_extracted(&result.output_directory) {
-                    result.success = false;
-                    warn!("Extractor exited successfully, but no data was extracted");
-                }
             }
+        }
+
+        // Populate these ExtractionResult fields automatically for all extractors
+        result.output_directory = output_directory;
+        result.do_not_recurse = extractor_definition.do_not_recurse;
+
+        // If the extractor reported success, make sure it extracted something other than just an empty file
+        if result.success && !was_something_extracted(&result.output_directory) {
+            result.success = false;
+            warn!("Extractor exited successfully, but no data was extracted");
         }
 
         // Clean up extractor's output directory if extraction failed
         if !result.success
-            && let Err(e) = fs::remove_dir_all(&output_directory)
+            && let Err(e) = fs::remove_dir_all(&result.output_directory)
         {
             warn!(
                 "Failed to clean up extraction directory {} after extraction failure: {e}",
-                output_directory.display()
+                result.output_directory.display()
             );
         }
     }
