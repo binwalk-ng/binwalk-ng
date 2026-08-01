@@ -134,13 +134,10 @@ fn rsa_key_definitions() -> Vec<RSAKeyDefinition> {
 
 /// RSA crypto magic bytes
 pub fn rsa_magic() -> Vec<Vec<u8>> {
-    let mut magics: Vec<Vec<u8>> = vec![];
-
-    for key_definition in rsa_key_definitions() {
-        magics.push(key_definition.magic.clone());
-    }
-
-    magics
+    rsa_key_definitions()
+        .iter()
+        .map(|key_definition| key_definition.magic.clone())
+        .collect()
 }
 
 /// Validates an RSA encrypted file header

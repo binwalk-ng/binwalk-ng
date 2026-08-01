@@ -194,20 +194,19 @@ pub fn print_analysis_results(quiet: bool, extraction_attempted: bool, results: 
 }
 
 // Used by print_signature_list
-#[derive(Debug, Default, Clone)]
-struct SignatureInfo {
-    name: String,
+#[derive(Debug, Default)]
+struct SignatureInfo<'a> {
+    name: &'a str,
     is_short: bool,
     has_extractor: bool,
-    extractor: String,
-    description: String,
+    extractor: &'a str,
+    description: &'a str,
 }
 
 pub fn print_signature_list(quiet: bool, signatures: &Vec<signatures::Signature>) {
     let mut extractor_count: usize = 0;
     let mut signature_count: usize = 0;
-    let mut sorted_descriptions: Vec<String> = vec![];
-    let mut signature_lookup: HashMap<String, SignatureInfo> = HashMap::new();
+    let mut signature_infos: Vec<SignatureInfo> = Vec::with_capacity(signatures.len());
 
     if quiet {
         return;
@@ -227,9 +226,9 @@ pub fn print_signature_list(quiet: bool, signatures: &Vec<signatures::Signature>
         // Convenience struct for storing some basic info about each signature
         // Keep track of signature name, description, and if the signature is a "short" signature
         let mut signature_info = SignatureInfo {
-            name: signature.name.clone(),
+            name: signature.name.as_str(),
             is_short: signature.short,
-            description: signature.description.clone(),
+            description: signature.description.as_str(),
             ..Default::default()
         };
 
@@ -237,17 +236,17 @@ pub fn print_signature_list(quiet: bool, signatures: &Vec<signatures::Signature>
         match &signature.extractor {
             None => {
                 signature_info.has_extractor = false;
-                signature_info.extractor = "None".to_string();
+                signature_info.extractor = "None";
             }
             Some(extractor) => {
                 signature_info.has_extractor = true;
 
                 match &extractor.utility {
                     extractors::ExtractorType::External(command) => {
-                        signature_info.extractor = command.to_string();
+                        signature_info.extractor = command;
                     }
                     extractors::ExtractorType::Internal(_) => {
-                        signature_info.extractor = "Built-in".to_string();
+                        signature_info.extractor = "Built-in";
                     }
                     extractors::ExtractorType::None => error!(
                         "An invalid extractor type exists for the '{}' signature",
@@ -265,24 +264,18 @@ pub fn print_signature_list(quiet: bool, signatures: &Vec<signatures::Signature>
             extractor_count += 1;
         }
 
-        // Keep signature descriptions in a separate list, which wil be sorted alphabetically for display
-        sorted_descriptions.push(signature_info.description.clone());
-
-        // Lookup table associating signature descriptions with their SignatureInfo struct
-        signature_lookup.insert(signature.description.clone(), signature_info.clone());
+        signature_infos.push(signature_info);
     }
 
     // Sort signature descriptions alphabetically
-    sorted_descriptions.sort_by_key(|description| description.to_lowercase());
+    signature_infos.sort_by_key(|info| info.description.to_lowercase());
 
     // Print signatures, sorted alphabetically by description
-    for description in sorted_descriptions {
-        let siginfo = &signature_lookup[&description];
-
+    for siginfo in &signature_infos {
         let display_line = format!(
             "{}{}{}",
-            pad_to_length(&description, COLUMN1_WIDTH),
-            pad_to_length(&siginfo.name, COLUMN2_WIDTH),
+            pad_to_length(siginfo.description, COLUMN1_WIDTH),
+            pad_to_length(siginfo.name, COLUMN2_WIDTH),
             siginfo.extractor
         );
 

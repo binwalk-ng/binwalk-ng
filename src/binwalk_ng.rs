@@ -394,11 +394,11 @@ impl Binwalk {
          * false positve matches.
          */
         for signature in &self.short_signatures {
-            for magic in signature.magic.clone() {
+            for magic in &signature.magic {
                 let magic_start = FILE_START_OFFSET + signature.magic_offset;
                 let magic_end = magic_start + magic.len();
 
-                if file_data.len() > magic_end && file_data[magic_start..magic_end] == magic {
+                if file_data.len() > magic_end && file_data[magic_start..magic_end] == *magic {
                     debug!(
                         "Found {} short magic match at offset {:#X}",
                         signature.description, magic_start
@@ -748,14 +748,14 @@ impl Binwalk {
             }
 
             // Get the extractor for this signature
-            let extractor = self.extractor_lookup_table[&signature.name].clone();
+            let extractor = &self.extractor_lookup_table[&signature.name];
 
             match &extractor {
                 None => continue,
                 Some(_) => {
                     // Run an extraction for this signature
                     let mut extraction_result =
-                        extractors::execute(file_data, file_path, signature, &extractor);
+                        extractors::execute(file_data, file_path, signature, extractor);
 
                     if !extraction_result.success {
                         debug!(
@@ -788,7 +788,7 @@ impl Binwalk {
                                 file_data,
                                 file_path,
                                 &new_signature,
-                                &extractor,
+                                extractor,
                             );
                         }
                     }

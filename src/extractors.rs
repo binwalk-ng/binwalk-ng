@@ -212,7 +212,7 @@ pub struct ExtractionResult {
 pub struct ProcInfo {
     pub child: process::Child,
     pub exit_codes: Vec<i32>,
-    pub carved_file: String,
+    pub carved_file: PathBuf,
 }
 
 /// Provides chroot-like functionality for internal extractors.
@@ -443,7 +443,7 @@ impl Chroot {
         };
 
         if !path::Path::new(&safe_file_path).exists() {
-            match fs::write(safe_file_path.clone(), file_data) {
+            match fs::write(&safe_file_path, file_data) {
                 Ok(_) => {
                     return true;
                 }
@@ -854,7 +854,7 @@ impl Chroot {
             }
         };
 
-        match fs::exists(safe_dir_path.clone()) {
+        match fs::exists(&safe_dir_path) {
             Ok(dir_exists) => {
                 if !dir_exists {
                     return true;
@@ -869,7 +869,7 @@ impl Chroot {
             }
         }
 
-        match fs::remove_dir_all(safe_dir_path.clone()) {
+        match fs::remove_dir_all(&safe_dir_path) {
             Ok(_) => return true,
             Err(e) => error!(
                 "Failed to delete directory {}: {e}",
@@ -913,7 +913,7 @@ impl Chroot {
             }
         };
 
-        match fs::metadata(safe_file_path.clone()) {
+        match fs::metadata(&safe_file_path) {
             Err(e) => {
                 error!(
                     "Failed to get permissions for file {}: {e}",
@@ -1388,8 +1388,8 @@ pub fn execute(
             Some(default_extractor) => {
                 // If the signature result specified a preferred extractor, use that instead of the default signature extractor
                 let extractor_definition = signature.preferred_extractor.as_ref().map_or_else(
-                    || default_extractor.clone(),
-                    |preferred_extractor| preferred_extractor.clone(),
+                    || default_extractor,
+                    |preferred_extractor| preferred_extractor,
                 );
 
                 // Decide how to execute the extractor depending on the extractor type
@@ -1422,7 +1422,7 @@ pub fn execute(
                             file_path,
                             &output_directory,
                             signature,
-                            extractor_definition.clone(),
+                            extractor_definition,
                         ) {
                             Err(e) => {
                                 error!(
@@ -1480,14 +1480,14 @@ fn spawn(
     file_path: impl AsRef<Path>,
     output_directory: &Path,
     signature: &SignatureResult,
-    mut extractor: Extractor,
+    extractor: &Extractor,
 ) -> Result<ProcInfo, std::io::Error> {
     let chroot = Chroot::default();
     let file_path = file_path.as_ref();
 
     // This function *only* handles execution of external extraction utilities; internal extractors must be invoked directly
     let command = match &extractor.utility {
-        ExtractorType::External(cmd) => cmd.clone(),
+        ExtractorType::External(cmd) => cmd,
         ExtractorType::Internal(_ext) => {
             error!("Tried to run an internal extractor as an external command!");
             return Err(std::io::Error::other(
@@ -1503,20 +1503,18 @@ fn spawn(
     };
 
     // Carved file path will be <output directory>/<signature.name>_<hex offset>.<extractor.extension>
-    let carved_file = format!(
-        "{}{}{}_{:X}.{}",
-        output_directory.display(),
-        path::MAIN_SEPARATOR,
-        signature.name,
-        signature.offset,
-        extractor.extension
+    let filename = format!(
+        "{}_{:X}.{}",
+        signature.name, signature.offset, extractor.extension
     );
+    let carved_file = output_directory.join(filename);
+
     info!(
         "Carving data from {} {:#X}..{:#X} to {}",
         file_path.display(),
         signature.offset,
         signature.offset + signature.size,
-        carved_file
+        carved_file.display()
     );
 
     // If the entirety of the source file is this one file type, no need to carve a copy of it, just create a symlink
@@ -1533,16 +1531,18 @@ fn spawn(
         }
     }
 
-    // Replace all "%e" command arguments with the path to the carved file
-    for arg in &mut extractor.arguments {
-        if *arg == SOURCE_FILE_PLACEHOLDER {
-            *arg = carved_file.clone();
-        }
-    }
+    let arguments: Vec<&str> = extractor
+        .arguments
+        .iter()
+        .map(|arg| match arg.as_str() {
+            SOURCE_FILE_PLACEHOLDER => carved_file.to_str().unwrap(), // this is safe as we constructed that path
+            _ => arg.as_str(),
+        })
+        .collect();
 
-    info!("Spawning process {} {:?}", command, extractor.arguments);
-    match process::Command::new(&command)
-        .args(&extractor.arguments)
+    info!("Spawning process {} {:?}", command, arguments);
+    match process::Command::new(command)
+        .args(&arguments)
         .stdout(process::Stdio::null())
         .stderr(process::Stdio::null())
         .current_dir(output_directory)
@@ -1560,7 +1560,7 @@ fn spawn(
             // If the process was spawned successfully, return some information about the process
             let proc_info = ProcInfo {
                 child,
-                exit_codes: extractor.exit_codes,
+                exit_codes: extractor.exit_codes.clone(),
                 carved_file,
             };
             Ok(proc_info)
@@ -1588,11 +1588,12 @@ fn proc_wait(mut worker_info: ProcInfo) -> Result<ExtractionResult, ExtractionEr
             let mut extraction_success = false;
 
             // Clean up the carved file used as input to the extractor
-            debug!("Deleting carved file {}", worker_info.carved_file);
-            if let Err(e) = fs::remove_file(worker_info.carved_file.clone()) {
+            debug!("Deleting carved file {}", worker_info.carved_file.display());
+            if let Err(e) = fs::remove_file(&worker_info.carved_file) {
                 warn!(
                     "Failed to remove carved file '{}': {}",
-                    worker_info.carved_file, e
+                    worker_info.carved_file.display(),
+                    e
                 );
             };
 
