@@ -10,33 +10,51 @@ pub const PEM_PUBLIC_KEY_DESCRIPTION: &str = "PEM public key";
 pub const PEM_PRIVATE_KEY_DESCRIPTION: &str = "PEM private key";
 pub const PEM_CERTIFICATE_DESCRIPTION: &str = "PEM certificate";
 
+/// Magic bytes that identify PEM public keys
+const PUBLIC_KEY_MAGICS: [&[u8]; 4] = [
+    b"-----BEGIN PUBLIC KEY-----",
+    b"-----BEGIN RSA PUBLIC KEY-----",
+    b"-----BEGIN DSA PUBLIC KEY-----",
+    b"-----BEGIN ECDSA PUBLIC KEY-----",
+];
+
+/// Magic bytes that identify PEM private keys
+const PRIVATE_KEY_MAGICS: [&[u8]; 8] = [
+    b"-----BEGIN PRIVATE KEY-----",
+    b"-----BEGIN EC PRIVATE KEY-----",
+    b"-----BEGIN RSA PRIVATE KEY-----",
+    b"-----BEGIN DSA PRIVATE KEY-----",
+    b"-----BEGIN OPENSSH PRIVATE KEY-----",
+    b"-----BEGIN ANY PRIVATE KEY-----",
+    b"-----BEGIN ENCRYPTED PRIVATE KEY-----",
+    b"-----BEGIN TSS2 PRIVATE KEY-----",
+];
+
+/// Magic bytes that identify PEM certificates
+const CERTIFICATE_MAGICS: [&[u8]; 1] = [b"-----BEGIN CERTIFICATE-----"];
+
 /// Public key magic
 pub fn pem_public_key_magic() -> Vec<Vec<u8>> {
-    vec![
-        b"-----BEGIN PUBLIC KEY-----".to_vec(),
-        b"-----BEGIN RSA PUBLIC KEY-----".to_vec(),
-        b"-----BEGIN DSA PUBLIC KEY-----".to_vec(),
-        b"-----BEGIN ECDSA PUBLIC KEY-----".to_vec(),
-    ]
+    PUBLIC_KEY_MAGICS
+        .iter()
+        .map(|magic| magic.to_vec())
+        .collect()
 }
 
 /// Private key magics
 pub fn pem_private_key_magic() -> Vec<Vec<u8>> {
-    vec![
-        b"-----BEGIN PRIVATE KEY-----".to_vec(),
-        b"-----BEGIN EC PRIVATE KEY-----".to_vec(),
-        b"-----BEGIN RSA PRIVATE KEY-----".to_vec(),
-        b"-----BEGIN DSA PRIVATE KEY-----".to_vec(),
-        b"-----BEGIN OPENSSH PRIVATE KEY-----".to_vec(),
-        b"-----BEGIN ANY PRIVATE KEY-----".to_vec(),
-        b"-----BEGIN ENCRYPTED PRIVATE KEY-----".to_vec(),
-        b"-----BEGIN TSS2 PRIVATE KEY-----".to_vec(),
-    ]
+    PRIVATE_KEY_MAGICS
+        .iter()
+        .map(|magic| magic.to_vec())
+        .collect()
 }
 
 /// Certificate magic
 pub fn pem_certificate_magic() -> Vec<Vec<u8>> {
-    vec![b"-----BEGIN CERTIFICATE-----".to_vec()]
+    CERTIFICATE_MAGICS
+        .iter()
+        .map(|magic| magic.to_vec())
+        .collect()
 }
 
 /// Validates both PEM certificate and key signatures
@@ -50,36 +68,25 @@ pub fn pem_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
         ..Default::default()
     };
 
-    /*
-     * Build a list of magic signatures for public, prvate, and certificate PEMs.
-     * These magics are truncated to MIN_PEM_LEN bytes, which is enough to check if
-     * the matching signature was a public key, private key, or certificate, which is
-     * all we need to know for displaying a useful description string.
-     */
-    let mut public_magics: Vec<Vec<u8>> = vec![];
-    let mut private_magics: Vec<Vec<u8>> = vec![];
-    let mut certificate_magics: Vec<Vec<u8>> = vec![];
-
-    for public_magic in pem_public_key_magic() {
-        public_magics.push(public_magic[0..MIN_PEM_LEN].to_vec());
-    }
-
-    for private_magic in pem_private_key_magic() {
-        private_magics.push(private_magic[0..MIN_PEM_LEN].to_vec());
-    }
-
-    for cert_magic in pem_certificate_magic() {
-        certificate_magics.push(cert_magic[0..MIN_PEM_LEN].to_vec());
-    }
-
     // Sanity check available data
     if let Some(pem_magic) = file_data.get(offset..offset + MIN_PEM_LEN) {
-        // Check if this magic is for a PEM cert or a PEM key
-        if public_magics.contains(&pem_magic.to_vec()) {
+        // All magic bytes are at least MIN_PEM_LEN long and unique within their first
+        // MIN_PEM_LEN bytes, so comparing their prefix against the data is enough to tell
+        // a public key from a private key from a certificate.
+        if PUBLIC_KEY_MAGICS
+            .iter()
+            .any(|magic| magic.starts_with(pem_magic))
+        {
             result.description = PEM_PUBLIC_KEY_DESCRIPTION.to_string();
-        } else if private_magics.contains(&pem_magic.to_vec()) {
+        } else if PRIVATE_KEY_MAGICS
+            .iter()
+            .any(|magic| magic.starts_with(pem_magic))
+        {
             result.description = PEM_PRIVATE_KEY_DESCRIPTION.to_string();
-        } else if certificate_magics.contains(&pem_magic.to_vec()) {
+        } else if CERTIFICATE_MAGICS
+            .iter()
+            .any(|magic| magic.starts_with(pem_magic))
+        {
             result.description = PEM_CERTIFICATE_DESCRIPTION.to_string();
         } else {
             // This function will only be called if one of the magics was found, so this should never happen
@@ -112,7 +119,7 @@ fn decode_pem_data(pem_file_data: &[u8]) -> Result<usize, SignatureError> {
     const DELIM: &str = "--";
 
     // Make sure the PEM data can be converted to a string
-    if let Ok(pem_file_string) = String::from_utf8(pem_file_data.to_vec()) {
+    if let Ok(pem_file_string) = std::str::from_utf8(pem_file_data) {
         let mut delim_count: usize = 0;
         let mut base64_string: String = "".to_string();
 
@@ -253,19 +260,19 @@ pub fn pem_carver(
 }
 
 fn get_pem_size(file_data: &[u8], start_of_pem_offset: usize) -> Option<usize> {
-    let eof_markers = vec![
-        b"-----END PUBLIC KEY-----".to_vec(),
-        b"-----END CERTIFICATE-----".to_vec(),
-        b"-----END PRIVATE KEY-----".to_vec(),
-        b"-----END EC PRIVATE KEY-----".to_vec(),
-        b"-----END RSA PRIVATE KEY-----".to_vec(),
-        b"-----END DSA PRIVATE KEY-----".to_vec(),
-        b"-----END OPENSSH PRIVATE KEY-----".to_vec(),
+    const EOF_MARKERS: [&[u8]; 7] = [
+        b"-----END PUBLIC KEY-----",
+        b"-----END CERTIFICATE-----",
+        b"-----END PRIVATE KEY-----",
+        b"-----END EC PRIVATE KEY-----",
+        b"-----END RSA PRIVATE KEY-----",
+        b"-----END DSA PRIVATE KEY-----",
+        b"-----END OPENSSH PRIVATE KEY-----",
     ];
 
     let newline_chars = [0x0D, 0x0A];
 
-    let grep = AhoCorasick::new(eof_markers.clone()).unwrap();
+    let grep = AhoCorasick::new(EOF_MARKERS).unwrap();
 
     // Find the first end marker
     if let Some(eof_match) = grep
@@ -273,7 +280,7 @@ fn get_pem_size(file_data: &[u8], start_of_pem_offset: usize) -> Option<usize> {
         .next()
     {
         let eof_marker_index = eof_match.pattern().as_usize();
-        let mut pem_size = eof_match.start() + eof_markers[eof_marker_index].len();
+        let mut pem_size = eof_match.start() + EOF_MARKERS[eof_marker_index].len();
 
         // Include any trailing newline characters in the total size of the PEM file
         while (start_of_pem_offset + pem_size) < file_data.len() {
