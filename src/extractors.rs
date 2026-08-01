@@ -1549,7 +1549,7 @@ fn spawn(
         Err(e) => {
             error!(
                 "Failed to execute command {}{:?}: {}",
-                command, extractor.arguments, e
+                command, arguments, e
             );
             Err(e)
         }
