@@ -1,7 +1,7 @@
 use crate::extractors;
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
 use crate::structures::StructureError;
-use aho_corasick::AhoCorasick;
+use memchr::memmem;
 use zerocopy::{BE, FromBytes, Immutable, KnownLayout, Unaligned};
 
 /// Human readable description
@@ -67,14 +67,11 @@ fn find_xml_property_list(file_data: &[u8]) -> Option<usize> {
     const MIN_XML_LENGTH: usize = 1024;
     const BLKX_KEY: &str = "<key>blkx</key>";
 
-    let grep = AhoCorasick::new(vec![XML_SIGNATURE]).unwrap();
-
-    for xml_match in grep.find_overlapping_iter(file_data) {
-        let xml_start = xml_match.start();
+    for xml_start in memmem::find_iter(file_data, XML_SIGNATURE.as_bytes()) {
         let xml_end = xml_start + MIN_XML_LENGTH;
 
         if let Some(xml_data) = file_data.get(xml_start..xml_end)
-            && let Ok(xml_string) = String::from_utf8(xml_data.to_vec())
+            && let Ok(xml_string) = str::from_utf8(xml_data)
             && xml_string.contains(BLKX_KEY)
         {
             return Some(xml_start);

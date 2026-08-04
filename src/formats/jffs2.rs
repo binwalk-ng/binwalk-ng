@@ -1,8 +1,8 @@
 use crate::extractors;
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
 use crate::structures::{Endianness, StructureError, dyn_endian};
-use aho_corasick::AhoCorasick;
 use crc32fast::Hasher;
+use memchr::memmem;
 use zerocopy::{FromBytes, Immutable, KnownLayout, Unaligned};
 
 /// Human readable description
@@ -60,13 +60,10 @@ pub fn jffs2_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
                 Endianness::Little => JFFS2_LITTLE_ENDIAN_MAGIC,
             };
 
-            // Need to grep for all JFFS2 nodes to figure out how big this file system really is
-            let grep = AhoCorasick::new(vec![node_magic]).unwrap();
-
             // Find all matching JFFS2 node magic bytes
-            for magic_match in grep.find_overlapping_iter(&file_data[grep_offset..]) {
+            for magic_start in memmem::find_iter(&file_data[grep_offset..], node_magic) {
                 // Calculate the start and end of the node header inside the file data
-                let header_start: usize = grep_offset + magic_match.start();
+                let header_start: usize = grep_offset + magic_start;
                 let header_end: usize = header_start + JFFS2_NODE_STRUCT_SIZE;
 
                 // This is a false positive that is inside the node data of a previously validated node

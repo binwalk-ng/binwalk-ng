@@ -4,6 +4,7 @@ use aho_corasick::AhoCorasick;
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use std::path::Path;
+use std::sync::LazyLock;
 
 /// Human readable descriptions
 pub const PEM_PUBLIC_KEY_DESCRIPTION: &str = "PEM public key";
@@ -259,36 +260,33 @@ pub fn pem_carver(
     result
 }
 
+const PEM_EOF_MARKERS: &[&[u8]] = &[
+    b"-----END PUBLIC KEY-----",
+    b"-----END CERTIFICATE-----",
+    b"-----END PRIVATE KEY-----",
+    b"-----END EC PRIVATE KEY-----",
+    b"-----END RSA PRIVATE KEY-----",
+    b"-----END DSA PRIVATE KEY-----",
+    b"-----END OPENSSH PRIVATE KEY-----",
+];
+
+static PEM_EOF_GREP: LazyLock<AhoCorasick> =
+    LazyLock::new(|| AhoCorasick::new(PEM_EOF_MARKERS).unwrap());
+
 fn get_pem_size(file_data: &[u8], start_of_pem_offset: usize) -> Option<usize> {
-    const EOF_MARKERS: [&[u8]; 7] = [
-        b"-----END PUBLIC KEY-----",
-        b"-----END CERTIFICATE-----",
-        b"-----END PRIVATE KEY-----",
-        b"-----END EC PRIVATE KEY-----",
-        b"-----END RSA PRIVATE KEY-----",
-        b"-----END DSA PRIVATE KEY-----",
-        b"-----END OPENSSH PRIVATE KEY-----",
-    ];
-
-    let newline_chars = [0x0D, 0x0A];
-
-    let grep = AhoCorasick::new(EOF_MARKERS).unwrap();
-
     // Find the first end marker
-    if let Some(eof_match) = grep
+    if let Some(eof_match) = PEM_EOF_GREP
         .find_overlapping_iter(&file_data[start_of_pem_offset..])
         .next()
     {
-        let eof_marker_index = eof_match.pattern().as_usize();
-        let mut pem_size = eof_match.start() + EOF_MARKERS[eof_marker_index].len();
+        let mut pem_size = eof_match.end();
 
         // Include any trailing newline characters in the total size of the PEM file
-        while (start_of_pem_offset + pem_size) < file_data.len() {
-            if newline_chars.contains(&file_data[start_of_pem_offset + pem_size]) {
-                pem_size += 1;
-            } else {
-                break;
-            }
+        while file_data
+            .get(start_of_pem_offset + pem_size)
+            .is_some_and(|&ch| ch == b'\n' || ch == b'\r')
+        {
+            pem_size += 1;
         }
 
         return Some(pem_size);
