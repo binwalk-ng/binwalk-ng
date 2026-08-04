@@ -1,0 +1,195 @@
+name: Benchmark
+
+on:
+  pull_request:
+    branches: ['*']
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  BENCH_IMAGE: 'binwalk-ng:benchmark'
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build benchmark image (Dockerfile target `benchmark`)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: benchmark
+          load: true
+          tags: ${{ env.BENCH_IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run benchmarks
+        env:
+          BINWALK: /usr/local/bin/binwalk
+        run: |
+          docker run --rm \
+            -v "$PWD:/tmp/binwalk" \
+            -w /tmp/binwalk \
+            -e BINWALK \
+            "${{ env.BENCH_IMAGE }}" \
+            benchmark/bench.py --run
+
+      - name: Show results
+        run: jq . benchmark/results.json
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-results
+          path: |
+            benchmark/results.json
+            benchmark/workdir/hf-*.json
+            benchmark/workdir/massif-*.log
+            benchmark/workdir/massif-*.out
+            benchmark/workdir/dhat-*.log
+            benchmark/workdir/dhat-*.out
+          if-no-files-found: ignore
+
+  update-baseline:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: benchmark
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v7
+
+      - name: Download benchmark results
+        uses: actions/download-artifact@v7
+        with:
+          name: benchmark-results
+          path: benchmark
+
+      - name: Update baseline
+        run: |
+          git fetch -q origin benchmark-baseline:refs/remotes/origin/benchmark-baseline || true
+          if git rev-parse -q --verify origin/benchmark-baseline >/dev/null \
+            && git show origin/benchmark-baseline:baseline.json > /tmp/baseline.json 2>/dev/null \
+            && jq -e --slurpfile r benchmark/results.json \
+              '.scenarios == $r[0].scenarios' /tmp/baseline.json >/dev/null 2>&1; then
+            echo 'Metrics unchanged; keeping the committed baseline'
+          else
+            if ! test -s benchmark/results.json \
+            || ! jq -e . benchmark/results.json >/dev/null 2>&1; then
+              echo 'ERROR: benchmark/results.json missing or invalid; not updating baseline' >&2
+              exit 1
+            fi
+            tree=$(printf '100644 blob %s\tbaseline.json\n' \
+              "$(git hash-object -w benchmark/results.json)" | git mktree)
+            parent=$(git rev-parse -q --verify origin/benchmark-baseline || git rev-parse HEAD)
+            commit=$(echo 'Update benchmark baseline' | \
+              git -c user.name='github-actions[bot]' \
+                  -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                  commit-tree "$tree" -p "$parent")
+            git push -q origin "$commit:refs/heads/benchmark-baseline"
+          fi
+
+  report:
+    if: github.event_name == 'pull_request'
+    needs: benchmark
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Download benchmark results
+        uses: actions/download-artifact@v7
+        with:
+          name: benchmark-results
+          path: benchmark
+
+      - name: Compare against baseline (PR)
+        env:
+          THRESH_TIME_PCT: 20
+          THRESH_CPU_PCT: 20
+          THRESH_MEM_PCT: 5
+          COMPARE_JSON: benchmark/workdir/compare.json
+        run: |
+          set -o pipefail
+          mkdir -p benchmark/workdir
+          git fetch -q origin benchmark-baseline:refs/remotes/origin/benchmark-baseline || true
+          if git rev-parse -q --verify origin/benchmark-baseline >/dev/null; then
+            git show origin/benchmark-baseline:baseline.json > benchmark/baseline.json
+            echo '## Benchmark results' >> "$GITHUB_STEP_SUMMARY"
+            if python3 benchmark/compare.py \
+              --results benchmark/results.json \
+              --baseline benchmark/baseline.json \
+              --time-threshold "$THRESH_TIME_PCT" \
+              --cpu-threshold "$THRESH_CPU_PCT" \
+              --mem-threshold "$THRESH_MEM_PCT" \
+              --compare-json "$COMPARE_JSON" \
+              | tee -a "$GITHUB_STEP_SUMMARY"; then
+              :
+            elif ! jq -e . "$COMPARE_JSON" >/dev/null 2>&1; then
+              echo 'ERROR: comparison failed without writing compare.json' >&2
+              exit 1
+            fi
+          else
+            echo 'No benchmark baseline found yet; skipping comparison'
+          fi
+
+      - name: Comment results on PR
+        if: github.event.pull_request.head.repo.full_name == github.repository && hashFiles('benchmark/workdir/compare.json') != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const verdict = JSON.parse(fs.readFileSync('benchmark/workdir/compare.json', 'utf8'));
+            const { owner, repo, number } = context.issue;
+            const marker = '<!-- binwalk-bench-comment -->';
+            let body = marker + '\n\n## Benchmark results\n\n';
+            if (verdict.base_sha) body += `_vs baseline from \`${verdict.base_sha}\`_\n\n`;
+            body += verdict.md + '\n';
+            if (verdict.regressed) body += '\n**Regressions detected**\n';
+            if (verdict.warnings && verdict.warnings.length) {
+              body += verdict.warnings.map(w => `- ${w}`).join('\n') + '\n';
+            }
+            const comments = await github.rest.issues.listComments({ owner, repo, issue_number: number });
+            const existing = comments.data.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: number, body });
+            }
+
+      - name: Fail on regressions
+        if: github.event.pull_request.head.repo.full_name == github.repository && hashFiles('benchmark/workdir/compare.json') != ''
+        run: |
+          if jq -e '.regressed' benchmark/workdir/compare.json >/dev/null 2>&1; then
+            echo 'Benchmark regressions detected:'
+            jq -r '.warnings[]' benchmark/workdir/compare.json | sed 's/^/  - /'
+            exit 1
+          fi
