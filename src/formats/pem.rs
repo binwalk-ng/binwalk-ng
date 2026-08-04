@@ -12,7 +12,7 @@ pub const PEM_PRIVATE_KEY_DESCRIPTION: &str = "PEM private key";
 pub const PEM_CERTIFICATE_DESCRIPTION: &str = "PEM certificate";
 
 /// Magic bytes that identify PEM public keys
-const PUBLIC_KEY_MAGICS: [&[u8]; 4] = [
+const PUBLIC_KEY_MAGICS: &[&[u8]] = &[
     b"-----BEGIN PUBLIC KEY-----",
     b"-----BEGIN RSA PUBLIC KEY-----",
     b"-----BEGIN DSA PUBLIC KEY-----",
@@ -20,7 +20,7 @@ const PUBLIC_KEY_MAGICS: [&[u8]; 4] = [
 ];
 
 /// Magic bytes that identify PEM private keys
-const PRIVATE_KEY_MAGICS: [&[u8]; 8] = [
+const PRIVATE_KEY_MAGICS: &[&[u8]] = &[
     b"-----BEGIN PRIVATE KEY-----",
     b"-----BEGIN EC PRIVATE KEY-----",
     b"-----BEGIN RSA PRIVATE KEY-----",
@@ -32,7 +32,7 @@ const PRIVATE_KEY_MAGICS: [&[u8]; 8] = [
 ];
 
 /// Magic bytes that identify PEM certificates
-const CERTIFICATE_MAGICS: [&[u8]; 1] = [b"-----BEGIN CERTIFICATE-----"];
+const CERTIFICATE_MAGICS: &[&[u8]] = &[b"-----BEGIN CERTIFICATE-----"];
 
 /// Public key magic
 pub fn pem_public_key_magic() -> Vec<Vec<u8>> {

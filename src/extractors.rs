@@ -142,7 +142,7 @@
 use crate::signatures::SignatureResult;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
 use std::io::Write;
 #[cfg(unix)]
@@ -1386,10 +1386,10 @@ pub fn execute(
     // Create an output directory for the extraction
     if let Ok(output_directory) = create_output_directory(&file_path, signature.offset) {
         // If the signature result specified a preferred extractor, use that instead of the default signature extractor
-        let extractor_definition = signature.preferred_extractor.as_ref().map_or_else(
-            || default_extractor,
-            |preferred_extractor| preferred_extractor,
-        );
+        let extractor_definition = signature
+            .preferred_extractor
+            .as_ref()
+            .unwrap_or(default_extractor);
 
         // Decide how to execute the extractor depending on the extractor type
         match &extractor_definition.utility {
@@ -1529,12 +1529,12 @@ fn spawn(
     }
 
     // Replace all "%e" (SOURCE_FILE_PLACEHOLDER) command arguments with the path to the carved file
-    let arguments: Vec<&str> = extractor
+    let arguments: Vec<&OsStr> = extractor
         .arguments
         .iter()
         .map(|arg| match arg.as_str() {
-            SOURCE_FILE_PLACEHOLDER => carved_file.to_str().unwrap(), // this is safe as we constructed that path
-            _ => arg.as_str(),
+            SOURCE_FILE_PLACEHOLDER => carved_file.as_os_str(),
+            _ => OsStr::new(arg),
         })
         .collect();
 
