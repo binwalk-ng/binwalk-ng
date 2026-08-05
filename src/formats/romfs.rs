@@ -396,13 +396,13 @@ fn process_romfs_entries(
                     if let Some(symlink_bytes) =
                         romfs_data.get(file_entry.offset..file_entry.offset + file_entry.size)
                     {
-                        match String::from_utf8(symlink_bytes.to_vec()) {
+                        match std::str::from_utf8(symlink_bytes) {
                             Err(e) => {
                                 warn!("Failed to convert symlink target path to string: {e}");
                                 return Err(ExtractionError);
                             }
                             Ok(path) => {
-                                file_entry.symlink_target = path.clone();
+                                file_entry.symlink_target = path.to_owned();
                             }
                         }
                     } else {

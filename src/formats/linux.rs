@@ -111,12 +111,9 @@ pub fn linux_boot_image_parser(
     let hdrs_end: usize = hdrs_start + HDRS_EXPECTED_VALUE.len();
 
     if let Some(hdrs_bytes) = file_data.get(hdrs_start..hdrs_end) {
-        // Get the string that should equal HDRS_EXPECTED_VALUE
-        if let Ok(actual_hdrs_value) = String::from_utf8(hdrs_bytes.to_vec()) {
-            // Validate that the hdrs string matches
-            if actual_hdrs_value == HDRS_EXPECTED_VALUE {
-                return Ok(result);
-            }
+        // Validate that the hdrs string matches
+        if hdrs_bytes == HDRS_EXPECTED_VALUE.as_bytes() {
+            return Ok(result);
         }
     }
 
