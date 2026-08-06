@@ -163,7 +163,7 @@ jobs:
 
       - name: Comment results on PR
         if: github.event.pull_request.head.repo.full_name == github.repository && hashFiles('benchmark/workdir/compare.json') != ''
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
