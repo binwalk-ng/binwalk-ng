@@ -268,7 +268,12 @@ pub fn print_signature_list(quiet: bool, signatures: &Vec<signatures::Signature>
     }
 
     // Sort signature descriptions alphabetically
-    signature_infos.sort_by_key(|info| info.description.to_lowercase());
+    signature_infos.sort_by(|a, b| {
+        a.description
+            .bytes()
+            .map(|c| c.to_ascii_lowercase())
+            .cmp(b.description.bytes().map(|c| c.to_ascii_lowercase()))
+    });
 
     // Print signatures, sorted alphabetically by description
     for siginfo in &signature_infos {
