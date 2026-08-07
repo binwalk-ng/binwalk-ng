@@ -1,36 +1,106 @@
 # binwalk-ng
 
+A firmware analysis tool. Identifies and extracts files and data embedded inside other files — compressed archives, file systems, boot images, executables, and more.
+
 This repository is a fork of the [ReFirmLabs/binwalk](https://github.com/ReFirmLabs/binwalk) project.
 
-This is an updated version of the Binwalk firmware analysis tool, re-written in Rust for speed and accuracy.
+## Features
 
-![binwalk v3](images/binwalk_animated.svg)
+- Parallel, multi-threaded scanning and (optionally) extracting
+- 30+ file signature definitions (firmware, filesystems, archives, media, executables, boot images)
+- [Entropy analysis](#entropy-analysis) to detect compression and encryption
+- Recursive extraction (matryoshka mode)
+- JSON output for automation
+- Usable as a Rust library
 
-## What does it do?
+## Usage
 
-Binwalk can identify, and optionally extract, files and data that have been embedded inside of other files.
+```bash
+# Scan a file for embedded data
+binwalk firmware.bin
 
-While its primary focus is firmware analysis, it supports a [wide variety](https://github.com/ReFirmLabs/binwalk/wiki/Supported-Signatures) of file and data types.
-
-Through [entropy analysis](https://github.com/ReFirmLabs/binwalk/wiki/Generating-Entropy-Graphs), it can even help to identify unknown compression or encryption!
-
-Binwalk can be customized and [integrated](https://github.com/ReFirmLabs/binwalk/wiki/Using-the-Rust-Library) into your own Rust projects.
-
-## How do I get it?
-
-The easiest way to install Binwalk and all dependencies is to [build a Docker image](https://github.com/ReFirmLabs/binwalk/wiki/Building-A-Binwalk-Docker-Image).
-
-Binwalk can also be [installed](https://github.com/ReFirmLabs/binwalk/wiki/Cargo-Installation) via the Rust package manager.
-
-Or, you can [compile from source](https://github.com/ReFirmLabs/binwalk/wiki/Compile-From-Source)!
-
-## How do I use it?
-
-Usage is _**simple**_, analysis is _**fast**_, and results are _**detailed**_:
-
+# Extract (-e) all signatures found, recursively (-M)
+binwalk -Me firmware.bin
 ```
-binwalk DIR-890L_AxFW110b07.bin
-```
-![example output](images/output.png)
 
-Use `--help`, or check out the [Wiki](https://github.com/ReFirmLabs/binwalk/wiki#usage) for more advanced options!
+### Docker
+
+Docker images are published to GitHub Container Registry with all system and runtime dependencies pre-installed:
+
+```bash
+docker pull ghcr.io/binwalk-ng/binwalk-ng:main
+```
+
+```bash
+docker run --rm -v "$PWD:/analysis" ghcr.io/binwalk-ng/binwalk-ng:main -Me firmware.bin
+```
+
+## Library Usage
+
+Binwalk can be used as a Rust library in your own projects:
+
+```rust
+use binwalk_ng::Binwalk;
+
+// Create a new Binwalk instance
+let binwalker = Binwalk::new();
+
+// Read in the data to analyze
+let file_data = std::fs::read("/tmp/firmware.bin").expect("Failed to read from file");
+
+// Scan the file data and print the results
+for result in binwalker.scan(&file_data) {
+    println!("{:#?}", result);
+}
+```
+
+Add binwalk-ng to your project:
+
+```bash
+cargo add binwalk-ng
+```
+
+## Entropy Analysis
+
+Generate an entropy graph to identify regions of unknown compression or encryption.
+
+The entropy plot feature requires building with the `entropy-plot` Cargo feature:
+```bash
+cargo build --release --features entropy-plot
+```
+
+Then run:
+
+```bash
+binwalk -E firmware.bin
+```
+
+Or, to save the graph as a PNG file:
+
+```bash
+binwalk -E --png entropy.png firmware.bin
+```
+
+## Development
+
+### Prerequisites
+
+- Rust toolchain (stable)
+- Docker (for full test suite)
+
+### Code Quality
+
+This project uses [`prek`](https://prek.j178.dev/) for Git pre-commit hooks. To start using the hooks, after installing `prek` run
+
+```bash
+prek install
+```
+
+### Testing
+
+Tests run inside Docker to ensure all external tool dependencies are available:
+
+```bash
+docker build --target dev --tag binwalk-ng:dev .
+docker run --rm -v "$(pwd):/tmp/binwalk" -e INSTA_UPDATE=new binwalk-ng:dev cargo insta test --unreferenced=reject
+```
