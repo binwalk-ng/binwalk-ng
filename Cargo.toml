@@ -83,11 +83,23 @@ opt-level = 3
 [profile.release]
 lto = true
 
+[profile.bench]
+debug = true
+
 [[bin]]
 name = "binwalk"
 path = "src/main.rs"
+bench = false
+
+[lib]
+bench = false
+
+[[bench]]
+name = "gungraun"
+harness = false
 
 [dev-dependencies]
 tempfile = "3.27.0"
 insta = { version = "1.48", features = ["yaml", "redactions"] }
 walkdir = "2.5.0"
+gungraun = "0.19.4"
