@@ -1,5 +1,0 @@
----
-source: tests/common/mod.rs
-expression: ordered_extractions
----
-- ~

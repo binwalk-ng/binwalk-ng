@@ -1,7 +1,0 @@
-* text eol=lf
-*.md text eol=lf
-*.rar binary
-*.exe binary
-*.png binary
-*.bin binary
-*.hex binary

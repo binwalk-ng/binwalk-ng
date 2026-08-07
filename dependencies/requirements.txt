@@ -1,4 +1,0 @@
-uefi_firmware
-jefferson
-ubi-reader
-vmlinux-to-elf

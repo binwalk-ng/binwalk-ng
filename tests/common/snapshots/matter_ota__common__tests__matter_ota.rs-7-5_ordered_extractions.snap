@@ -1,9 +1,0 @@
----
-source: tests/common/mod.rs
-expression: ordered_extractions
----
-- size: 96
-  success: true
-  extractor: matter_ota_built_in
-  do_not_recurse: false
-  output_directory: "[output_directory]"
