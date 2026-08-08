@@ -1009,7 +1009,7 @@ impl Binwalk {
     ) -> AnalysisResults {
         let file_path = target_file.as_ref();
 
-        let file_data = read_or_map_file(file_path, self.mmap_usage());
+        let file_data = read_or_map_file(file_path, self.mmap_usage);
         let file_data: &[u8] = file_data
             .as_ref()
             .map(|data| data.as_ref())
