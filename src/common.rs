@@ -1,5 +1,6 @@
 //! Common Functions
 
+use crate::binwalk_ng::MmapUsage;
 use log::{debug, error};
 use memmap2::Mmap;
 use std::io::Read;
@@ -33,9 +34,11 @@ pub fn read_file(file: impl AsRef<Path>) -> Result<Vec<u8>, std::io::Error> {
     Ok(file_data)
 }
 
-pub fn read_or_map_file(file: &Path, allow_mmap: bool) -> std::io::Result<impl AsRef<[u8]>> {
+pub fn read_or_map_file(file: &Path, mmap_usage: MmapUsage) -> std::io::Result<impl AsRef<[u8]>> {
     let mut f = std::fs::File::open(file)?;
-    if allow_mmap && let Ok(map) = unsafe { Mmap::map(&f) } {
+    if mmap_usage != MmapUsage::Never
+        && let Ok(map) = unsafe { Mmap::map(&f) }
+    {
         Ok(VecOrMmap::Mmap(map))
     } else {
         let mut v = Vec::new();
