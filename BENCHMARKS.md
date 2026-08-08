@@ -86,7 +86,7 @@ repo root.
 To compare two runs locally, run the benchmark twice — Gungraun diffs each
 benchmark against the previous run's output and reports per-metric deltas.
 
-## CI behavior (`.github/workflows/benchmark.yaml`)
+## CI behavior (`.github/workflows/benchmark.yaml` + `.github/workflows/benchmark-report.yml`)
 
 - Runs on every PR, on `main` pushes, and via `workflow_dispatch`.
 - The `benchmark` job builds the Docker `dev` image (pinned environment:
@@ -95,15 +95,18 @@ benchmark against the previous run's output and reports per-metric deltas.
   script installs `gungraun-runner` at the exact version of the `gungraun`
   dev-dependency, runs `cargo bench -- --output-format=json`, and strips
   run-specific fields (log/output paths, PIDs, per-thread parts) so identical
-  runs produce byte-comparable `results.json`.
-- On PRs: posts/updates a results table as a comment and **fails the job** if a
-  metric exceeds its threshold:
+  runs produce byte-comparable `results.json`. `results.json` is uploaded as a
+  workflow artifact.
+- The `report` job lives in a separate `benchmark-report.yml` triggered by
+  `workflow_run` once the `Benchmark` workflow completes, so it runs with a
+  write-scoped token even on fork PRs (where the `pull_request` run itself
+  only gets a read-only token). It downloads the artifact, fetches the latest
+  baseline from `benchmark-baseline`, diffs, posts/updates a results table as a
+  PR comment (including on fork PRs), surfaces the table in the job summary,
+  and **fails the job** if a metric exceeds its threshold:
   - instructions / total bytes / heap allocations: **+5%**
   - peak live heap: **+10%** (measured under `--threads 4`, where valgrind's
     serialized scheduling can move the peak; treat it as indicative)
-  Fork PRs get the comparison in the job summary and **still fail** on
-  regressions, but no comment is posted (the bot token is read-only on
-  `pull_request` runs from forks, so it cannot write one).
 - On pushes to `main` (not PRs or manual runs): the results are pushed to the
   dedicated `benchmark-baseline` branch (root file `baseline.json`), but only
   when the metrics actually changed (the JSON is compared byte-for-byte). The

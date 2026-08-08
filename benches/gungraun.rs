@@ -111,7 +111,7 @@ fn bench_scan_large() -> Command {
 #[bench::list_signatures(config = config(&[]))]
 fn bench_list_signatures() -> Command {
     ensure_fixtures();
-    binwalk().args(["-q", "-L"]).build()
+    binwalk().args(["-L"]).build()
 }
 
 #[binary_benchmark]

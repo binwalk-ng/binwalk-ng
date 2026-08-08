@@ -24,7 +24,7 @@ pub struct CliArgs {
     pub file_name: Option<PathBuf>,
 
     /// Suppress normal stdout output
-    #[arg(short, long)]
+    #[arg(short, long, conflicts_with = "verbose")]
     pub quiet: bool,
 
     /// During recursive extraction display *all* results

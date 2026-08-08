@@ -58,7 +58,7 @@ fn main() -> ExitCode {
 
     // If --list was specified, just display a list of signatures and return
     if cli_args.list {
-        display::print_signature_list(cli_args.quiet, &binwalk_ng::magic::patterns());
+        display::print_signature_list(&binwalk_ng::magic::patterns());
         return ExitCode::SUCCESS;
     }
 
@@ -155,9 +155,14 @@ fn main() -> ExitCode {
         process::exit(-1);
     }));
 
+    let verbosity = match (cli_args.quiet, cli_args.verbose) {
+        (true, _) => Verbosity::Quiet,
+        (_, true) => Verbosity::Verbose,
+        _ => Verbosity::Normal,
+    };
+
     let flags = AnalysisFlags {
-        verbose: cli_args.verbose,
-        quiet: cli_args.quiet,
+        verbosity,
         do_extract: cli_args.extract,
         matryoshka: cli_args.matryoshka,
     };
@@ -228,43 +233,49 @@ fn main() -> ExitCode {
     }
 
     // All done, show some basic statistics
-    display::print_stats(
-        cli_args.quiet,
-        run_time,
-        file_count,
-        binwalker.signature_count,
-        binwalker.pattern_count,
-    );
+    if !cli_args.quiet {
+        display::print_stats(
+            run_time,
+            file_count,
+            binwalker.signature_count,
+            binwalker.pattern_count,
+        );
+    }
 
     ExitCode::SUCCESS
 }
 
 /// Returns true if the specified results should be displayed to screen
-fn should_display(results: &AnalysisResults, file_count: usize, verbose: bool) -> bool {
+fn should_display(verbosity: Verbosity, results: &AnalysisResults, file_count: usize) -> bool {
     /*
      * For brevity, when analyzing more than one file only display subsequent files whose results
      * contain signatures that we always want displayed, or which contain extractable signatures.
-     * This can be overridden with the --verbose command line flag.
      */
-    if file_count == 1 || verbose || !results.extractions.is_empty() {
-        return true;
-    } else {
-        for signature in &results.file_map {
-            if signature.always_display {
-                return true;
-            }
-        }
+    if verbosity == Verbosity::Quiet {
+        return false;
     }
-
-    false
+    if verbosity == Verbosity::Verbose || file_count == 1 || !results.extractions.is_empty() {
+        true
+    } else {
+        results
+            .file_map
+            .iter()
+            .any(|signature| signature.always_display)
+    }
 }
 
 #[derive(Clone, Copy)]
 struct AnalysisFlags {
-    verbose: bool,
-    quiet: bool,
+    verbosity: Verbosity,
     do_extract: bool,
     matryoshka: bool,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum Verbosity {
+    Quiet,
+    Normal,
+    Verbose,
 }
 
 /// Process analysis results from a worker: log, display, and queue nested files.
@@ -283,8 +294,8 @@ fn process_analysis_results(
         return;
     }
 
-    if should_display(&results, *file_count, flags.verbose) {
-        display::print_analysis_results(flags.quiet, flags.do_extract, &results);
+    if should_display(flags.verbosity, &results, *file_count) {
+        display::print_analysis_results(flags.do_extract, &results);
     }
 
     if flags.matryoshka {

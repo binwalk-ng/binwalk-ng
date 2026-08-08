@@ -1,0 +1,61 @@
+name: Benchmark Report
+
+on:
+  workflow_run:
+    workflows:
+      - Benchmark
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+jobs:
+
+  report:
+    if: |
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.pull_requests[0]
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Download benchmark artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: benchmark-results
+          path: target/bench
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Compare against baseline
+        env:
+          COMPARE_JSON: target/bench/workdir/compare.json
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: bash .github/scripts/bench-report.sh
+
+      - name: Comment results on PR
+        if: hashFiles('target/bench/workdir/compare.json') != ''
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const postComment = require('./.github/scripts/post-bench-comment.js');
+
+            await postComment({
+              github,
+              context,
+              prNumber: context.payload.workflow_run.pull_requests[0].number,
+            });
+
+      - name: Fail on regressions
+        if: hashFiles('target/bench/workdir/compare.json') != ''
+        run: bash .github/scripts/fail-on-regressions.sh
