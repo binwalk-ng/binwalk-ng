@@ -1177,4 +1177,751 @@ mod tests {
             "{file_map:?}"
         );
     }
+
+    /*
+     * These tests drive scan() through the conflicting-signature resolution loop, which removes
+     * entries from the file map while iterating over it. All test signatures are short signatures
+     * with the same magic bytes, so they match at file offset 0 and each parser reports a
+     * controlled offset, size, and confidence.
+     */
+    const CONFLICT_TEST_FILE_SIZE: usize = 64;
+    const CONFLICT_TEST_MAGIC: u8 = 0xAA;
+    const CONFLICT_TEST_VALID_SIZE: usize = 8;
+
+    fn conflict_test_signature(
+        name: &str,
+        parser: signatures::SignatureParser,
+    ) -> signatures::Signature {
+        signatures::Signature {
+            name: name.to_string(),
+            short: true,
+            magic: vec![vec![CONFLICT_TEST_MAGIC]],
+            magic_offset: 0,
+            description: format!("{name} conflict test signature"),
+            always_display: false,
+            parser,
+            extractor: None,
+        }
+    }
+
+    fn conflict_test_result(
+        offset: usize,
+        size: usize,
+        confidence: u8,
+        description: &str,
+    ) -> signatures::SignatureResult {
+        signatures::SignatureResult {
+            offset,
+            size,
+            confidence,
+            description: description.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn conflict_low_parser(
+        _file_data: &[u8],
+        _offset: usize,
+    ) -> Result<signatures::SignatureResult, signatures::SignatureError> {
+        Ok(conflict_test_result(
+            0,
+            CONFLICT_TEST_VALID_SIZE,
+            signatures::CONFIDENCE_LOW,
+            "low confidence conflict parser",
+        ))
+    }
+
+    fn conflict_high_parser(
+        _file_data: &[u8],
+        _offset: usize,
+    ) -> Result<signatures::SignatureResult, signatures::SignatureError> {
+        Ok(conflict_test_result(
+            0,
+            CONFLICT_TEST_VALID_SIZE,
+            signatures::CONFIDENCE_HIGH,
+            "high confidence conflict parser",
+        ))
+    }
+
+    fn conflict_high_invalid_size_parser(
+        file_data: &[u8],
+        _offset: usize,
+    ) -> Result<signatures::SignatureResult, signatures::SignatureError> {
+        Ok(conflict_test_result(
+            0,
+            file_data.len() + 1024,
+            signatures::CONFIDENCE_HIGH,
+            "high confidence conflict parser with an invalid size",
+        ))
+    }
+
+    fn conflict_following_parser(
+        _file_data: &[u8],
+        _offset: usize,
+    ) -> Result<signatures::SignatureResult, signatures::SignatureError> {
+        Ok(conflict_test_result(
+            32,
+            CONFLICT_TEST_VALID_SIZE,
+            signatures::CONFIDENCE_LOW,
+            "following conflict parser",
+        ))
+    }
+
+    fn conflict_scan(signatures: Vec<signatures::Signature>) -> Vec<signatures::SignatureResult> {
+        let include: Vec<String> = signatures
+            .iter()
+            .map(|signature| signature.name.clone())
+            .collect();
+        let binwalker =
+            Binwalk::configure(None, None, include, vec![], Some(signatures), false).unwrap();
+
+        let mut file_data = vec![0u8; CONFLICT_TEST_FILE_SIZE];
+        file_data[0] = CONFLICT_TEST_MAGIC;
+
+        binwalker.scan(&file_data)
+    }
+
+    #[test]
+    fn conflicting_signatures_keep_higher_confidence_entry() {
+        let file_map = conflict_scan(vec![
+            conflict_test_signature("conflict_low", conflict_low_parser),
+            conflict_test_signature("conflict_high", conflict_high_parser),
+        ]);
+
+        assert_eq!(file_map.len(), 1, "{file_map:?}");
+        assert_eq!(file_map[0].name, "conflict_high");
+        assert_eq!(file_map[0].offset, 0);
+    }
+
+    // Skipped: scan() panics with an out-of-bounds removal ("removal index (is 1) should be <
+    // len (is 1)") at src/binwalk_ng.rs:632. After the higher confidence signature wins the
+    // offset conflict (file_map.remove(i - 1)), the loop falls through to the EOF size check
+    // with a stale index and removes the wrong entry. This bug is not solved in this branch.
+    #[test]
+    #[ignore = "failing, will be fixed in another branch: scan() panics on a conflicting signature with an invalid size (src/binwalk_ng.rs:632)"]
+    fn conflicting_signature_with_invalid_size_is_removed() {
+        let file_map = conflict_scan(vec![
+            conflict_test_signature("conflict_low", conflict_low_parser),
+            conflict_test_signature("conflict_high", conflict_high_invalid_size_parser),
+        ]);
+
+        assert!(
+            file_map.is_empty(),
+            "the higher confidence signature reported an invalid size and must be removed: {file_map:?}"
+        );
+    }
+
+    #[test]
+    fn conflict_resolution_preserves_following_signatures() {
+        let file_map = conflict_scan(vec![
+            conflict_test_signature("conflict_low", conflict_low_parser),
+            conflict_test_signature("conflict_high", conflict_high_parser),
+            conflict_test_signature("conflict_following", conflict_following_parser),
+        ]);
+
+        assert_eq!(file_map.len(), 2, "{file_map:?}");
+        assert_eq!(file_map[0].name, "conflict_high");
+        assert_eq!(file_map[1].name, "conflict_following");
+    }
+
+    #[test]
+    fn conflicting_signatures_same_confidence_keep_first() {
+        let file_map = conflict_scan(vec![
+            conflict_test_signature("conflict_low", conflict_low_parser),
+            conflict_test_signature("conflict_low_2", conflict_low_parser),
+        ]);
+
+        assert_eq!(file_map.len(), 1, "{file_map:?}");
+        assert_eq!(file_map[0].name, "conflict_low");
+    }
+
+    fn unknown_size_parser(
+        _file_data: &[u8],
+        offset: usize,
+    ) -> Result<signatures::SignatureResult, signatures::SignatureError> {
+        Ok(signatures::SignatureResult {
+            offset,
+            // Reports no size; Binwalk::scan should fill it in to the next signature or EOF
+            size: 0,
+            confidence: signatures::CONFIDENCE_HIGH,
+            description: "unknown size test signature".to_string(),
+            ..Default::default()
+        })
+    }
+
+    fn sized_parser(
+        _file_data: &[u8],
+        offset: usize,
+    ) -> Result<signatures::SignatureResult, signatures::SignatureError> {
+        Ok(signatures::SignatureResult {
+            offset,
+            size: 8,
+            confidence: signatures::CONFIDENCE_HIGH,
+            description: "sized test signature".to_string(),
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn scan_fills_unknown_size_to_next_signature_offset() {
+        let next_signature_offset = 18;
+        let mut file_data = vec![0xAA, 0xAA];
+        file_data.extend_from_slice(&[0xFF; 16]);
+        file_data.extend_from_slice(&[0xBB, 0xBB]);
+        file_data.extend_from_slice(&[0xCC; 8]);
+
+        let signature1 = signatures::Signature {
+            name: "unknown_size".to_string(),
+            short: false,
+            magic: vec![vec![0xAA, 0xAA]],
+            magic_offset: 0,
+            description: "unknown size test signature".to_string(),
+            always_display: false,
+            parser: unknown_size_parser,
+            extractor: None,
+        };
+        let signature2 = signatures::Signature {
+            name: "sized".to_string(),
+            short: false,
+            magic: vec![vec![0xBB, 0xBB]],
+            magic_offset: 0,
+            description: "sized test signature".to_string(),
+            always_display: false,
+            parser: sized_parser,
+            extractor: None,
+        };
+
+        let binwalker = Binwalk::configure(
+            None,
+            None,
+            vec![],
+            vec![],
+            Some(vec![signature1, signature2]),
+            false,
+        )
+        .unwrap();
+        let file_map = binwalker.scan(&file_data);
+
+        assert_eq!(file_map.len(), 2);
+        assert_eq!(file_map[0].name, "unknown_size");
+        // The unknown-size signature's data ends where the next signature begins
+        assert_eq!(file_map[0].size, next_signature_offset);
+        assert_eq!(file_map[1].name, "sized");
+        assert_eq!(file_map[1].size, 8);
+    }
+
+    #[test]
+    fn scan_fills_unknown_size_to_eof() {
+        let file_data = vec![0xAA, 0xAA, 0xFF, 0xFF, 0xFF, 0xFF];
+
+        let signature = signatures::Signature {
+            name: "unknown_size".to_string(),
+            short: false,
+            magic: vec![vec![0xAA, 0xAA]],
+            magic_offset: 0,
+            description: "unknown size test signature".to_string(),
+            always_display: false,
+            parser: unknown_size_parser,
+            extractor: None,
+        };
+
+        let binwalker =
+            Binwalk::configure(None, None, vec![], vec![], Some(vec![signature]), false).unwrap();
+        let file_map = binwalker.scan(&file_data);
+
+        assert_eq!(file_map.len(), 1);
+        // With no following signature, the unknown-size signature extends to EOF
+        assert_eq!(file_map[0].size, file_data.len());
+    }
+
+    fn oversized_short_parser(
+        file_data: &[u8],
+        offset: usize,
+    ) -> Result<signatures::SignatureResult, signatures::SignatureError> {
+        Ok(signatures::SignatureResult {
+            offset,
+            size: file_data.len() + 1000,
+            confidence: signatures::CONFIDENCE_HIGH,
+            description: "oversized short test signature".to_string(),
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn scan_drops_short_signature_whose_size_exceeds_eof() {
+        let file_data = vec![0xAA, 0xAA, 0x00, 0x00, 0x00, 0x00, 0x00];
+
+        let signature = signatures::Signature {
+            name: "oversized_short".to_string(),
+            short: true,
+            magic: vec![vec![0xAA, 0xAA]],
+            magic_offset: 0,
+            description: "oversized short test signature".to_string(),
+            always_display: false,
+            parser: oversized_short_parser,
+            extractor: None,
+        };
+
+        // full_search=false routes the signature through the short-signature path, which lacks
+        // the EOF sanity check the Aho-Corasick path applies; the invalid size must still be
+        // caught during post-processing rather than panicking or being reported.
+        let binwalker =
+            Binwalk::configure(None, None, vec![], vec![], Some(vec![signature]), false).unwrap();
+        let file_map = binwalker.scan(&file_data);
+
+        assert!(file_map.is_empty(), "{file_map:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn extract_retries_with_all_available_data_after_extraction_failure() {
+        fn truncated_parser(
+            _file_data: &[u8],
+            offset: usize,
+        ) -> Result<signatures::SignatureResult, signatures::SignatureError> {
+            Ok(signatures::SignatureResult {
+                offset,
+                // Reports a size smaller than the real file, so the first extraction gets only
+                // the first few bytes of data
+                size: 5,
+                confidence: signatures::CONFIDENCE_HIGH,
+                description: "retry test signature".to_string(),
+                ..Default::default()
+            })
+        }
+
+        let file_data: Vec<u8> = vec![0xAA, 0xAA, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        // The retry carves to EOF via a symlink to the source file, so the source file must
+        // actually contain the scanned data (as it does in production).
+        std::fs::write(tmp.path(), &file_data).unwrap();
+
+        // `sh -c <script> %e`: the SOURCE_FILE_PLACEHOLDER becomes the carved input path, exposed
+        // to the script as `$0`. The script fails unless the carved input holds more than the
+        // reported size, and copies it out on success.
+        let extractor = extractors::Extractor {
+            utility: extractors::ExtractorType::External("sh".to_string()),
+            extension: "bin".to_string(),
+            arguments: vec![
+                "-c".to_string(),
+                "test \"$(wc -c < \"$0\")\" -gt 5 && cp \"$0\" out.bin".to_string(),
+                extractors::SOURCE_FILE_PLACEHOLDER.to_string(),
+            ],
+            exit_codes: vec![0],
+            ..Default::default()
+        };
+
+        let signature = signatures::Signature {
+            name: "retry_test".to_string(),
+            short: false,
+            magic: vec![vec![0xAA, 0xAA]],
+            magic_offset: 0,
+            description: "retry test signature".to_string(),
+            always_display: false,
+            parser: truncated_parser,
+            extractor: Some(extractor),
+        };
+
+        let binwalker =
+            Binwalk::configure(None, None, vec![], vec![], Some(vec![signature]), false).unwrap();
+        let file_map = binwalker.scan(&file_data);
+        assert_eq!(file_map.len(), 1);
+
+        let extraction_results = binwalker.extract(&file_data, tmp.path(), &file_map);
+        let result = &extraction_results[&file_map[0].id];
+
+        assert!(
+            result.success,
+            "extraction should succeed on the retry with all available data"
+        );
+
+        let output_file = format!("{}.extracted/0/out.bin", tmp.path().display());
+        assert_eq!(std::fs::read(&output_file).unwrap(), file_data);
+    }
+
+    fn rejecting_parser(
+        _file_data: &[u8],
+        _offset: usize,
+    ) -> Result<signatures::SignatureResult, signatures::SignatureError> {
+        Err(signatures::SignatureError)
+    }
+
+    /// Reports that the signature starts at offset 0 and covers 16 bytes, even though its magic
+    /// bytes were found later in the file (the container's real start precedes its magic).
+    fn outer_container_parser(
+        _file_data: &[u8],
+        _offset: usize,
+    ) -> Result<signatures::SignatureResult, signatures::SignatureError> {
+        Ok(conflict_test_result(
+            0,
+            16,
+            signatures::CONFIDENCE_HIGH,
+            "outer container test parser",
+        ))
+    }
+
+    /// A parser error means the magic match is a false positive; the scan must skip the match
+    /// without crashing or reporting it, and keep scanning for later signatures.
+    #[test]
+    fn scan_skips_matches_whose_parser_rejects_them() {
+        // The rejecting magic at offset 0 matches before the accepting magic at offset 5; the
+        // scan must survive the rejection and still find the accepting signature.
+        let mut file_data = vec![0xFF; 16];
+        file_data[0] = 0xAA;
+        file_data[1] = 0xAA;
+        file_data[5] = 0xBB;
+
+        let rejecting = signatures::Signature {
+            name: "rejecting".to_string(),
+            short: false,
+            magic: vec![vec![0xAA, 0xAA]],
+            magic_offset: 0,
+            description: "rejecting test signature".to_string(),
+            always_display: false,
+            parser: rejecting_parser,
+            extractor: None,
+        };
+        let accepting = signatures::Signature {
+            name: "accepting".to_string(),
+            short: false,
+            magic: vec![vec![0xBB]],
+            magic_offset: 0,
+            description: "accepting test signature".to_string(),
+            always_display: false,
+            parser: sized_parser,
+            extractor: None,
+        };
+
+        let binwalker = Binwalk::configure(
+            None,
+            None,
+            vec![],
+            vec![],
+            Some(vec![rejecting, accepting]),
+            false,
+        )
+        .unwrap();
+        let file_map = binwalker.scan(&file_data);
+
+        assert_eq!(file_map.len(), 1, "{file_map:?}");
+        assert_eq!(file_map[0].name, "accepting");
+        assert_eq!(file_map[0].offset, 5);
+    }
+
+    /// In the full-search path, a signature whose reported size exceeds the file must be dropped
+    /// by the in-loop EOF check, and the scan must continue: a valid signature after it is still
+    /// found. (If the in-loop check were missing, the oversized signature would end the scan and
+    /// the valid one would never be reported.)
+    #[test]
+    fn scan_rejects_oversized_signature_in_the_full_search_path() {
+        let mut file_data = vec![0xFF; 28];
+        file_data[0] = 0xAA;
+        file_data[1] = 0xAA;
+        file_data[20] = 0xBB;
+
+        let oversized = signatures::Signature {
+            name: "oversized_full_search".to_string(),
+            short: false,
+            magic: vec![vec![0xAA, 0xAA]],
+            magic_offset: 0,
+            description: "oversized full search test signature".to_string(),
+            always_display: false,
+            parser: oversized_short_parser,
+            extractor: None,
+        };
+        let valid = signatures::Signature {
+            name: "valid".to_string(),
+            short: false,
+            magic: vec![vec![0xBB]],
+            magic_offset: 0,
+            description: "valid test signature".to_string(),
+            always_display: false,
+            parser: sized_parser,
+            extractor: None,
+        };
+
+        let binwalker = Binwalk::configure(
+            None,
+            None,
+            vec![],
+            vec![],
+            Some(vec![oversized, valid]),
+            true,
+        )
+        .unwrap();
+        let file_map = binwalker.scan(&file_data);
+
+        assert_eq!(file_map.len(), 1, "{file_map:?}");
+        assert_eq!(file_map[0].name, "valid");
+        assert_eq!(file_map[0].offset, 20);
+    }
+
+    /// A signature found inside the data of an already-identified signature (e.g. a gzip inside
+    /// a tarball) is a false positive and must be dropped, while the containing signature is kept.
+    #[test]
+    fn scan_drops_signatures_inside_a_previously_identified_signature() {
+        // The inner magic at offset 3 is found first and reports a size covering offsets 3..11.
+        // The outer magic at offset 12 reports a size of 16 starting at offset 0, which contains
+        // the inner signature entirely; the inner one must be dropped as conflicting data.
+        let mut file_data = vec![0xFF; 40];
+        file_data[3] = 0xBB;
+        file_data[12] = 0xAA;
+        file_data[13] = 0xAA;
+
+        let inner = signatures::Signature {
+            name: "inner".to_string(),
+            short: false,
+            magic: vec![vec![0xBB]],
+            magic_offset: 0,
+            description: "inner test signature".to_string(),
+            always_display: false,
+            parser: sized_parser,
+            extractor: None,
+        };
+        let outer = signatures::Signature {
+            name: "outer".to_string(),
+            short: false,
+            magic: vec![vec![0xAA, 0xAA]],
+            magic_offset: 0,
+            description: "outer test signature".to_string(),
+            always_display: false,
+            parser: outer_container_parser,
+            extractor: None,
+        };
+
+        let binwalker =
+            Binwalk::configure(None, None, vec![], vec![], Some(vec![inner, outer]), false)
+                .unwrap();
+        let file_map = binwalker.scan(&file_data);
+
+        assert_eq!(file_map.len(), 1, "{file_map:?}");
+        assert_eq!(file_map[0].name, "outer");
+        assert_eq!(file_map[0].offset, 0);
+        assert_eq!(file_map[0].size, 16);
+    }
+
+    fn low_confidence_offset_parser(
+        _file_data: &[u8],
+        offset: usize,
+    ) -> Result<signatures::SignatureResult, signatures::SignatureError> {
+        Ok(signatures::SignatureResult {
+            offset,
+            size: 0,
+            confidence: signatures::CONFIDENCE_LOW,
+            description: "low confidence test parser".to_string(),
+            ..Default::default()
+        })
+    }
+
+    /// A signature of unknown size extends to the next signature of at least medium confidence;
+    /// low-confidence entries between them must not truncate it.
+    #[test]
+    fn scan_fills_unknown_size_ignoring_low_confidence_interlopers() {
+        let mut file_data = vec![0xFF; 20];
+        file_data[0] = 0xAA;
+        file_data[1] = 0xAA;
+        file_data[5] = 0xBB;
+        file_data[10] = 0xCC;
+
+        let unknown = signatures::Signature {
+            name: "unknown_size".to_string(),
+            short: false,
+            magic: vec![vec![0xAA, 0xAA]],
+            magic_offset: 0,
+            description: "unknown size test signature".to_string(),
+            always_display: false,
+            parser: unknown_size_parser,
+            extractor: None,
+        };
+        let low_confidence = signatures::Signature {
+            name: "low_confidence".to_string(),
+            short: false,
+            magic: vec![vec![0xBB]],
+            magic_offset: 0,
+            description: "low confidence test signature".to_string(),
+            always_display: false,
+            parser: low_confidence_offset_parser,
+            extractor: None,
+        };
+        let sized = signatures::Signature {
+            name: "sized".to_string(),
+            short: false,
+            magic: vec![vec![0xCC]],
+            magic_offset: 0,
+            description: "sized test signature".to_string(),
+            always_display: false,
+            parser: sized_parser,
+            extractor: None,
+        };
+
+        let binwalker = Binwalk::configure(
+            None,
+            None,
+            vec![],
+            vec![],
+            Some(vec![unknown, low_confidence, sized]),
+            false,
+        )
+        .unwrap();
+        let file_map = binwalker.scan(&file_data);
+
+        assert_eq!(file_map.len(), 3, "{file_map:?}");
+        // The unknown-size signature must extend to the sized signature at offset 10, not to the
+        // low-confidence entry at offset 5.
+        assert_eq!(file_map[0].name, "unknown_size");
+        assert_eq!(file_map[0].size, 10);
+        assert_eq!(file_map[1].name, "low_confidence");
+        assert_eq!(file_map[1].size, 5);
+        assert_eq!(file_map[2].name, "sized");
+        assert_eq!(file_map[2].size, 8);
+    }
+
+    /// Signatures may opt out of extraction via extraction_declined; extract() must skip them.
+    #[test]
+    fn extract_skips_signatures_that_declined_extraction() {
+        fn declining_parser(
+            file_data: &[u8],
+            offset: usize,
+        ) -> Result<signatures::SignatureResult, signatures::SignatureError> {
+            Ok(signatures::SignatureResult {
+                offset,
+                size: file_data.len() - offset,
+                confidence: signatures::CONFIDENCE_HIGH,
+                description: "declining test signature".to_string(),
+                extraction_declined: true,
+                ..Default::default()
+            })
+        }
+
+        let file_data: Vec<u8> = vec![0xAA, 0xAA, 0x11, 0x22, 0x33, 0x44];
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+
+        // The extractor never runs; the signature declined extraction. A minimal valid extractor
+        // is enough to prove the decline is honored rather than the extractor being missing.
+        let extractor = extractors::Extractor {
+            utility: extractors::ExtractorType::External("sh".to_string()),
+            ..Default::default()
+        };
+
+        let signature = signatures::Signature {
+            name: "declining".to_string(),
+            short: false,
+            magic: vec![vec![0xAA, 0xAA]],
+            magic_offset: 0,
+            description: "declining test signature".to_string(),
+            always_display: false,
+            parser: declining_parser,
+            extractor: Some(extractor),
+        };
+
+        let binwalker =
+            Binwalk::configure(None, None, vec![], vec![], Some(vec![signature]), false).unwrap();
+        let file_map = binwalker.scan(&file_data);
+        assert_eq!(file_map.len(), 1);
+        assert!(file_map[0].extraction_declined);
+
+        let extraction_results = binwalker.extract(&file_data, tmp.path(), &file_map);
+        assert!(
+            extraction_results.is_empty(),
+            "a signature that declined extraction must not be extracted: {extraction_results:?}"
+        );
+    }
+
+    fn include_filter_signature(name: &str) -> signatures::Signature {
+        signatures::Signature {
+            name: name.to_string(),
+            short: false,
+            magic: vec![],
+            magic_offset: 0,
+            description: String::new(),
+            always_display: false,
+            parser: rejecting_parser,
+            extractor: None,
+        }
+    }
+
+    #[test]
+    fn include_signature_filters_by_name() {
+        let jpeg = include_filter_signature("jpeg");
+        let png = include_filter_signature("png");
+
+        // No filters: everything is included
+        assert!(include_signature(&jpeg, &vec![], &vec![]));
+        assert!(include_signature(&png, &vec![], &vec![]));
+
+        // Include filter: matching names are included, non-matching names are excluded
+        assert!(include_signature(&jpeg, &vec!["JPEG".to_string()], &vec![]));
+        assert!(!include_signature(&png, &vec!["jpeg".to_string()], &vec![]));
+
+        // Exclude filter: matching names are excluded, non-matching names are included
+        assert!(!include_signature(
+            &jpeg,
+            &vec![],
+            &vec!["jpeg".to_string()]
+        ));
+        assert!(include_signature(&png, &vec![], &vec!["jpeg".to_string()]));
+
+        // Include filter takes precedence over exclude filter
+        assert!(include_signature(
+            &jpeg,
+            &vec!["jpeg".to_string()],
+            &vec!["jpeg".to_string()]
+        ));
+    }
+
+    /// A short signature whose magic is exactly as long as the file is never matched, because the
+    /// magic check at src/binwalk_ng.rs:401 uses `file_data.len() > magic_end` instead of `>=`.
+    #[test]
+    #[ignore = "failing, will be fixed in another branch: a short signature whose magic is exactly as long as the file is never matched (src/binwalk_ng.rs:401)"]
+    fn short_signature_matches_when_the_magic_is_entire_file() {
+        let file_data = vec![0xAA, 0xAA];
+
+        let signature = signatures::Signature {
+            name: "exact_len".to_string(),
+            short: true,
+            magic: vec![vec![0xAA, 0xAA]],
+            magic_offset: 0,
+            description: "exact length short test signature".to_string(),
+            always_display: false,
+            parser: unknown_size_parser,
+            extractor: None,
+        };
+
+        let binwalker =
+            Binwalk::configure(None, None, vec![], vec![], Some(vec![signature]), false).unwrap();
+        let file_map = binwalker.scan(&file_data);
+
+        assert_eq!(file_map.len(), 1, "{file_map:?}");
+        assert_eq!(file_map[0].name, "exact_len");
+    }
+
+    /// Every default signature table entry must be structurally sound: a unique non-empty name
+    /// (it keys the extractor lookup table and the include/exclude name filters, so duplicates or
+    /// empty names silently misbehave) and at least one non-empty magic pattern.
+    #[test]
+    fn default_signatures_have_unique_names_and_non_empty_magic() {
+        let patterns = magic::patterns();
+
+        let mut names = std::collections::HashSet::new();
+        for signature in &patterns {
+            assert!(!signature.name.is_empty(), "signature has an empty name");
+            assert!(
+                names.insert(signature.name.to_ascii_lowercase()),
+                "duplicate signature name: {}",
+                signature.name,
+            );
+            assert!(
+                !signature.magic.is_empty(),
+                "signature {} has no magic patterns",
+                signature.name,
+            );
+            for magic_pattern in &signature.magic {
+                assert!(
+                    !magic_pattern.is_empty(),
+                    "signature {} has an empty magic pattern",
+                    signature.name,
+                );
+            }
+        }
+    }
 }

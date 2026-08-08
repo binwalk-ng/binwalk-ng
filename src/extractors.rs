@@ -2006,3 +2006,156 @@ mod chroot_security_tests {
         assert_eq!(fs::read(dir.path().join("x/y/z.txt")).unwrap(), b"ok");
     }
 }
+
+#[cfg(test)]
+mod execution_tests {
+    use super::*;
+
+    fn make_signature(name: &str, size: usize) -> SignatureResult {
+        SignatureResult {
+            offset: 0,
+            size,
+            name: name.to_string(),
+            id: format!("{name}-id"),
+            confidence: crate::signatures::CONFIDENCE_HIGH,
+            description: name.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn noop_extractor(
+        _file_data: &[u8],
+        _offset: usize,
+        _output_directory: Option<&Path>,
+    ) -> ExtractionResult {
+        ExtractionResult {
+            size: Some(16),
+            success: true,
+            ..Default::default()
+        }
+    }
+
+    fn empty_file_extractor(
+        _file_data: &[u8],
+        _offset: usize,
+        output_directory: Option<&Path>,
+    ) -> ExtractionResult {
+        output_directory.map_or_else(
+            || ExtractionResult {
+                success: true,
+                ..Default::default()
+            },
+            |output_directory| {
+                let chroot = Chroot::new(output_directory);
+                ExtractionResult {
+                    success: chroot.create_file("empty.txt", b""),
+                    ..Default::default()
+                }
+            },
+        )
+    }
+
+    fn writing_extractor(
+        _file_data: &[u8],
+        _offset: usize,
+        output_directory: Option<&Path>,
+    ) -> ExtractionResult {
+        output_directory.map_or_else(
+            || ExtractionResult {
+                success: true,
+                ..Default::default()
+            },
+            |output_directory| {
+                let chroot = Chroot::new(output_directory);
+                ExtractionResult {
+                    success: chroot.create_file("extracted.txt", b"hello"),
+                    ..Default::default()
+                }
+            },
+        )
+    }
+
+    /// An extractor that reports success without writing anything must be demoted to failure,
+    /// otherwise a "successful" extraction would silently produce no files.
+    #[test]
+    fn success_is_demoted_when_extractor_writes_nothing() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let file_data = vec![0xAA; 32];
+
+        let signature = make_signature("noop", 16);
+        let extractor = Extractor {
+            utility: ExtractorType::Internal(noop_extractor),
+            ..Default::default()
+        };
+
+        let result = execute(&file_data, tmp.path(), &signature, &Some(extractor));
+        assert!(!result.success);
+    }
+
+    /// Writing only an empty file counts as nothing extracted.
+    #[test]
+    fn success_is_demoted_when_extractor_only_writes_an_empty_file() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let file_data = vec![0xAA; 32];
+
+        let signature = make_signature("empty_writer", 16);
+        let extractor = Extractor {
+            utility: ExtractorType::Internal(empty_file_extractor),
+            ..Default::default()
+        };
+
+        let result = execute(&file_data, tmp.path(), &signature, &Some(extractor));
+        assert!(!result.success);
+    }
+
+    /// An extractor that actually writes data keeps its success status.
+    #[test]
+    fn success_is_kept_when_extractor_writes_real_data() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let file_data = vec![0xAA; 32];
+
+        let signature = make_signature("writer", 16);
+        let extractor = Extractor {
+            utility: ExtractorType::Internal(writing_extractor),
+            ..Default::default()
+        };
+
+        let result = execute(&file_data, tmp.path(), &signature, &Some(extractor));
+        assert!(result.success);
+        let output_file = Path::new(&result.output_directory).join("extracted.txt");
+        assert_eq!(std::fs::read(output_file).unwrap(), b"hello");
+    }
+
+    /// A signature may specify a preferred extractor, which overrides the default one.
+    #[test]
+    fn preferred_extractor_overrides_the_default_extractor() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let file_data = vec![0xAA; 32];
+
+        let extractor_definition = |script: &str| Extractor {
+            utility: ExtractorType::External("sh".to_string()),
+            extension: "bin".to_string(),
+            arguments: vec![
+                "-c".to_string(),
+                script.to_string(),
+                SOURCE_FILE_PLACEHOLDER.to_string(),
+            ],
+            exit_codes: vec![0],
+            ..Default::default()
+        };
+
+        let mut signature = make_signature("preferred", 16);
+        signature.preferred_extractor =
+            Some(extractor_definition("echo preferred > preferred.txt"));
+        let default_extractor = extractor_definition("echo default > default.txt");
+
+        let result = execute(&file_data, tmp.path(), &signature, &Some(default_extractor));
+        assert!(result.success);
+        let output_directory = Path::new(&result.output_directory);
+        assert!(
+            output_directory.join("preferred.txt").exists(),
+            "the preferred extractor must be used instead of the default one"
+        );
+        assert!(!output_directory.join("default.txt").exists());
+    }
+}

@@ -1,0 +1,12 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 668
+  name: cpio
+  confidence: 250
+  description: "CPIO ASCII archive, file count: 4"
+  always_display: false
+  extraction_declined: false
