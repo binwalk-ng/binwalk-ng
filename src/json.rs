@@ -1,5 +1,5 @@
 use log::error;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::fs;
 use std::io;
 use std::io::Seek;
@@ -17,11 +17,11 @@ const JSON_LIST_START: &str = "[\n";
 const JSON_LIST_END: &str = "\n]\n";
 const JSON_LIST_SEP: &str = ",\n";
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum JSONType {
+#[derive(Debug, Serialize)]
+pub enum JSONType<'a> {
     #[cfg(feature = "entropy-plot")]
-    Entropy(FileEntropy),
-    Analysis(AnalysisResults),
+    Entropy(&'a FileEntropy),
+    Analysis(&'a AnalysisResults),
 }
 
 #[derive(Debug, Default, Clone)]

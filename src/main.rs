@@ -81,7 +81,7 @@ fn main() -> ExitCode {
                 entropy::plot(cli_args.file_name.unwrap(), cli_args.png.as_deref())
             {
                 // Log entropy results to JSON file, if requested
-                json_logger.log(json::JSONType::Entropy(entropy_results));
+                json_logger.log(json::JSONType::Entropy(&entropy_results));
                 json_logger.close();
 
                 display::println_plain(cli_args.quiet, "done.");
@@ -287,7 +287,7 @@ fn process_analysis_results(
     target_files: &mut Vec<PathBuf>,
 ) {
     *file_count += 1;
-    json_logger.log(json::JSONType::Analysis(results.clone()));
+    json_logger.log(json::JSONType::Analysis(&results));
 
     if results.file_map.is_empty() {
         debug!("Found no results for file {}", results.file_path.display());

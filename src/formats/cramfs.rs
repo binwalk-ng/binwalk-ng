@@ -1,6 +1,6 @@
-use crate::common;
 use crate::signatures::{CONFIDENCE_HIGH, CONFIDENCE_MEDIUM, SignatureError, SignatureResult};
 use crate::structures::{Endianness, StructureError, dyn_endian};
+use std::mem::offset_of;
 use zerocopy::{FromBytes, Immutable, KnownLayout, Unaligned};
 
 /// Human readable description
@@ -14,9 +14,9 @@ pub fn cramfs_magic() -> Vec<Vec<u8>> {
 /// Parse and validate the CramFS header
 pub fn cramfs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, SignatureError> {
     // Some constant relative offsets
-    const SIGNATURE_OFFSET: usize = 16;
-    const CRC_START_OFFSET: usize = 32;
-    const CRC_END_OFFSET: usize = 36;
+    const SIGNATURE_OFFSET: usize = offset_of!(CramFSHeaderBytes, signature);
+    const CRC_START_OFFSET: usize = offset_of!(CramFSHeaderBytes, checksum);
+    const CRC_END_OFFSET: usize = offset_of!(CramFSHeaderBytes, edition);
 
     let mut result = SignatureResult {
         offset: offset - SIGNATURE_OFFSET,
@@ -35,20 +35,21 @@ pub fn cramfs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult,
                 file_data.get(result.offset..result.offset + result.size)
             {
                 /*
-                 * Create a copy of the cramfs image; we have to NULL out the checksum field to calculate the CRC.
-                 * This typically shouldn't be too bad on performance, CramFS images are usually relatively small.
+                 * The image checksum is calculated over the image with the checksum field zeroed
+                 * out, so compute the CRC over the image without copying it by feeding the
+                 * hasher the data before the field, a zeroed field, and the data after it.
                  */
-                let mut cramfs_image = cramfs_image_data.to_vec();
-
-                // Null out the checksum field
-                cramfs_image[CRC_START_OFFSET..CRC_END_OFFSET].fill(0);
+                let mut crc_hasher = crc32fast::Hasher::new();
+                crc_hasher.update(&cramfs_image_data[..CRC_START_OFFSET]);
+                crc_hasher.update(&[0u8; CRC_END_OFFSET - CRC_START_OFFSET]);
+                crc_hasher.update(&cramfs_image_data[CRC_END_OFFSET..]);
 
                 // For displaying an error message in the description
                 let mut error_message = "";
 
                 // On CRC error, lower confidence and report the checksum error
                 // (have seen partially corrupted images that still extract Ok)
-                if common::crc32(&cramfs_image) != cramfs_header.checksum {
+                if crc_hasher.finalize() != cramfs_header.checksum {
                     error_message = " (checksum error)";
                     result.confidence = CONFIDENCE_MEDIUM;
                 }

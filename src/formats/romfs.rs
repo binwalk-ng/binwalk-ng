@@ -89,11 +89,12 @@ pub fn parse_romfs_header(romfs_data: &[u8]) -> Result<RomFSHeader, StructureErr
             if let Some(crc_data) = romfs_data.get(0..crc_data_len)
                 && romfs_crc_valid(crc_data)
             {
+                // Volume name has a NULL terminator and is padded to a 16 byte boundary alignment
+                let header_size = header_size + romfs_align(volume_name.len() + 1);
                 return Ok(RomFSHeader {
                     image_size,
-                    volume_name: volume_name.clone(),
-                    // Volume name has a NULL terminator and is padded to a 16 byte boundary alignment
-                    header_size: header_size + romfs_align(volume_name.len() + 1),
+                    volume_name,
+                    header_size,
                 });
             }
         }
@@ -395,13 +396,13 @@ fn process_romfs_entries(
                     if let Some(symlink_bytes) =
                         romfs_data.get(file_entry.offset..file_entry.offset + file_entry.size)
                     {
-                        match String::from_utf8(symlink_bytes.to_vec()) {
+                        match std::str::from_utf8(symlink_bytes) {
                             Err(e) => {
                                 warn!("Failed to convert symlink target path to string: {e}");
                                 return Err(ExtractionError);
                             }
                             Ok(path) => {
-                                file_entry.symlink_target = path.clone();
+                                file_entry.symlink_target = path.to_owned();
                             }
                         }
                     } else {
