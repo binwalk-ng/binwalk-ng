@@ -149,8 +149,12 @@ use std::io::Write;
 use std::os::unix::fs as unix_fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
+use std::os::unix::fs::symlink as symlink_file;
 #[cfg(windows)]
 use std::os::windows;
+#[cfg(windows)]
+use std::os::windows::fs::symlink_file;
 use std::path::Path;
 use std::path::{self, Component, PathBuf};
 use std::process;
@@ -1366,9 +1370,20 @@ pub fn get_extracted_files(directory: impl AsRef<Path>) -> Vec<PathBuf> {
 }
 
 /// Executes an extractor for the provided SignatureResult.
+///
+/// Extraction results are written to `<extraction_directory>/<hex signature offset>`.
+/// See [`extraction_directory`] for the conventional directory to extract a file into.
+///
+/// ## Warning
+///
+/// The `<hex signature offset>` subdirectory is **deleted and recreated**, so any existing
+/// contents are lost. Extracting two different files into the same `extraction_directory`
+/// therefore makes their results collide, and the second extraction destroys the first.
+/// Give each file its own directory, e.g. the one [`extraction_directory`] returns.
 pub fn execute(
     file_data: &[u8],
     file_path: impl AsRef<Path>,
+    extraction_directory: impl AsRef<Path>,
     signature: &SignatureResult,
     extractor: &Option<Extractor>,
 ) -> ExtractionResult {
@@ -1384,7 +1399,7 @@ pub fn execute(
     };
 
     // Create an output directory for the extraction
-    if let Ok(output_directory) = create_output_directory(&file_path, signature.offset) {
+    if let Ok(output_directory) = create_output_directory(&extraction_directory, signature.offset) {
         // If the signature result specified a preferred extractor, use that instead of the default signature extractor
         let extractor_definition = signature
             .preferred_extractor
@@ -1514,18 +1529,38 @@ fn spawn(
         carved_file.display()
     );
 
+    let mut linked = false;
+
     // If the entirety of the source file is this one file type, no need to carve a copy of it, just create a symlink
     if signature.offset == 0 && signature.size == file_data.len() {
-        if !chroot.create_symlink(&carved_file, file_path) {
-            return Err(std::io::Error::other(
-                "Failed to create carved file symlink",
-            ));
+        /*
+         * Link directly to the source file, rather than via Chroot. Chroot contains the
+         * paths it *writes*, and the path written here is `carved_file`, which binwalk
+         * generated inside `output_directory`. `file_path` may be influenced by an
+         * untrusted archive in matryoshka mode, but it is only ever the link's target,
+         * which is never written through, so there is nothing to contain.
+         *
+         * Chroot would rewrite that target to a chroot-relative path, and the target has
+         * to stay absolute: the source file may live anywhere relative to the output
+         * directory.
+         */
+        match path::absolute(file_path)
+            .and_then(|source_path| symlink_file(&source_path, &carved_file))
+        {
+            Ok(()) => linked = true,
+            // Symlinks may be unavailable (unprivileged Windows, exotic file systems); a copy works just as well
+            Err(e) => warn!(
+                "Failed to link {} to {}: {}; carving a copy instead",
+                carved_file.display(),
+                file_path.display(),
+                e
+            ),
         }
-    } else {
-        // Copy file data to carved file path
-        if !chroot.carve_file(&carved_file, file_data, signature.offset, signature.size) {
-            return Err(std::io::Error::other("Failed to carve data to disk"));
-        }
+    }
+
+    // Copy file data to carved file path if we couldn't link it
+    if !linked && !chroot.carve_file(&carved_file, file_data, signature.offset, signature.size) {
+        return Err(std::io::Error::other("Failed to carve data to disk"));
     }
 
     // Replace all "%e" (SOURCE_FILE_PLACEHOLDER) command arguments with the path to the carved file
@@ -1620,20 +1655,38 @@ fn proc_wait(mut worker_info: ProcInfo) -> Result<ExtractionResult, ExtractionEr
     }
 }
 
-// Create an output directory in which to place extraction results
-fn create_output_directory(
-    file_path: impl AsRef<Path>,
-    offset: usize,
-) -> Result<PathBuf, std::io::Error> {
+/// Returns the conventional extraction directory for a file: `<file_path>.extracted`.
+///
+/// This performs no file I/O; it only builds the path. Pass the result to
+/// [`execute`] to extract a file's contents alongside it.
+///
+/// Returns `None` if `file_path` has no file name to append to, e.g. `/` or `..`.
+///
+/// ## Example
+///
+/// ```
+/// use binwalk_ng::extractors::extraction_directory;
+///
+/// let directory = extraction_directory("/tmp/firmware.bin").unwrap();
+///
+/// assert_eq!(directory, std::path::Path::new("/tmp/firmware.bin.extracted"));
+/// assert_eq!(extraction_directory("/"), None);
+/// ```
+pub fn extraction_directory(file_path: impl AsRef<Path>) -> Option<PathBuf> {
     let file_path = file_path.as_ref();
 
-    // Output directory will be: <file_path.extracted/<hex offset>
+    let mut directory_name = file_path.file_name()?.to_os_string();
+    directory_name.push(".extracted");
 
-    let mut dir_name = file_path.file_name().unwrap().to_os_string();
-    dir_name.push(".extracted");
-    let output_directory = file_path
-        .with_file_name(dir_name)
-        .join(format!("{:X}", offset));
+    Some(file_path.with_file_name(directory_name))
+}
+
+// Create an output directory in which to place the extraction results for one signature
+fn create_output_directory(
+    base_directory: impl AsRef<Path>,
+    offset: usize,
+) -> Result<PathBuf, std::io::Error> {
+    let output_directory = base_directory.as_ref().join(format!("{offset:X}"));
 
     // First, remove the output directory if it exists from a previous run
     _ = fs::remove_dir_all(&output_directory);

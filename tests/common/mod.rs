@@ -74,17 +74,12 @@ pub fn trailing_data_test(signature_filter: &str, file_name: &str) {
     std::io::Write::write_all(&mut tmp, &data).unwrap();
 
     let output_directory = tempfile::tempdir().unwrap();
-    let binwalker = Binwalk::configure(
-        Some(tmp.path()),
-        Some(output_directory.as_ref()),
-        vec![signature_filter.to_string()],
-        vec![],
-        None,
-        false,
-    )
-    .expect("Binwalk initialization failed");
+    let binwalker = Binwalk::builder()
+        .include(signature_filter)
+        .build()
+        .expect("Binwalk initialization failed");
 
-    let results = binwalker.analyze(&binwalker.base_target_file, true);
+    let results = binwalker.analyze(tmp.path(), Some(output_directory.path()));
 
     // Assert that there was a valid signature and successful extraction at offset 0
     assert_eq!(results.file_map.len(), 1, "expected one signature result");
@@ -109,15 +104,10 @@ pub fn run_binwalk(signature_filter: &str, file_name: impl AsRef<Path>) -> Analy
     let output_directory = tempfile::tempdir().unwrap();
 
     // Configure binwalk
-    let binwalker = Binwalk::configure(
-        Some(file_path.as_path()),
-        Some(output_directory.as_ref()),
-        vec![signature_filter.to_string()],
-        vec![],
-        None,
-        false,
-    )
-    .expect("Binwalk initialization failed");
+    let binwalker = Binwalk::builder()
+        .include(signature_filter)
+        .build()
+        .expect("Binwalk initialization failed");
 
-    binwalker.analyze(&binwalker.base_target_file, true)
+    binwalker.analyze(&file_path, Some(output_directory.path()))
 }
