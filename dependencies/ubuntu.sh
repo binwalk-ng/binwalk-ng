@@ -12,7 +12,6 @@ DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get -y install \
     curl \
     wget \
     git \
-    lzop \
     unyaffs \
     python3-pip \
     build-essential \
