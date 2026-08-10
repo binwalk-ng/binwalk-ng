@@ -474,14 +474,14 @@ impl Binwalk {
          * These signatures are only valid if they occur at the very beginning of a file.
          * This is typically because the signatures are very short and they are likely
          * to occur randomly throughout the file, so this prevents having to validate many
-         * false positve matches.
+         * false positive matches.
          */
         for signature in &self.short_signatures {
-            for magic in signature.magic.clone() {
+            for magic in &signature.magic {
                 let magic_start = FILE_START_OFFSET + signature.magic_offset;
                 let magic_end = magic_start + magic.len();
 
-                if file_data.len() > magic_end && file_data[magic_start..magic_end] == magic {
+                if file_data.len() > magic_end && file_data[magic_start..magic_end] == *magic {
                     debug!(
                         "Found {} short magic match at offset {:#X}",
                         signature.description, magic_start
@@ -492,7 +492,11 @@ impl Binwalk {
                         signature_result_auto_populate(&mut signature_result, signature);
 
                         // Add this signature to the file map
-                        file_map.push(signature_result.clone());
+                        file_map.push(signature_result);
+
+                        // Reference to the entry just added, for logging and updating next_valid_offset
+                        let signature_result = file_map.last().unwrap();
+
                         info!(
                             "Found valid {} short signature at offset {:#X}",
                             signature_result.name, FILE_START_OFFSET
@@ -592,7 +596,10 @@ impl Binwalk {
                     signature_result_auto_populate(&mut signature_result, signature);
 
                     // Add this signature to the file map
-                    file_map.push(signature_result.clone());
+                    file_map.push(signature_result);
+
+                    // Reference to the entry just added, for logging and updating next_valid_offset
+                    let signature_result = file_map.last().unwrap();
 
                     info!(
                         "Found valid {} signature at offset {:#X}",
@@ -644,13 +651,12 @@ impl Binwalk {
                 break;
             }
 
-            let this_signature = file_map[i].clone();
-            let remaining_available_size = file_data.len() - this_signature.offset;
+            let this_signature = &file_map[i];
 
             // Check if the previous file map entry had the same reported starting offset as this one
             if i > 0 && this_signature.offset == file_map[i - 1].offset {
                 // Get the previous signature in the file map
-                let previous_signature = file_map[i - 1].clone();
+                let previous_signature = &file_map[i - 1];
 
                 // If this file map entry and the conflicting entry do not have the same confidence level, default to the one with highest confidence
                 if this_signature.confidence != previous_signature.confidence {
@@ -663,6 +669,8 @@ impl Binwalk {
                     if this_signature.confidence > previous_signature.confidence {
                         file_map.remove(i - 1);
                         index_adjustment += 1;
+                        // This signature was not removed, but it shifted down to index i - 1
+                        i -= 1;
 
                     // Else, this signature has a lower confidence; invalidate this signature and continue to the next signature in the list
                     } else {
@@ -692,6 +700,10 @@ impl Binwalk {
                 index_adjustment += 1;
                 continue;
             }
+
+            // The signature being examined may have shifted down in the file map; get a fresh reference to it at its current index
+            let this_signature = &file_map[i];
+            let remaining_available_size = file_data.len() - this_signature.offset;
 
             // If we've made it this far, make sure this signature's data doesn't extend beyond EOF and that the file data doesn't wrap around
             if this_signature.size > remaining_available_size
@@ -824,7 +836,7 @@ impl Binwalk {
             }
 
             // Get the extractor for this signature
-            let extractor = self.extractor_lookup_table[&signature.name].clone();
+            let extractor = &self.extractor_lookup_table[&signature.name];
 
             match &extractor {
                 None => continue,
@@ -835,7 +847,7 @@ impl Binwalk {
                         file_path,
                         extraction_directory,
                         signature,
-                        &extractor,
+                        extractor,
                     );
 
                     if !extraction_result.success {
@@ -870,7 +882,7 @@ impl Binwalk {
                                 file_path,
                                 extraction_directory,
                                 &new_signature,
-                                &extractor,
+                                extractor,
                             );
                         }
                     }
@@ -997,7 +1009,7 @@ impl Binwalk {
     ) -> AnalysisResults {
         let file_path = target_file.as_ref();
 
-        let file_data = read_or_map_file(file_path, self.mmap_usage());
+        let file_data = read_or_map_file(file_path, self.mmap_usage);
         let file_data: &[u8] = file_data
             .as_ref()
             .map(|data| data.as_ref())

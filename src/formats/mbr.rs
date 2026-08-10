@@ -160,7 +160,7 @@ pub fn parse_mbr_image(mbr_data: &[u8]) -> Result<MBRHeader, StructureError> {
                         // Don't report the partition where the MBR header resides
                         if this_partition.start != 0 {
                             // Add it to the list of partitions
-                            mbr_header.partitions.push(this_partition.clone());
+                            mbr_header.partitions.push(this_partition);
                         }
 
                         // Image size is the end of the farthest away partition

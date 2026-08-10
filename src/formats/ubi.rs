@@ -2,7 +2,7 @@ use crate::common::crc32;
 use crate::extractors;
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
 use crate::structures::StructureError;
-use aho_corasick::AhoCorasick;
+use memchr::memmem;
 use std::collections::HashMap;
 use zerocopy::{BE, FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
@@ -75,21 +75,19 @@ pub fn ubi_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
 
 /// Determines the LEB size and returns the size of the UBI image
 fn get_ubi_image_size(ubi_data: &[u8]) -> Result<usize, SignatureError> {
+    // Volume magic bytes, version is assumed to be 1
+    const VOLUME_MAGIC: &[u8] = b"UBI!\x01";
+
     let mut leb_size: usize = 0;
     let mut block_count: usize = 0;
     let mut best_leb_match_count: usize = 0;
     let mut previous_volume_offset: usize = 0;
     let mut possible_leb_sizes: HashMap<usize, usize> = HashMap::new();
 
-    // Volume magic bytes, version is assumed to be 1
-    let ubi_vol_magic = vec![b"UBI!\x01"];
-
-    let grep = AhoCorasick::new(ubi_vol_magic).unwrap();
-
     // grep for all volume header magic bytes
-    for magic_match in grep.find_overlapping_iter(ubi_data) {
+    for magic_start in memmem::find_iter(ubi_data, VOLUME_MAGIC) {
         // Offset in the UBI image where this magic match was found
-        let this_volume_offset = magic_match.start();
+        let this_volume_offset = magic_start;
 
         // Parse the volume header
         if parse_ubi_volume_header(&ubi_data[this_volume_offset..]).is_ok() {
