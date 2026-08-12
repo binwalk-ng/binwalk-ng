@@ -64,13 +64,7 @@ pub struct CliArgs {
     pub threads: Option<u64>,
 
     /// Do not scan for these signatures
-    #[arg(
-        short = 'x',
-        long,
-        value_delimiter = ',',
-        num_args = 1..,
-        value_name = "SIG"
-    )]
+    #[arg(short = 'x', long, value_delimiter = ',', value_name = "SIG")]
     pub exclude: Vec<String>, // Removed Option; Vec is empty by default
 
     /// Only scan for these signatures
@@ -78,7 +72,6 @@ pub struct CliArgs {
         short = 'y',
         long,
         value_delimiter = ',',
-        num_args = 1..,
         conflicts_with = "exclude",
         value_name = "SIG"
     )]

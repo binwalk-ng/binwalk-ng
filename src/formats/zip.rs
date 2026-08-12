@@ -2,7 +2,7 @@ use crate::common::is_offset_safe;
 use crate::formats::dahua_zip::DAHUA_ZIP_LOCAL_FILE_MAGIC;
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
 use crate::structures::StructureError;
-use aho_corasick::AhoCorasick;
+use memchr::memmem;
 use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
 /// Human readable description
@@ -91,13 +91,10 @@ pub fn find_zip_eof(file_data: &[u8], offset: usize) -> Result<ZipEOCDInfo, Sign
     // This magic string assumes that the disk_number and central_directory_disk_number are 0
     const ZIP_EOCD_MAGIC: &[u8; 8] = b"PK\x05\x06\x00\x00\x00\x00";
 
-    // Instatiate AhoCorasick search with the ZIP EOCD magic bytes
-    let grep = AhoCorasick::new(vec![ZIP_EOCD_MAGIC]).unwrap();
-
     // Find all matching ZIP EOCD patterns
-    for eocd_match in grep.find_overlapping_iter(&file_data[offset..]) {
+    for eocd_start in memmem::find_iter(&file_data[offset..], ZIP_EOCD_MAGIC) {
         // Calculate the start and end of the fixed-size portion of the ZIP EOCD header in the file data
-        let eocd_start: usize = eocd_match.start() + offset;
+        let eocd_start: usize = eocd_start + offset;
 
         // Parse the end-of-central-directory header
         if let Some(eocd_data) = file_data.get(eocd_start..)
