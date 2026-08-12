@@ -21,14 +21,14 @@ pub fn dpapi_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
         return Ok(SignatureResult {
             offset,
             description: format!(
-            "{}, header_size: {}, blob_size: {}, version: {}, provider_id: {}, master_key_version: {},
+                "{}, header_size: {}, blob_size: {}, version: {}, provider_id: {}, master_key_version: {},
              master_key_id: {}, flags: {}, description_len: {}, crypto_algorithm: {}, crypto_alg_len: {},
              salt_len: {}, hmac_key_len: {}, hash_algorithm: {}, hash_alg_len: {}, hmac2_key_len: {},
              data_len: {}, sign_len: {}",
-             DESCRIPTION, header.header_size, header.blob_size, header.version, header.provider_id,
-             header.master_key_version, header.master_key_id, header.flags, header.description_len,
-             header.crypto_algorithm, header.crypto_alg_len, header.salt_len, header.hmac_key_len,
-             header.hash_algorithm, header.hash_alg_len, header.hmac2_key_len, header.data_len, header.sign_len
+                DESCRIPTION, header.header_size, header.blob_size, header.version, header.provider_id,
+                header.master_key_version, header.master_key_id, header.flags, header.description_len,
+                header.crypto_algorithm, header.crypto_alg_len, header.salt_len, header.hmac_key_len,
+                header.hash_algorithm, header.hash_alg_len, header.hmac2_key_len, header.data_len, header.sign_len
             ),
             confidence: CONFIDENCE_MEDIUM,
             ..Default::default()
@@ -150,16 +150,10 @@ pub fn parse_dpapi_blob_header(dpapi_blob_data: &[u8]) -> Result<DPAPIBlobHeader
         return Err(StructureError);
     }
 
-    let utf16_vec = utf8_to_utf16(
-        dpapi_blob_data
-            .get(offset..offset + description_len)
-            .ok_or(StructureError)?,
-    );
-    let desc = String::from_utf16(&utf16_vec).map_err(|_| StructureError)?;
-
-    // description_len counts bytes (incl. the null terminator); desc counts code units.
-    // Check the description is null-terminated and has no embedded nulls.
-    if !desc.ends_with('\0') || desc.trim_end_matches('\0').contains('\0') {
+    let desc_bytes = dpapi_blob_data
+        .get(offset..offset + description_len)
+        .ok_or(StructureError)?;
+    if description_len != 0 && !is_null_terminated_utf16(desc_bytes) {
         return Err(StructureError);
     }
 
@@ -226,11 +220,25 @@ pub fn parse_dpapi_blob_header(dpapi_blob_data: &[u8]) -> Result<DPAPIBlobHeader
     })
 }
 
-/// Convert &[u8] into Vec<u16>
-/// Any trailing odd byte is silently dropped by chunks_exact(2).
-fn utf8_to_utf16(byte_array: &[u8]) -> Vec<u16> {
-    byte_array
-        .chunks_exact(2)
-        .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
-        .collect()
+/// Check if `byte_array` contains valid utf-16 which is null terminated correctly
+///
+/// Returns false if description is invalid utf-16, is not null terminated,
+/// or contains embedded nulls
+fn is_null_terminated_utf16(byte_array: &[u8]) -> bool {
+    let (chars, []) = byte_array.as_chunks::<2>() else {
+        return false;
+    };
+    let mut char_iter = char::decode_utf16(chars.iter().map(|&ch_arr| u16::from_le_bytes(ch_arr)));
+    // loop until the first null utf16 character
+    loop {
+        let Some(Ok(ch)) = char_iter.next() else {
+            return false;
+        };
+        if ch == '\0' {
+            break;
+        }
+    }
+
+    // Require all characters after the first null also be null
+    char_iter.all(|ch| ch == Ok('\0'))
 }
