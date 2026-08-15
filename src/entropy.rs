@@ -25,6 +25,11 @@ pub struct FileEntropy {
 fn blocks(data: &[u8]) -> Vec<BlockEntropy> {
     const BLOCK_COUNT: usize = 2048;
 
+    // An empty input has no blocks to measure; `data.chunks(0)` would panic.
+    if data.is_empty() {
+        return vec![];
+    }
+
     let mut offset: usize = 0;
 
     let block_size = if data.len() < BLOCK_COUNT {
@@ -109,12 +114,7 @@ mod tests {
     use super::blocks;
 
     /// Empty input has no blocks to measure, but `blocks(&[])` must not panic.
-    ///
-    /// Currently failing: `data.chunks(0)` panics with "chunk size must be non-zero" because
-    /// `data.len() / BLOCK_COUNT == 0` for `data.len() < BLOCK_COUNT`. Reachable in production via
-    /// `binwalk -E` on an empty file. To be fixed on another branch.
     #[test]
-    #[ignore = "failing, will be fixed in another branch: blocks(&[]) panics via chunks(0) for data shorter than BLOCK_COUNT (src/entropy.rs:36)"]
     fn blocks_of_empty_data_does_not_panic() {
         assert!(blocks(&[]).is_empty());
     }

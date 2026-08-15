@@ -481,7 +481,7 @@ impl Binwalk {
                 let magic_start = FILE_START_OFFSET + signature.magic_offset;
                 let magic_end = magic_start + magic.len();
 
-                if file_data.len() > magic_end && file_data[magic_start..magic_end] == *magic {
+                if file_data.len() >= magic_end && file_data[magic_start..magic_end] == *magic {
                     debug!(
                         "Found {} short magic match at offset {:#X}",
                         signature.description, magic_start
@@ -1326,12 +1326,10 @@ mod tests {
         assert_eq!(file_map[0].offset, 0);
     }
 
-    // Skipped: scan() panics with an out-of-bounds removal ("removal index (is 1) should be <
-    // len (is 1)") at src/binwalk_ng.rs:632. After the higher confidence signature wins the
-    // offset conflict (file_map.remove(i - 1)), the loop falls through to the EOF size check
-    // with a stale index and removes the wrong entry. This bug is not solved in this branch.
+    // The higher-confidence signature wins the offset conflict and is then dropped by the EOF
+    // size check; the resolution loop must survive the removal (the winner shifts down to
+    // `i - 1`) without panicking on a stale index or removing the wrong entry.
     #[test]
-    #[ignore = "failing, will be fixed in another branch: scan() panics on a conflicting signature with an invalid size (src/binwalk_ng.rs:632)"]
     fn conflicting_signature_with_invalid_size_is_removed() {
         let file_map = conflict_scan(vec![
             conflict_test_signature("conflict_low", conflict_low_parser),
@@ -1909,10 +1907,10 @@ mod tests {
         ));
     }
 
-    /// A short signature whose magic is exactly as long as the file is never matched, because the
-    /// magic check at src/binwalk_ng.rs:401 uses `file_data.len() > magic_end` instead of `>=`.
+    /// A short signature whose magic is exactly as long as the file matches: the magic check
+    /// uses `file_data.len() >= magic_end` so a signature that is the entire file is accepted,
+    /// not skipped.
     #[test]
-    #[ignore = "failing, will be fixed in another branch: a short signature whose magic is exactly as long as the file is never matched (src/binwalk_ng.rs:401)"]
     fn short_signature_matches_when_the_magic_is_entire_file() {
         let file_data = vec![0xAA, 0xAA];
 
