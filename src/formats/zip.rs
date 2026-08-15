@@ -181,12 +181,19 @@ pub fn parse_zip_header(zip_data: &[u8]) -> Result<ZipFileHeader, StructureError
         return Err(StructureError);
     }
 
+    // The version needed to extract is a decimal field; the ZIP specification defines versions
+    // 1.0 (10) through 6.3 (63), and some non-conforming writers emit 0
+    let version = zip_local_file_header.version.get();
+    if version != 0 && !(10..=63).contains(&version) {
+        return Err(StructureError);
+    }
+
     // Unused/reserved flag bits should be 0
     if (zip_local_file_header.flags & UNUSED_FLAGS_MASK) == 0 {
         // Specified compression method should be one of the defined ZIP compression methods
         if allowed_compression_methods.contains(&zip_local_file_header.compression.get()) {
-            result.version_major = zip_local_file_header.version.get() / 10;
-            result.version_minor = (zip_local_file_header.version.get() % 10) as u8;
+            result.version_major = version / 10;
+            result.version_minor = (version % 10) as u8;
             result.header_size = std::mem::size_of::<ZipHeaderBytes>()
                 + zip_local_file_header.file_name_len.get() as usize
                 + zip_local_file_header.extra_field_len.get() as usize;
