@@ -2140,7 +2140,13 @@ mod execution_tests {
             ..Default::default()
         };
 
-        let result = execute(&file_data, tmp.path(), &signature, &Some(extractor));
+        let result = execute(
+            &file_data,
+            tmp.path(),
+            extraction_directory(tmp.path()).unwrap(),
+            &signature,
+            &Some(extractor),
+        );
         assert!(!result.success);
     }
 
@@ -2156,7 +2162,13 @@ mod execution_tests {
             ..Default::default()
         };
 
-        let result = execute(&file_data, tmp.path(), &signature, &Some(extractor));
+        let result = execute(
+            &file_data,
+            tmp.path(),
+            extraction_directory(tmp.path()).unwrap(),
+            &signature,
+            &Some(extractor),
+        );
         assert!(!result.success);
     }
 
@@ -2172,7 +2184,13 @@ mod execution_tests {
             ..Default::default()
         };
 
-        let result = execute(&file_data, tmp.path(), &signature, &Some(extractor));
+        let result = execute(
+            &file_data,
+            tmp.path(),
+            extraction_directory(tmp.path()).unwrap(),
+            &signature,
+            &Some(extractor),
+        );
         assert!(result.success);
         let output_file = Path::new(&result.output_directory).join("extracted.txt");
         assert_eq!(std::fs::read(output_file).unwrap(), b"hello");
@@ -2201,7 +2219,13 @@ mod execution_tests {
             Some(extractor_definition("echo preferred > preferred.txt"));
         let default_extractor = extractor_definition("echo default > default.txt");
 
-        let result = execute(&file_data, tmp.path(), &signature, &Some(default_extractor));
+        let result = execute(
+            &file_data,
+            tmp.path(),
+            extraction_directory(tmp.path()).unwrap(),
+            &signature,
+            &Some(default_extractor),
+        );
         assert!(result.success);
         let output_directory = Path::new(&result.output_directory);
         assert!(

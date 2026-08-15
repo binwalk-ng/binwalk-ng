@@ -240,8 +240,8 @@ mod tests {
         let mut tmp = tempfile::NamedTempFile::new().unwrap();
         tmp.write_all(b"test data").unwrap();
 
-        let mapped = read_or_map_file(tmp.path(), true).unwrap();
-        let read = read_or_map_file(tmp.path(), false).unwrap();
+        let mapped = read_or_map_file(tmp.path(), MmapUsage::WhenPossible).unwrap();
+        let read = read_or_map_file(tmp.path(), MmapUsage::Never).unwrap();
 
         assert_eq!(mapped.as_ref(), b"test data");
         assert_eq!(read.as_ref(), b"test data");
@@ -251,8 +251,8 @@ mod tests {
     fn read_or_map_file_empty_file() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
 
-        let mapped = read_or_map_file(tmp.path(), true).unwrap();
-        let read = read_or_map_file(tmp.path(), false).unwrap();
+        let mapped = read_or_map_file(tmp.path(), MmapUsage::WhenPossible).unwrap();
+        let read = read_or_map_file(tmp.path(), MmapUsage::Never).unwrap();
 
         assert_eq!(mapped.as_ref(), b"");
         assert_eq!(read.as_ref(), b"");
@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn read_or_map_file_missing_file_returns_error() {
-        assert!(read_or_map_file(Path::new("/nonexistent/file"), true).is_err());
-        assert!(read_or_map_file(Path::new("/nonexistent/file"), false).is_err());
+        assert!(read_or_map_file(Path::new("/nonexistent/file"), MmapUsage::WhenPossible).is_err());
+        assert!(read_or_map_file(Path::new("/nonexistent/file"), MmapUsage::Never).is_err());
     }
 }

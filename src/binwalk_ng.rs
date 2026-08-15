@@ -1301,8 +1301,12 @@ mod tests {
             .iter()
             .map(|signature| signature.name.clone())
             .collect();
-        let binwalker =
-            Binwalk::configure(None, None, include, vec![], Some(signatures), false).unwrap();
+        let binwalker = Binwalk::builder()
+            .includes(include)
+            .signatures(signatures)
+            .full_search(false)
+            .build()
+            .unwrap();
 
         let mut file_data = vec![0u8; CONFLICT_TEST_FILE_SIZE];
         file_data[0] = CONFLICT_TEST_MAGIC;
@@ -1420,15 +1424,11 @@ mod tests {
             extractor: None,
         };
 
-        let binwalker = Binwalk::configure(
-            None,
-            None,
-            vec![],
-            vec![],
-            Some(vec![signature1, signature2]),
-            false,
-        )
-        .unwrap();
+        let binwalker = Binwalk::builder()
+            .signatures(vec![signature1, signature2])
+            .full_search(false)
+            .build()
+            .unwrap();
         let file_map = binwalker.scan(&file_data);
 
         assert_eq!(file_map.len(), 2);
@@ -1454,8 +1454,11 @@ mod tests {
             extractor: None,
         };
 
-        let binwalker =
-            Binwalk::configure(None, None, vec![], vec![], Some(vec![signature]), false).unwrap();
+        let binwalker = Binwalk::builder()
+            .signatures(vec![signature])
+            .full_search(false)
+            .build()
+            .unwrap();
         let file_map = binwalker.scan(&file_data);
 
         assert_eq!(file_map.len(), 1);
@@ -1494,8 +1497,11 @@ mod tests {
         // full_search=false routes the signature through the short-signature path, which lacks
         // the EOF sanity check the Aho-Corasick path applies; the invalid size must still be
         // caught during post-processing rather than panicking or being reported.
-        let binwalker =
-            Binwalk::configure(None, None, vec![], vec![], Some(vec![signature]), false).unwrap();
+        let binwalker = Binwalk::builder()
+            .signatures(vec![signature])
+            .full_search(false)
+            .build()
+            .unwrap();
         let file_map = binwalker.scan(&file_data);
 
         assert!(file_map.is_empty(), "{file_map:?}");
@@ -1551,12 +1557,20 @@ mod tests {
             extractor: Some(extractor),
         };
 
-        let binwalker =
-            Binwalk::configure(None, None, vec![], vec![], Some(vec![signature]), false).unwrap();
+        let binwalker = Binwalk::builder()
+            .signatures(vec![signature])
+            .full_search(false)
+            .build()
+            .unwrap();
         let file_map = binwalker.scan(&file_data);
         assert_eq!(file_map.len(), 1);
 
-        let extraction_results = binwalker.extract(&file_data, tmp.path(), &file_map);
+        let extraction_results = binwalker.extract(
+            &file_data,
+            tmp.path(),
+            extractors::extraction_directory(tmp.path()).unwrap(),
+            &file_map,
+        );
         let result = &extraction_results[&file_map[0].id];
 
         assert!(
@@ -1621,15 +1635,11 @@ mod tests {
             extractor: None,
         };
 
-        let binwalker = Binwalk::configure(
-            None,
-            None,
-            vec![],
-            vec![],
-            Some(vec![rejecting, accepting]),
-            false,
-        )
-        .unwrap();
+        let binwalker = Binwalk::builder()
+            .signatures(vec![rejecting, accepting])
+            .full_search(false)
+            .build()
+            .unwrap();
         let file_map = binwalker.scan(&file_data);
 
         assert_eq!(file_map.len(), 1, "{file_map:?}");
@@ -1669,15 +1679,11 @@ mod tests {
             extractor: None,
         };
 
-        let binwalker = Binwalk::configure(
-            None,
-            None,
-            vec![],
-            vec![],
-            Some(vec![oversized, valid]),
-            true,
-        )
-        .unwrap();
+        let binwalker = Binwalk::builder()
+            .signatures(vec![oversized, valid])
+            .full_search(true)
+            .build()
+            .unwrap();
         let file_map = binwalker.scan(&file_data);
 
         assert_eq!(file_map.len(), 1, "{file_map:?}");
@@ -1718,9 +1724,10 @@ mod tests {
             extractor: None,
         };
 
-        let binwalker =
-            Binwalk::configure(None, None, vec![], vec![], Some(vec![inner, outer]), false)
-                .unwrap();
+        let binwalker = Binwalk::builder()
+            .signatures(vec![inner, outer])
+            .build()
+            .unwrap();
         let file_map = binwalker.scan(&file_data);
 
         assert_eq!(file_map.len(), 1, "{file_map:?}");
@@ -1783,15 +1790,11 @@ mod tests {
             extractor: None,
         };
 
-        let binwalker = Binwalk::configure(
-            None,
-            None,
-            vec![],
-            vec![],
-            Some(vec![unknown, low_confidence, sized]),
-            false,
-        )
-        .unwrap();
+        let binwalker = Binwalk::builder()
+            .signatures(vec![unknown, low_confidence, sized])
+            .full_search(false)
+            .build()
+            .unwrap();
         let file_map = binwalker.scan(&file_data);
 
         assert_eq!(file_map.len(), 3, "{file_map:?}");
@@ -1843,13 +1846,21 @@ mod tests {
             extractor: Some(extractor),
         };
 
-        let binwalker =
-            Binwalk::configure(None, None, vec![], vec![], Some(vec![signature]), false).unwrap();
+        let binwalker = Binwalk::builder()
+            .signatures(vec![signature])
+            .full_search(false)
+            .build()
+            .unwrap();
         let file_map = binwalker.scan(&file_data);
         assert_eq!(file_map.len(), 1);
         assert!(file_map[0].extraction_declined);
 
-        let extraction_results = binwalker.extract(&file_data, tmp.path(), &file_map);
+        let extraction_results = binwalker.extract(
+            &file_data,
+            tmp.path(),
+            extractors::extraction_directory(tmp.path()).unwrap(),
+            &file_map,
+        );
         assert!(
             extraction_results.is_empty(),
             "a signature that declined extraction must not be extracted: {extraction_results:?}"
@@ -1916,8 +1927,11 @@ mod tests {
             extractor: None,
         };
 
-        let binwalker =
-            Binwalk::configure(None, None, vec![], vec![], Some(vec![signature]), false).unwrap();
+        let binwalker = Binwalk::builder()
+            .signatures(vec![signature])
+            .full_search(false)
+            .build()
+            .unwrap();
         let file_map = binwalker.scan(&file_data);
 
         assert_eq!(file_map.len(), 1, "{file_map:?}");
