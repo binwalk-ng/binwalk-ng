@@ -142,15 +142,19 @@
 use crate::signatures::SignatureResult;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs as unix_fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
+use std::os::unix::fs::symlink as symlink_file;
 #[cfg(windows)]
 use std::os::windows;
+#[cfg(windows)]
+use std::os::windows::fs::symlink_file;
 use std::path::Path;
 use std::path::{self, Component, PathBuf};
 use std::process;
@@ -212,7 +216,7 @@ pub struct ExtractionResult {
 pub struct ProcInfo {
     pub child: process::Child,
     pub exit_codes: Vec<i32>,
-    pub carved_file: String,
+    pub carved_file: PathBuf,
 }
 
 /// Provides chroot-like functionality for internal extractors.
@@ -443,7 +447,7 @@ impl Chroot {
         };
 
         if !path::Path::new(&safe_file_path).exists() {
-            match fs::write(safe_file_path.clone(), file_data) {
+            match fs::write(&safe_file_path, file_data) {
                 Ok(_) => {
                     return true;
                 }
@@ -854,7 +858,7 @@ impl Chroot {
             }
         };
 
-        match fs::exists(safe_dir_path.clone()) {
+        match fs::exists(&safe_dir_path) {
             Ok(dir_exists) => {
                 if !dir_exists {
                     return true;
@@ -869,7 +873,7 @@ impl Chroot {
             }
         }
 
-        match fs::remove_dir_all(safe_dir_path.clone()) {
+        match fs::remove_dir_all(&safe_dir_path) {
             Ok(_) => return true,
             Err(e) => error!(
                 "Failed to delete directory {}: {e}",
@@ -913,7 +917,7 @@ impl Chroot {
             }
         };
 
-        match fs::metadata(safe_file_path.clone()) {
+        match fs::metadata(&safe_file_path) {
             Err(e) => {
                 error!(
                     "Failed to get permissions for file {}: {e}",
@@ -1366,107 +1370,115 @@ pub fn get_extracted_files(directory: impl AsRef<Path>) -> Vec<PathBuf> {
 }
 
 /// Executes an extractor for the provided SignatureResult.
+///
+/// Extraction results are written to `<extraction_directory>/<hex signature offset>`.
+/// See [`extraction_directory`] for the conventional directory to extract a file into.
+///
+/// ## Warning
+///
+/// The `<hex signature offset>` subdirectory is **deleted and recreated**, so any existing
+/// contents are lost. Extracting two different files into the same `extraction_directory`
+/// therefore makes their results collide, and the second extraction destroys the first.
+/// Give each file its own directory, e.g. the one [`extraction_directory`] returns.
 pub fn execute(
     file_data: &[u8],
     file_path: impl AsRef<Path>,
+    extraction_directory: impl AsRef<Path>,
     signature: &SignatureResult,
     extractor: &Option<Extractor>,
 ) -> ExtractionResult {
     let mut result = ExtractionResult::default();
 
+    // Make sure a default extractor was actually defined (this function should not be called if signature.extractor is None)
+    let Some(default_extractor) = &extractor else {
+        error!(
+            "Attempted to extract {} data, but no extractor is defined!",
+            signature.name
+        );
+        return result;
+    };
+
     // Create an output directory for the extraction
-    if let Ok(output_directory) = create_output_directory(&file_path, signature.offset) {
-        // Make sure a default extractor was actually defined (this function should not be called if signature.extractor is None)
-        match &extractor {
-            None => {
+    if let Ok(output_directory) = create_output_directory(&extraction_directory, signature.offset) {
+        // If the signature result specified a preferred extractor, use that instead of the default signature extractor
+        let extractor_definition = signature
+            .preferred_extractor
+            .as_ref()
+            .unwrap_or(default_extractor);
+
+        // Decide how to execute the extractor depending on the extractor type
+        match &extractor_definition.utility {
+            ExtractorType::None => {
                 error!(
-                    "Attempted to extract {} data, but no extractor is defined!",
+                    "Signature {}: an extractor of type None is invalid!",
                     signature.name
                 );
             }
 
-            Some(default_extractor) => {
-                // If the signature result specified a preferred extractor, use that instead of the default signature extractor
-                let extractor_definition = signature.preferred_extractor.as_ref().map_or_else(
-                    || default_extractor.clone(),
-                    |preferred_extractor| preferred_extractor.clone(),
+            ExtractorType::Internal(func) => {
+                debug!(
+                    "Executing internal {} extractor on {} @ {} (size:{})",
+                    signature.name,
+                    file_path.as_ref().display(),
+                    signature.offset,
+                    signature.size,
                 );
+                // Run the internal extractor function
+                result = func(file_data, signature.offset, Some(&output_directory));
+                // Set the extractor name to "<signature name>_built_in"
+                result.extractor = format!("{}_built_in", signature.name);
+            }
 
-                // Decide how to execute the extractor depending on the extractor type
-                match &extractor_definition.utility {
-                    ExtractorType::None => {
+            ExtractorType::External(cmd) => {
+                // Spawn the external extractor command
+                match spawn(
+                    file_data,
+                    file_path,
+                    &output_directory,
+                    signature,
+                    extractor_definition,
+                ) {
+                    Err(e) => {
                         error!(
-                            "Signature {}: an extractor of type None is invalid!",
-                            signature.name
+                            "Failed to spawn external extractor for '{}' signature: {}",
+                            signature.name, e
                         );
                     }
 
-                    ExtractorType::Internal(func) => {
-                        debug!(
-                            "Executing internal {} extractor on {} @ {} (size:{})",
-                            signature.name,
-                            file_path.as_ref().display(),
-                            signature.offset,
-                            signature.size,
-                        );
-                        // Run the internal extractor function
-                        result = func(file_data, signature.offset, Some(&output_directory));
-                        // Set the extractor name to "<signature name>_built_in"
-                        result.extractor = format!("{}_built_in", signature.name);
-                    }
-
-                    ExtractorType::External(cmd) => {
-                        // Spawn the external extractor command
-                        match spawn(
-                            file_data,
-                            file_path,
-                            &output_directory,
-                            signature,
-                            extractor_definition.clone(),
-                        ) {
-                            Err(e) => {
-                                error!(
-                                    "Failed to spawn external extractor for '{}' signature: {}",
-                                    signature.name, e
-                                );
+                    Ok(proc_info) => {
+                        // Wait for the external process to exit
+                        match proc_wait(proc_info) {
+                            Err(_) => {
+                                warn!("External extractor failed!");
                             }
-
-                            Ok(proc_info) => {
-                                // Wait for the external process to exit
-                                match proc_wait(proc_info) {
-                                    Err(_) => {
-                                        warn!("External extractor failed!");
-                                    }
-                                    Ok(ext_result) => {
-                                        result = ext_result;
-                                        // Set the extractor name to the name of the extraction utility
-                                        result.extractor = cmd.to_string();
-                                    }
-                                }
+                            Ok(ext_result) => {
+                                result = ext_result;
+                                // Set the extractor name to the name of the extraction utility
+                                result.extractor = cmd.to_string();
                             }
                         }
                     }
                 }
-
-                // Populate these ExtractionResult fields automatically for all extractors
-                result.output_directory = output_directory.clone();
-                result.do_not_recurse = extractor_definition.do_not_recurse;
-
-                // If the extractor reported success, make sure it extracted something other than just an empty file
-                if result.success && !was_something_extracted(&result.output_directory) {
-                    result.success = false;
-                    warn!("Extractor exited successfully, but no data was extracted");
-                }
             }
+        }
+
+        // Populate these ExtractionResult fields automatically for all extractors
+        result.output_directory = output_directory;
+        result.do_not_recurse = extractor_definition.do_not_recurse;
+
+        // If the extractor reported success, make sure it extracted something other than just an empty file
+        if result.success && !was_something_extracted(&result.output_directory) {
+            result.success = false;
+            warn!("Extractor exited successfully, but no data was extracted");
         }
 
         // Clean up extractor's output directory if extraction failed
         if !result.success
-            && let Err(e) = fs::remove_dir_all(&output_directory)
+            && let Err(e) = fs::remove_dir_all(&result.output_directory)
         {
             warn!(
                 "Failed to clean up extraction directory {} after extraction failure: {e}",
-                output_directory.display()
+                result.output_directory.display()
             );
         }
     }
@@ -1480,14 +1492,14 @@ fn spawn(
     file_path: impl AsRef<Path>,
     output_directory: &Path,
     signature: &SignatureResult,
-    mut extractor: Extractor,
+    extractor: &Extractor,
 ) -> Result<ProcInfo, std::io::Error> {
     let chroot = Chroot::default();
     let file_path = file_path.as_ref();
 
     // This function *only* handles execution of external extraction utilities; internal extractors must be invoked directly
     let command = match &extractor.utility {
-        ExtractorType::External(cmd) => cmd.clone(),
+        ExtractorType::External(cmd) => cmd,
         ExtractorType::Internal(_ext) => {
             error!("Tried to run an internal extractor as an external command!");
             return Err(std::io::Error::other(
@@ -1503,46 +1515,67 @@ fn spawn(
     };
 
     // Carved file path will be <output directory>/<signature.name>_<hex offset>.<extractor.extension>
-    let carved_file = format!(
-        "{}{}{}_{:X}.{}",
-        output_directory.display(),
-        path::MAIN_SEPARATOR,
-        signature.name,
-        signature.offset,
-        extractor.extension
+    let filename = format!(
+        "{}_{:X}.{}",
+        signature.name, signature.offset, extractor.extension
     );
+    let carved_file = output_directory.join(filename);
+
     info!(
         "Carving data from {} {:#X}..{:#X} to {}",
         file_path.display(),
         signature.offset,
         signature.offset + signature.size,
-        carved_file
+        carved_file.display()
     );
+
+    let mut linked = false;
 
     // If the entirety of the source file is this one file type, no need to carve a copy of it, just create a symlink
     if signature.offset == 0 && signature.size == file_data.len() {
-        if !chroot.create_symlink(&carved_file, file_path) {
-            return Err(std::io::Error::other(
-                "Failed to create carved file symlink",
-            ));
-        }
-    } else {
-        // Copy file data to carved file path
-        if !chroot.carve_file(&carved_file, file_data, signature.offset, signature.size) {
-            return Err(std::io::Error::other("Failed to carve data to disk"));
+        /*
+         * Link directly to the source file, rather than via Chroot. Chroot contains the
+         * paths it *writes*, and the path written here is `carved_file`, which binwalk
+         * generated inside `output_directory`. `file_path` may be influenced by an
+         * untrusted archive in matryoshka mode, but it is only ever the link's target,
+         * which is never written through, so there is nothing to contain.
+         *
+         * Chroot would rewrite that target to a chroot-relative path, and the target has
+         * to stay absolute: the source file may live anywhere relative to the output
+         * directory.
+         */
+        match path::absolute(file_path)
+            .and_then(|source_path| symlink_file(&source_path, &carved_file))
+        {
+            Ok(()) => linked = true,
+            // Symlinks may be unavailable (unprivileged Windows, exotic file systems); a copy works just as well
+            Err(e) => warn!(
+                "Failed to link {} to {}: {}; carving a copy instead",
+                carved_file.display(),
+                file_path.display(),
+                e
+            ),
         }
     }
 
-    // Replace all "%e" command arguments with the path to the carved file
-    for arg in &mut extractor.arguments {
-        if *arg == SOURCE_FILE_PLACEHOLDER {
-            *arg = carved_file.clone();
-        }
+    // Copy file data to carved file path if we couldn't link it
+    if !linked && !chroot.carve_file(&carved_file, file_data, signature.offset, signature.size) {
+        return Err(std::io::Error::other("Failed to carve data to disk"));
     }
 
-    info!("Spawning process {} {:?}", command, extractor.arguments);
-    match process::Command::new(&command)
-        .args(&extractor.arguments)
+    // Replace all "%e" (SOURCE_FILE_PLACEHOLDER) command arguments with the path to the carved file
+    let arguments: Vec<&OsStr> = extractor
+        .arguments
+        .iter()
+        .map(|arg| match arg.as_str() {
+            SOURCE_FILE_PLACEHOLDER => carved_file.as_os_str(),
+            _ => OsStr::new(arg),
+        })
+        .collect();
+
+    info!("Spawning process {} {:?}", command, arguments);
+    match process::Command::new(command)
+        .args(&arguments)
         .stdout(process::Stdio::null())
         .stderr(process::Stdio::null())
         .current_dir(output_directory)
@@ -1551,7 +1584,7 @@ fn spawn(
         Err(e) => {
             error!(
                 "Failed to execute command {}{:?}: {}",
-                command, extractor.arguments, e
+                command, arguments, e
             );
             Err(e)
         }
@@ -1560,7 +1593,7 @@ fn spawn(
             // If the process was spawned successfully, return some information about the process
             let proc_info = ProcInfo {
                 child,
-                exit_codes: extractor.exit_codes,
+                exit_codes: extractor.exit_codes.clone(),
                 carved_file,
             };
             Ok(proc_info)
@@ -1588,11 +1621,12 @@ fn proc_wait(mut worker_info: ProcInfo) -> Result<ExtractionResult, ExtractionEr
             let mut extraction_success = false;
 
             // Clean up the carved file used as input to the extractor
-            debug!("Deleting carved file {}", worker_info.carved_file);
-            if let Err(e) = fs::remove_file(worker_info.carved_file.clone()) {
+            debug!("Deleting carved file {}", worker_info.carved_file.display());
+            if let Err(e) = fs::remove_file(&worker_info.carved_file) {
                 warn!(
                     "Failed to remove carved file '{}': {}",
-                    worker_info.carved_file, e
+                    worker_info.carved_file.display(),
+                    e
                 );
             };
 
@@ -1621,20 +1655,38 @@ fn proc_wait(mut worker_info: ProcInfo) -> Result<ExtractionResult, ExtractionEr
     }
 }
 
-// Create an output directory in which to place extraction results
-fn create_output_directory(
-    file_path: impl AsRef<Path>,
-    offset: usize,
-) -> Result<PathBuf, std::io::Error> {
+/// Returns the conventional extraction directory for a file: `<file_path>.extracted`.
+///
+/// This performs no file I/O; it only builds the path. Pass the result to
+/// [`execute`] to extract a file's contents alongside it.
+///
+/// Returns `None` if `file_path` has no file name to append to, e.g. `/` or `..`.
+///
+/// ## Example
+///
+/// ```
+/// use binwalk_ng::extractors::extraction_directory;
+///
+/// let directory = extraction_directory("/tmp/firmware.bin").unwrap();
+///
+/// assert_eq!(directory, std::path::Path::new("/tmp/firmware.bin.extracted"));
+/// assert_eq!(extraction_directory("/"), None);
+/// ```
+pub fn extraction_directory(file_path: impl AsRef<Path>) -> Option<PathBuf> {
     let file_path = file_path.as_ref();
 
-    // Output directory will be: <file_path.extracted/<hex offset>
+    let mut directory_name = file_path.file_name()?.to_os_string();
+    directory_name.push(".extracted");
 
-    let mut dir_name = file_path.file_name().unwrap().to_os_string();
-    dir_name.push(".extracted");
-    let output_directory = file_path
-        .with_file_name(dir_name)
-        .join(format!("{:X}", offset));
+    Some(file_path.with_file_name(directory_name))
+}
+
+// Create an output directory in which to place the extraction results for one signature
+fn create_output_directory(
+    base_directory: impl AsRef<Path>,
+    offset: usize,
+) -> Result<PathBuf, std::io::Error> {
+    let output_directory = base_directory.as_ref().join(format!("{offset:X}"));
 
     // First, remove the output directory if it exists from a previous run
     _ = fs::remove_dir_all(&output_directory);

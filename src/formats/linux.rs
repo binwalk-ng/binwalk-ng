@@ -2,7 +2,7 @@ use crate::common::get_cstring;
 use crate::extractors;
 use crate::signatures::{CONFIDENCE_LOW, CONFIDENCE_MEDIUM, SignatureError, SignatureResult};
 use crate::structures::{Endianness, StructureError};
-use aho_corasick::AhoCorasick;
+use memchr::memmem;
 use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
 /// Human readable descriptions
@@ -111,12 +111,9 @@ pub fn linux_boot_image_parser(
     let hdrs_end: usize = hdrs_start + HDRS_EXPECTED_VALUE.len();
 
     if let Some(hdrs_bytes) = file_data.get(hdrs_start..hdrs_end) {
-        // Get the string that should equal HDRS_EXPECTED_VALUE
-        if let Ok(actual_hdrs_value) = String::from_utf8(hdrs_bytes.to_vec()) {
-            // Validate that the hdrs string matches
-            if actual_hdrs_value == HDRS_EXPECTED_VALUE {
-                return Ok(result);
-            }
+        // Validate that the hdrs string matches
+        if hdrs_bytes == HDRS_EXPECTED_VALUE.as_bytes() {
+            return Ok(result);
         }
     }
 
@@ -202,12 +199,12 @@ pub fn linux_kernel_version_parser(
 /// Searches the file data for a linux symbol table
 fn has_linux_symbol_table(file_data: &[u8]) -> bool {
     // Same magic bytes that vmlinux-to-elf searches for
-    let symtab_magic = vec![b"\x000\x001\x002\x003\x004\x005\x006\x007\x008\x009\x00"];
+    const SYMTAB_MAGIC: &[u8] = b"\x000\x001\x002\x003\x004\x005\x006\x007\x008\x009\x00";
 
-    let grep = AhoCorasick::new(symtab_magic).unwrap();
+    let mut iter = memmem::find_iter(file_data, SYMTAB_MAGIC);
 
-    // Grep for matches on the Linux symbol table magic bytes, there should be only one match
-    grep.find_overlapping_iter(file_data).count() == 1
+    // there should be only one match
+    iter.next().is_some() && iter.next().is_none()
 }
 
 /// Struct to store linux ARM64 boot image header info

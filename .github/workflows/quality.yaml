@@ -1,4 +1,5 @@
 name: Quality Checks
+
 on:
   pull_request:
     branches: [ '*' ]
@@ -25,21 +26,12 @@ jobs:
   fmt:
     name: Formatting (rustfmt)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        platform:
-          - target: x86_64-unknown-linux-gnu
-
     steps:
       - name: Code checkout
         uses: actions/checkout@v7
 
-      - name: Install Rust toolchain (stable)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          target: ${{ matrix.platform.target }}
-          components: rustfmt
+      - name: Install rustfmt
+        run: rustup component add rustfmt
 
       - name: Formatting (rustfmt)
         run: cargo fmt --all -- --check
@@ -95,11 +87,11 @@ jobs:
       - name: Code checkout
         uses: actions/checkout@v7
 
-      - name: Install Rust toolchain (stable)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          target: ${{ matrix.platform.target }}
-          components: clippy
+      - name: Install Rust target
+        run: rustup target add "${{ matrix.platform.target }}"
+
+      - name: Install clippy
+        run: rustup component add clippy
 
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
