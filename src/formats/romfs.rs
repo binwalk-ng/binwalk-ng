@@ -216,8 +216,10 @@ fn romfs_crc_valid(crc_data: &[u8]) -> bool {
     // Checksum size must be 4-byte aligned
     if crc_data.len().is_multiple_of(WORD_SIZE) {
         let sum: u32 = crc_data
-            .chunks_exact(WORD_SIZE)
-            .map(|chunk| u32::from_be_bytes(chunk.try_into().unwrap()))
+            .as_chunks::<WORD_SIZE>()
+            .0
+            .iter()
+            .map(|chunk| u32::from_be_bytes(*chunk))
             .fold(0u32, u32::wrapping_add);
 
         /*
@@ -453,35 +455,29 @@ fn extract_romfs_entries(
     let chroot = Chroot::new(chroot_directory);
 
     for file_entry in romfs_files {
-        let extraction_success: bool;
         let file_path = chroot.safe_path_join(parent_directory.as_ref(), &file_entry.name);
 
-        if file_entry.directory {
-            extraction_success = chroot.create_directory(&file_path);
+        let extraction_success = if file_entry.directory {
+            chroot.create_directory(&file_path)
         } else if file_entry.regular {
-            extraction_success =
-                chroot.carve_file(&file_path, romfs_data, file_entry.offset, file_entry.size);
+            chroot.carve_file(&file_path, romfs_data, file_entry.offset, file_entry.size)
         } else if file_entry.symlink {
-            extraction_success = chroot.create_symlink(&file_path, &file_entry.symlink_target);
+            chroot.create_symlink(&file_path, &file_entry.symlink_target)
         } else if file_entry.fifo {
-            extraction_success = chroot.create_fifo(&file_path);
+            chroot.create_fifo(&file_path)
         } else if file_entry.socket {
-            extraction_success = chroot.create_socket(&file_path);
+            chroot.create_socket(&file_path)
         } else if file_entry.block_device {
-            extraction_success = chroot.create_block_device(
-                &file_path,
-                file_entry.device_major,
-                file_entry.device_minor,
-            );
+            chroot.create_block_device(&file_path, file_entry.device_major, file_entry.device_minor)
         } else if file_entry.character_device {
-            extraction_success = chroot.create_character_device(
+            chroot.create_character_device(
                 &file_path,
                 file_entry.device_major,
                 file_entry.device_minor,
-            );
+            )
         } else {
             continue;
-        }
+        };
 
         if extraction_success {
             file_count += 1;
