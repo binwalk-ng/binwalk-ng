@@ -12,10 +12,10 @@ Four scenarios against the release binary:
 
 | scenario | workload |
 |---|---|
-| `scan_corpus` | `tests/inputs/*` concatenated (~6.6 MB) |
+| `scan_corpus` | `tests/testdata/samples/*` concatenated (~33 MB) |
 | `extract_corpus` | `-Me` (extract + matryoshka recursion) on `scan_corpus`' file, into a fresh per-run sandbox |
 | `list_signatures` | `-L` (list signatures/extractors, no file scan) |
-| `scan_large` | `tests/inputs/*` content repeated to exactly 128 MB |
+| `scan_large` | `tests/testdata/samples/*` content repeated to exactly 128 MB |
 
 Every scenario runs under **Callgrind** (instructions) and **DHAT** (heap):
 
@@ -52,7 +52,7 @@ Measurement boundaries (see `benches/gungraun.rs`):
   counts) is identical on every machine.
 - Workload files are generated once, at command-collection time (outside
   valgrind), into `target/gungraun/fixtures/`. `large.bin` repeats the sorted
-  `tests/inputs` bytes, so it is byte-identical on every machine.
+  `tests/testdata/samples` bytes, so it is byte-identical on every machine.
 
 Because the metrics are one-shot and deterministic, a run has no stddev and the
 old noise-band verdict is gone: the gate is a plain percentage threshold.

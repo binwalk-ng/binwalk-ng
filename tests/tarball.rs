@@ -10,7 +10,7 @@ use binwalk_ng::Binwalk;
 #[test]
 fn integration_test() {
     const SIGNATURE_TYPE: &str = "tarball";
-    const INPUT_FILE_NAME: &str = "tarball.bin";
+    const INPUT_FILE_NAME: &str = "tarball.archive.tar";
     common::integration_test(SIGNATURE_TYPE, INPUT_FILE_NAME);
 }
 
@@ -18,26 +18,24 @@ fn integration_test() {
 ///
 /// This is the regression guard for swapping out the external `tar` extractor: it
 /// asserts that whichever extractor is wired up reproduces exactly the layout and
-/// byte-for-byte contents that the fixture was built from (see
-/// tests/inputs/gen_tarball.sh). Keep the `expected` table in sync with that script.
+/// byte-for-byte contents that the fixture was built from. The fixture is the
+/// samples repo's `tarball.archive.tar` (see its generate_samples.py); the
+/// expected tree/contents below stay in sync with that generator's "tree".
 #[test]
 fn extraction_produces_expected_files() {
-    // Expected archive layout and contents -- kept in sync with gen_tarball.sh.
-    let expected: [(&str, Vec<u8>); 4] = [
-        (
-            "testdir/hello.txt",
-            b"Hello, binwalk-ng tarball!\n".to_vec(),
-        ),
-        ("testdir/readme.md", b"# Tarball test fixture\n".to_vec()),
-        ("testdir/nested/data.bin", vec![0xAB; 256]),
-        ("testdir/run.sh", b"#!/bin/sh\necho hi\n".to_vec()),
+    // Expected archive layout and contents -- kept in sync with the samples
+    // repo's generate_samples.py (tar --sort=name --mtime=@0 over its "tree").
+    let expected: [(&str, Vec<u8>); 3] = [
+        ("readme.txt", common::reference_payload()),
+        ("docs/notes.txt", b"documentation\n".repeat(50)),
+        ("subdir/payload.bin", vec![0xAB; 256]),
     ];
 
     // Bind the output directory in this scope so it lives until the assertions are
     // done. (The common::run_binwalk helper drops its tempdir before returning,
     // which would delete the extracted files we want to inspect.)
     let output_directory = tempfile::tempdir().unwrap();
-    let input_path = Path::new("tests").join("inputs").join("tarball.bin");
+    let input_path = Path::new(common::SAMPLES_DIR).join("tarball.archive.tar");
 
     let binwalker = Binwalk::builder()
         .include("tarball")
@@ -77,7 +75,7 @@ fn extraction_produces_expected_files() {
     }
 
     // The explicit directory entry must be extracted as a directory.
-    let subdir = root.join("testdir/subdir");
+    let subdir = root.join("subdir");
     assert!(
         subdir.is_dir(),
         "expected extracted directory was not created: {}",
@@ -86,10 +84,10 @@ fn extraction_produces_expected_files() {
 
     // The symlink entry must be extracted as a symlink whose target is rewritten to a
     // chroot-contained *relative* path (never host-absolute), so it stays inside the
-    // extraction tree and reading through it resolves to testdir/hello.txt.
-    let symlink = root.join("testdir/hello.link");
-    let link_metadata = fs::symlink_metadata(&symlink)
-        .expect("expected symlink testdir/hello.link was not extracted");
+    // extraction tree and reading through it resolves to readme.txt.
+    let symlink = root.join("link.txt");
+    let link_metadata =
+        fs::symlink_metadata(&symlink).expect("expected symlink link.txt was not extracted");
     assert!(
         link_metadata.file_type().is_symlink(),
         "expected {} to be a symlink",
@@ -101,9 +99,9 @@ fn extraction_produces_expected_files() {
         "symlink target {link_target:?} must be relative (chroot-contained)"
     );
     assert_eq!(
-        fs::read_to_string(&symlink).unwrap(),
-        "Hello, binwalk-ng tarball!\n",
-        "symlink {} did not resolve to hello.txt within the extraction tree",
+        fs::read(&symlink).unwrap(),
+        common::reference_payload(),
+        "symlink {} did not resolve to readme.txt within the extraction tree",
         symlink.display()
     );
 
@@ -114,7 +112,7 @@ fn extraction_produces_expected_files() {
     {
         use std::os::unix::fs::PermissionsExt;
 
-        let script_mode = fs::metadata(root.join("testdir/run.sh"))
+        let script_mode = fs::metadata(root.join("run.sh"))
             .unwrap()
             .permissions()
             .mode();

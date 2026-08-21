@@ -34,10 +34,13 @@ fn fixture(name: &str) -> String {
 fn ensure_fixtures() {
     static INIT: OnceLock<()> = OnceLock::new();
     INIT.get_or_init(|| {
-        let inputs = workspace_root().join("tests").join("inputs");
+        let inputs = workspace_root()
+            .join("tests")
+            .join("testdata")
+            .join("samples");
         let mut files: Vec<PathBuf> = fs::read_dir(&inputs)
-            .expect("tests/inputs must exist; run cargo bench from the repo root")
-            .map(|entry| entry.expect("read tests/inputs entry").path())
+            .expect("samples submodule must exist; run cargo bench from the repo root")
+            .map(|entry| entry.expect("read samples entry").path())
             .filter(|p| p.is_file())
             .collect();
         files.sort();
@@ -45,7 +48,10 @@ fn ensure_fixtures() {
         for f in &files {
             corpus.extend(fs::read(f).expect("read input file"));
         }
-        assert!(!corpus.is_empty(), "tests/inputs contains no files");
+        assert!(
+            !corpus.is_empty(),
+            "tests/testdata/samples contains no files"
+        );
 
         let dir = workspace_root()
             .join("target")

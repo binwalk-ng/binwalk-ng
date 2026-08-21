@@ -355,12 +355,14 @@ mod tests {
     use super::*;
     use crate::signatures::{CONFIDENCE_HIGH, CONFIDENCE_MEDIUM};
 
-    /// The shared test fixture: a deterministic POSIX (ustar) tar archive containing
-    /// three files (see tests/inputs/gen_tarball.sh). The `ustar` magic for the first
-    /// entry lives at TARBALL_MAGIC_OFFSET (257), i.e. the archive starts at offset 0.
+    /// The shared test fixture: the samples repo's POSIX (ustar) tar archive
+    /// `tarball.archive.tar` (see that repo's generate_samples.py: a fixed
+    /// `docs/` tree, executable run.sh, a sticky-bit subdir and a symlink).
+    /// The `ustar` magic for the first entry lives at TARBALL_MAGIC_OFFSET (257),
+    /// i.e. the archive starts at offset 0.
     const FIXTURE: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/tests/inputs/tarball.bin"
+        "/tests/testdata/samples/tarball.archive.tar"
     ));
 
     #[test]
@@ -396,8 +398,13 @@ mod tests {
 
     #[test]
     fn entry_size_rounds_up_to_block_size() {
-        // First entry holds a 27-byte file: one header block + one (partial) data block.
+        // First entry is the "./" directory header: one header block, no data.
         let header = &FIXTURE[0..TARBALL_BLOCK_SIZE];
+        assert_eq!(tarball_entry_size(header).unwrap(), TARBALL_BLOCK_SIZE);
+        // "./run.sh" (18 bytes) is the first regular file in the sample's
+        // sorted entry order; its header lives at offset 343040 (see the
+        // samples repo's generate_samples.py layout).
+        let header = &FIXTURE[343040..343040 + TARBALL_BLOCK_SIZE];
         assert_eq!(tarball_entry_size(header).unwrap(), 2 * TARBALL_BLOCK_SIZE);
     }
 
@@ -413,14 +420,15 @@ mod tests {
 
         // Archive starts at the very beginning of the file.
         assert_eq!(result.offset, 0);
-        // Reported size covers all six entries' header + data blocks (not the trailing
-        // end-of-archive zero padding): four files (1024 each) plus a directory and a
-        // symlink (one 512-byte header block each).
-        assert_eq!(result.size, 10 * TARBALL_BLOCK_SIZE);
-        // Six valid headers found; below TARBALL_MIN_EXPECTED_HEADERS, so medium.
+        // Reported size covers all eight entries' header + data blocks (not the
+        // trailing end-of-archive zero padding): three directories (one 512-byte
+        // header block each), two symlink/folder-free files, docs/notes.txt,
+        // the 339209-byte readme.txt (664 blocks) and the 256-byte payload.bin.
+        assert_eq!(result.size, 675 * TARBALL_BLOCK_SIZE);
+        // Eight valid headers found; below TARBALL_MIN_EXPECTED_HEADERS, so medium.
         assert_eq!(result.confidence, CONFIDENCE_MEDIUM);
         assert!(result.confidence < CONFIDENCE_HIGH);
-        assert!(result.description.contains("file count: 6"));
+        assert!(result.description.contains("file count: 8"));
     }
 
     #[test]

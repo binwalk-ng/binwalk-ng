@@ -370,8 +370,9 @@ mod tests {
     use super::*;
     use crate::Binwalk;
 
-    static VALID: &[u8] = include_bytes!("../../tests/inputs/program_store.bin");
-    static VALID_SPLIT: &[u8] = include_bytes!("../../tests/inputs/program_store_dual.bin");
+    static VALID: &[u8] = include_bytes!("../../tests/testdata/samples/program_store.bin");
+    static VALID_SPLIT: &[u8] =
+        include_bytes!("../../tests/testdata/samples/program_store.dual.bin");
 
     // Recompute and patch the HCS field after mutating bytes in the HCS-covered region (0..84).
     // Needed by any test that must reject (or accept) for a reason other than a broken HCS.

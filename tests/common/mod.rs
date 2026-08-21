@@ -1,8 +1,38 @@
 use std::panic::Location;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use binwalk_ng::extractors::ExtractionResult;
 use binwalk_ng::{AnalysisResults, Binwalk};
+
+/// Directory inside the samples submodule that holds the fixture files.
+/// Checked out at `tests/testdata` (see .gitmodules), files live under
+/// `testdata/samples/` (the submodule's own `samples/` output directory).
+///
+/// Every `tests/*.rs` crate compiles this module, so shared helpers are
+/// `#[allow(dead_code)]` (some crates only use a subset of them).
+#[allow(dead_code)]
+pub const SAMPLES_DIR: &str = "tests/testdata/samples";
+
+#[allow(dead_code)]
+fn sample_path(file_name: impl AsRef<Path>) -> PathBuf {
+    Path::new(SAMPLES_DIR).join(file_name)
+}
+
+/// The shared payload text used by the samples generator
+/// (`scripts/data/extraction_reference.txt` in the samples repo). Every
+/// archive/filesystem sample stores exactly these bytes as `readme.txt`,
+/// so extraction tests can assert exact contents without re-vendoring data.
+#[allow(dead_code)]
+pub fn reference_payload() -> Vec<u8> {
+    std::fs::read(
+        Path::new("tests")
+            .join("testdata")
+            .join("scripts")
+            .join("data")
+            .join("extraction_reference.txt"),
+    )
+    .unwrap()
+}
 
 /// Convenience function for running an integration test against the specified file, with the provided signature filter.
 /// Assumes that there will be one signature result and one extraction result at file offset 0.
@@ -67,7 +97,7 @@ pub fn assert_results_ok(
 /// This verifies that extractors properly bound decompression to the parsed range.
 #[allow(dead_code)]
 pub fn trailing_data_test(signature_filter: &str, file_name: &str) {
-    let mut data = std::fs::read(Path::new("tests").join("inputs").join(file_name)).unwrap();
+    let mut data = std::fs::read(sample_path(file_name)).unwrap();
     data.extend_from_slice(b"TRAILING GARBAGE DATA THAT SHOULD BE IGNORED");
 
     let mut tmp = tempfile::NamedTempFile::new().unwrap();
@@ -99,7 +129,7 @@ pub fn trailing_data_test(signature_filter: &str, file_name: &str) {
 /// Run Binwalk, with extraction, against the specified file, with the provided signature filter
 pub fn run_binwalk(signature_filter: &str, file_name: impl AsRef<Path>) -> AnalysisResults {
     // Build the path to the input file
-    let file_path = Path::new("tests").join("inputs").join(file_name);
+    let file_path = sample_path(file_name);
 
     let output_directory = tempfile::tempdir().unwrap();
 

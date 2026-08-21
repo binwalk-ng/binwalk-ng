@@ -796,8 +796,9 @@ impl Binwalk {
     /// use binwalk_ng::Binwalk;
     ///
     /// let target_path = std::path::Path::new("tests")
-    ///     .join("inputs")
-    ///     .join("gzip.bin");
+    ///     .join("testdata")
+    ///     .join("samples")
+    ///     .join("gzip.data.gz");
     ///
     /// let extraction_directory = std::path::Path::new("tests").join("extractions");
     /// # let temp_dir = tempfile::tempdir().unwrap();
@@ -910,8 +911,9 @@ impl Binwalk {
     /// use binwalk_ng::{Binwalk, common};
     ///
     /// let target_path = std::path::Path::new("tests")
-    ///     .join("inputs")
-    ///     .join("gzip.bin");
+    ///     .join("testdata")
+    ///     .join("samples")
+    ///     .join("gzip.data.gz");
     ///
     /// let extraction_directory = std::path::Path::new("tests").join("extractions");
     /// # let temp_dir = tempfile::tempdir().unwrap();
@@ -984,8 +986,9 @@ impl Binwalk {
     /// use binwalk_ng::Binwalk;
     ///
     /// let target_path = std::path::Path::new("tests")
-    ///     .join("inputs")
-    ///     .join("gzip.bin");
+    ///     .join("testdata")
+    ///     .join("samples")
+    ///     .join("gzip.data.gz");
     ///
     /// let extraction_directory = std::path::Path::new("tests").join("extractions");
     /// # let temp_dir = tempfile::tempdir().unwrap();
