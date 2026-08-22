@@ -94,12 +94,23 @@ pub fn parse_efigpt_header(efi_data: &[u8]) -> Result<EFIGPTHeader, StructureErr
         if gpt_header.reserved == 0 {
             // Make sure the revision field is the expected valid
             if gpt_header.revision == EXPECTED_REVISION {
-                // Calculate the start and end offsets of the partition entries
-                let partition_entries_start =
-                    lba_to_offset(gpt_header.partition_entry_lba.get() as usize);
-                let partition_entries_end = partition_entries_start
-                    + (gpt_header.partition_entry_count.get()
-                        * gpt_header.partition_entry_size.get()) as usize;
+                // Calculate the start and end offsets of the partition entries.
+                // LBAs and table sizes that overflow usize cannot address data in
+                // the scanned file.
+                let Some(partition_entries_start) =
+                    lba_to_offset(gpt_header.partition_entry_lba.get() as usize)
+                else {
+                    return Err(StructureError);
+                };
+                // u32 values are widened before multiplying so the product itself
+                // cannot overflow.
+                let partition_entries_len = gpt_header.partition_entry_count.get() as usize
+                    * gpt_header.partition_entry_size.get() as usize;
+                let Some(partition_entries_end) =
+                    partition_entries_start.checked_add(partition_entries_len)
+                else {
+                    return Err(StructureError);
+                };
 
                 // Get the partition entires
                 if let Some(partition_entries_data) =
@@ -172,12 +183,12 @@ fn parse_gpt_partition_entry(entry_data: &[u8]) -> Option<GPTPartitionEntry> {
     }
 
     Some(GPTPartitionEntry {
-        start_offset: lba_to_offset(entry_header.starting_lba.get() as usize),
-        end_offset: lba_to_offset(entry_header.ending_lba.get() as usize),
+        start_offset: lba_to_offset(entry_header.starting_lba.get() as usize)?,
+        end_offset: lba_to_offset(entry_header.ending_lba.get() as usize)?,
     })
 }
 
-// Convert LBA to offset
-const fn lba_to_offset(lba: usize) -> usize {
-    lba * BLOCK_SIZE
+// Convert LBA to offset; None if the product overflows.
+const fn lba_to_offset(lba: usize) -> Option<usize> {
+    lba.checked_mul(BLOCK_SIZE)
 }

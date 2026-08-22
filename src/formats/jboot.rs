@@ -47,6 +47,12 @@ pub fn jboot_arm_parser(
         ..Default::default()
     };
 
+    // The magic bytes start MAGIC_OFFSET bytes into the header; anything earlier is
+    // not a JBOOT header (and would underflow the subtraction below).
+    if offset < MAGIC_OFFSET {
+        return Err(SignatureError);
+    }
+
     // Actual header starts MAGIC_OFFSET bytes before the magic bytes
     let header_start = offset - MAGIC_OFFSET;
 

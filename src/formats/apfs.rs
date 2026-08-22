@@ -27,7 +27,12 @@ pub fn apfs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
 
         if let Ok(apfs_header) = parse_apfs_header(&file_data[result.offset..]) {
             let mut truncated_message = "".to_string();
-            result.size = apfs_header.block_count * apfs_header.block_size;
+            // Reject sizes that overflow; they cannot describe real data.
+            let Some(total_size) = apfs_header.block_count.checked_mul(apfs_header.block_size)
+            else {
+                return Err(SignatureError);
+            };
+            result.size = total_size;
 
             // It is observed that an APFS contained in an EFIGPT with a protective MBR includes the MBR block in its size.
             // If the APFS image is pulled out of the EFIGPT, the reported size will be 512 bytes too long, but otherwise valid.

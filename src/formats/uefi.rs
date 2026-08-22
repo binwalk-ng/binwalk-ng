@@ -44,8 +44,10 @@ pub fn uefi_volume_parser(
 
         // Parse the volume header
         if let Ok(uefi_volume_header) = parse_uefi_volume_header(&file_data[result.offset..]) {
-            // Make sure the volume size is sane
-            if file_data.len() >= (result.offset + uefi_volume_header.volume_size) {
+            // Make sure the volume size is sane (an overflowing sum cannot fit)
+            if let Some(volume_end) = result.offset.checked_add(uefi_volume_header.volume_size)
+                && file_data.len() >= volume_end
+            {
                 result.size = uefi_volume_header.volume_size;
                 result.description = format!(
                     "{}, header CRC: {:#X}, header size: {} bytes, total size: {} bytes",
@@ -79,8 +81,9 @@ pub fn uefi_capsule_parser(
     let available_data: usize = file_data.len() - offset;
 
     if let Ok(capsule_header) = parse_uefi_capsule_header(&file_data[offset..]) {
-        // Sanity check on header total size field
-        if capsule_header.total_size >= available_data {
+        // Sanity check on header total size field: the capsule must fit within the
+        // remaining data (an oversized total_size means this is not a real capsule).
+        if capsule_header.total_size > 0 && capsule_header.total_size <= available_data {
             result.size = capsule_header.total_size;
             result.description = format!(
                 "{}, header size: {} bytes, total size: {} bytes",

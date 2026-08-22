@@ -17,7 +17,10 @@ pub fn qcow_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
         ..Default::default()
     };
 
-    if let Ok(qcow_header) = parse_qcow_header(file_data) {
+    // Validate the header at the match offset, not at the start of the file: the
+    // magic can be found anywhere (e.g., a QCOW image embedded in a larger blob),
+    // and validating bytes from offset 0 would misattribute or reject real images.
+    if let Ok(qcow_header) = parse_qcow_header(&file_data[offset..]) {
         result.description = format!(
             "QEMU QCOW Image, version: {}, storage media size: {:#x} bytes, cluster block size: {:#x} bytes, encryption method: {}",
             qcow_header.version,

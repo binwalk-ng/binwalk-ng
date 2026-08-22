@@ -31,6 +31,12 @@ pub fn tarball_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult
     // Keep a count of how many tar entry headers were validated
     let mut valid_header_count: usize = 0;
 
+    // The magic bytes sit TARBALL_MAGIC_OFFSET bytes into each 512-byte header block;
+    // a match earlier than that cannot be a tar header (and would underflow below).
+    if offset < TARBALL_MAGIC_OFFSET {
+        return Err(SignatureError);
+    }
+
     // Calculate the actual start of the tarball (header magic does not start at the beginning of a tar entry)
     let tarball_start_offset = offset - TARBALL_MAGIC_OFFSET;
 
@@ -56,15 +62,16 @@ pub fn tarball_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult
                     break;
                 }
 
-                // Increment the count of valid tarball headers found
-                valid_header_count += 1;
-
                 // Get the reported size of the next entry header
                 match tarball_entry_size(tarball_header_block) {
                     Err(_) => {
+                        // Bad magic: quit processing headers. Note this block passed the
+                        // checksum but is not a valid ustar entry, so it is not counted.
                         break;
                     }
                     Ok(entry_size) => {
+                        valid_header_count += 1;
+
                         // Update total size count, and next/previous header offsets
                         tarball_total_size += entry_size;
                         previous_header_start = Some(next_header_start);
@@ -132,9 +139,9 @@ fn tarball_entry_size(tarball_entry_data: &[u8]) -> Result<usize, SignatureError
         // Convert the ASCII octal to a number
         let reported_entry_size = tarball_octal(entry_size_string);
 
-        // The actual size of this entry will be the data size, rounded up to the nearest block size, PLUS one block for the entry header
-        let block_count: usize =
-            1 + (reported_entry_size as f32 / TARBALL_BLOCK_SIZE as f32).ceil() as usize;
+        // The actual size of this entry will be the data size, rounded up to the nearest block size, PLUS one block for the entry header.
+        // (f32 here would lose precision for sizes above 2^24 and mis-round block boundaries.)
+        let block_count: usize = 1 + reported_entry_size.div_ceil(TARBALL_BLOCK_SIZE);
 
         // Total size is the total number of blocks times the block size
         return Ok(block_count * TARBALL_BLOCK_SIZE);

@@ -154,8 +154,12 @@ pub fn parse_matter_ota_header(ota_data: &[u8]) -> Result<MatterOTAHeader, Struc
         }
     }
 
-    // Sanity check
-    if (result.payload_size + size_of::<OtaHeaderBytes>() + header_size) == total_size {
+    // Sanity check; an overflowing sum can never equal total_size.
+    let expected_total = result
+        .payload_size
+        .checked_add(size_of::<OtaHeaderBytes>())
+        .and_then(|sum| sum.checked_add(header_size));
+    if expected_total == Some(total_size) {
         return Ok(result);
     }
 
@@ -270,13 +274,20 @@ pub fn extract_matter_ota(
     let mut result = ExtractionResult::default();
 
     if let Ok(ota_header) = parse_matter_ota_header(&file_data[offset..]) {
-        let total_header_size = size_of::<OtaHeaderBytes>() + ota_header.header_size;
+        // Bounds that overflow cannot describe data within this file.
+        let Some(header_end) = size_of::<OtaHeaderBytes>().checked_add(ota_header.header_size)
+        else {
+            return result;
+        };
+        let Some(payload_start) = offset.checked_add(header_end) else {
+            return result;
+        };
+        let Some(payload_end) = payload_start.checked_add(ota_header.payload_size) else {
+            return result;
+        };
 
         result.success = true;
         result.size = Some(ota_header.total_size);
-
-        let payload_start = offset + total_header_size;
-        let payload_end = offset + total_header_size + ota_header.payload_size;
 
         // Sanity check reported payload size and get the payload data
         if let Some(payload_data) = file_data.get(payload_start..payload_end)

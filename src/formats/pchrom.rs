@@ -133,8 +133,11 @@ fn get_pch_regions_size(pch_data: &[u8], offset: usize, fcba: u8) -> Result<u32,
         let region_base = (region_value & 0x1FFF) << 12;
         let region_limit = (((region_value & 0x1FFF0000) >> 4) | 0xFFFF) + 1;
 
-        // Size can be inferred from the base and limit values
-        let region_size = region_limit - region_base;
+        // Size can be inferred from the base and limit values; the fields are
+        // independent, so base can exceed limit (no usable region).
+        let Some(region_size) = region_limit.checked_sub(region_base) else {
+            continue;
+        };
 
         // If size is 0, this region is not used in this image
         if region_size > 0 && region_limit > image_size {

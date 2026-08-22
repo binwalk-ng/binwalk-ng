@@ -184,7 +184,7 @@ pub fn parse_tplink_rtos_header(
 
     Ok(TPLinkRTOSFirmwareHeader {
         header_size: HEADER_SIZE,
-        total_size: header.data_size.get() + TOTAL_SIZE_OFFSET,
+        total_size: header.data_size.get().saturating_add(TOTAL_SIZE_OFFSET),
         model_number: header.model_number.get(),
         hardware_rev_major: header.hardware_revision_major,
         hardware_rev_minor: header.hardware_revision_minor,

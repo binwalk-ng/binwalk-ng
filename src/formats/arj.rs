@@ -92,6 +92,33 @@ struct ARJHeaderBytes {
 
 const HDR_DATA_OFFSET: usize = std::mem::offset_of!(ARJHeaderBytes, first_hdr_size);
 
+/// Converts an MS-DOS packed date/time value (as stored in ARJ headers) to Unix
+/// epoch seconds: bits 25-31 year-1980, 21-24 month, 16-20 day, 11-15 hour,
+/// 5-10 minute, 0-4 seconds/2. Returns None if the fields don't form a valid
+/// date/time.
+/// Converts an MS-DOS packed date/time value (as stored in ARJ headers) to Unix
+/// epoch seconds: bits 25-31 year-1980, 21-24 month, 16-20 day, 11-15 hour,
+/// 5-10 minute, 0-4 seconds/2. Returns None if the fields don't form a valid
+/// date/time.
+fn dos_datetime_to_epoch(dos: u32) -> Option<i64> {
+    let year = 1980 + ((dos >> 25) & 0x7F) as i16;
+    let month = ((dos >> 21) & 0x0F) as i8;
+    let day = ((dos >> 16) & 0x1F) as i8;
+    let hour = ((dos >> 11) & 0x1F) as i8;
+    let minute = ((dos >> 5) & 0x3F) as i8;
+    let second = ((dos & 0x1F) as i8) * 2;
+
+    let date = jiff::civil::Date::new(year, month, day).ok()?;
+    let time = jiff::civil::Time::new(hour, minute, second, 0).ok()?;
+    Some(
+        jiff::civil::DateTime::from_parts(date, time)
+            .to_zoned(jiff::tz::TimeZone::UTC)
+            .ok()?
+            .timestamp()
+            .as_second(),
+    )
+}
+
 pub fn parse_arj_header(arj_data: &[u8]) -> Result<ARJHeader, StructureError> {
     let (arj_header, _) = ARJHeaderBytes::ref_from_prefix(arj_data).map_err(|_| StructureError)?;
 
@@ -114,9 +141,10 @@ pub fn parse_arj_header(arj_data: &[u8]) -> Result<ARJHeader, StructureError> {
             .expect("bad slice"),
     );
 
-    // Validate version range
-    if !(1..=16).contains(&arj_header.archiver_version)
-        || !(1..=16).contains(&arj_header.min_version)
+    // Validate version fields: modern ARJ writers use versions above the historical
+    // 1..=16 range. The header CRC is what rejects garbage.
+    if arj_header.archiver_version == 0
+        || arj_header.min_version == 0
         || arj_header.archiver_version < arj_header.min_version
     {
         return Err(StructureError);
@@ -160,6 +188,9 @@ pub fn parse_arj_header(arj_data: &[u8]) -> Result<ARJHeader, StructureError> {
         2 => "compressed",
         3 => "compressed faster",
         4 => "compressed fastest",
+        // The spec defines additional method codes for entries without data
+        // (directories, symlinks); keep them parseable.
+        8 | 9 => "no data",
         _ => return Err(StructureError),
     }
     .to_string();
@@ -205,7 +236,8 @@ pub fn parse_arj_header(arj_data: &[u8]) -> Result<ARJHeader, StructureError> {
         compression_method,
         file_type,
         original_name,
-        original_file_date: epoch_to_string(arj_header.datetime_file.get()),
+        original_file_date: dos_datetime_to_epoch(arj_header.datetime_file.get())
+            .map_or_else(String::new, epoch_to_string),
         compressed_file_size: compressed_file_size as usize,
         uncompressed_file_size: uncompressed_file_size as usize,
         basic_hdr_size,

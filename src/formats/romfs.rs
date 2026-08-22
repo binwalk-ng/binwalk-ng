@@ -297,7 +297,8 @@ pub fn extract_romfs(
         // Sanity check reported image size and get the romfs data
         if let Some(romfs_data) = file_data.get(romfs_data_start..romfs_data_end) {
             // Process the RomFS file entries
-            if let Ok(root_entries) = process_romfs_entries(romfs_data, romfs_header.header_size) {
+            if let Ok(root_entries) = process_romfs_entries(romfs_data, romfs_header.header_size, 0)
+            {
                 // We expect at least one file entry in the root of the RomFS image
                 if !root_entries.is_empty() {
                     // Everything looks good
@@ -339,10 +340,26 @@ pub fn extract_romfs(
 }
 
 // Recursively processes all RomFS file entries and their children, and returns a list of RomFSEntry structures
+/// Maximum directory nesting depth processed by [`process_romfs_entries`].
+///
+/// The `info` field of a directory entry (the offset of its first child) is
+/// attacker-controlled, so without a bound a crafted image can nest entries
+/// arbitrarily deep -- or point two directories at each other, recursing
+/// forever. The per-call `processed_entries` set cannot see cycles that span
+/// recursive calls, so the depth budget is what actually terminates them.
+const MAX_ROMFS_DEPTH: usize = 64;
+
 fn process_romfs_entries(
     romfs_data: &[u8],
     offset: usize,
+    depth: usize,
 ) -> Result<Vec<RomFSEntry>, ExtractionError> {
+    // Refuse to recurse past the depth budget; this converts a stack-exhaustion
+    // crash on crafted images into an ordinary parse failure.
+    if depth > MAX_ROMFS_DEPTH {
+        return Err(ExtractionError);
+    }
+
     let mut previous_file_offset = None;
     let mut file_entries: Vec<RomFSEntry> = vec![];
     let mut processed_entries: Vec<usize> = vec![];
@@ -419,7 +436,8 @@ fn process_romfs_entries(
                 // Directories have children; process them
                 if file_entry.directory {
                     {
-                        let children = process_romfs_entries(romfs_data, file_entry.info)?;
+                        let children =
+                            process_romfs_entries(romfs_data, file_entry.info, depth + 1)?;
                         file_entry.children = children
                     }
                 }
