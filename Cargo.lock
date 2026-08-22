@@ -214,6 +214,7 @@ dependencies = [
  "log",
  "lz4_flex",
  "lzfse",
+ "lzo",
  "md-5",
  "memchr",
  "memmap2",
@@ -1260,6 +1261,12 @@ checksum = "e20f57f9918e5bd7bc58c22cdd70a6afc7375d4dd9683af5f2b34bd3d2bba619"
 dependencies = [
  "sha2 0.10.9",
 ]
+
+[[package]]
+name = "lzo"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd9b7b4d9500e916f96a043f885f9d808cd47895a578dc6f1d2da3add173ead6"
 
 [[package]]
 name = "md-5"

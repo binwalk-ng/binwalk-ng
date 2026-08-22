@@ -403,7 +403,7 @@ pub fn patterns() -> Vec<signatures::Signature> {
             description: formats::lzop::DESCRIPTION.to_string(),
             extractor: Some(formats::lzop::lzop_extractor()),
         },
-        // lzop
+        // pe
         signatures::Signature {
             name: "pe".to_string(),
             short: false,
