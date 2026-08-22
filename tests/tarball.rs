@@ -98,6 +98,18 @@ fn extraction_produces_expected_files() {
         link_target.is_relative(),
         "symlink target {link_target:?} must be relative (chroot-contained)"
     );
+    // Relative alone is not containment: a crafted "../../outside/readme.txt" would
+    // still be relative yet escape the extraction root. Resolve the symlink and pin
+    // the real location inside it.
+    let canonical_root = fs::canonicalize(root).unwrap();
+    let resolved = fs::canonicalize(&symlink).unwrap();
+    assert!(
+        resolved.starts_with(&canonical_root),
+        "symlink {} resolves to {}, outside the extraction root {}",
+        symlink.display(),
+        resolved.display(),
+        canonical_root.display()
+    );
     assert_eq!(
         fs::read(&symlink).unwrap(),
         common::reference_payload(),

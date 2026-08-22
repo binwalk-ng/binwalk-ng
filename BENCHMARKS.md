@@ -53,6 +53,8 @@ Measurement boundaries (see `benches/gungraun.rs`):
 - Workload files are generated once, at command-collection time (outside
   valgrind), into `target/gungraun/fixtures/`. `large.bin` repeats the sorted
   `tests/testdata/samples` bytes, so it is byte-identical on every machine.
+  Fixtures are regenerated on every bench run, so derived files can't go stale
+  when the samples change.
 
 Because the metrics are one-shot and deterministic, a run has no stddev and the
 old noise-band verdict is gone: the gate is a plain percentage threshold.

@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Code checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Link Checker
         uses: lycheeverse/lychee-action@v2.9.0
@@ -29,6 +31,8 @@ jobs:
     steps:
       - name: Code checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Install rustfmt
         run: rustup component add rustfmt
@@ -43,6 +47,7 @@ jobs:
       - name: Code checkout
         uses: actions/checkout@v7
         with:
+          persist-credentials: false
           submodules: true
 
       - name: Set up Docker Buildx
@@ -88,6 +93,9 @@ jobs:
     steps:
       - name: Code checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: true
 
       - name: Install Rust target
         run: rustup target add "${{ matrix.platform.target }}"

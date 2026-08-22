@@ -60,19 +60,15 @@ fn ensure_fixtures() {
         fs::create_dir_all(&dir).expect("create fixtures dir");
         fs::write(dir.join("corpus.bin"), &corpus).expect("write corpus.bin");
 
+        // Always regenerated, so derived fixtures can never go stale when the
+        // samples submodule changes.
         let size = LARGE_MB * 1024 * 1024;
-        let large_path = dir.join("large.bin");
-        let stale = fs::metadata(&large_path)
-            .map(|meta| meta.len() as usize != size)
-            .unwrap_or(true);
-        if stale {
-            let mut large = Vec::with_capacity(size);
-            while large.len() < size {
-                large.extend_from_slice(&corpus);
-            }
-            large.truncate(size);
-            fs::write(large_path, large).expect("write large.bin");
+        let mut large = Vec::with_capacity(size);
+        while large.len() < size {
+            large.extend_from_slice(&corpus);
         }
+        large.truncate(size);
+        fs::write(dir.join("large.bin"), large).expect("write large.bin");
     });
 }
 
