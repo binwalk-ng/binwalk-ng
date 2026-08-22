@@ -2,7 +2,7 @@
 source: tests/common/mod.rs
 expression: ordered_extractions
 ---
-- size: 5120
+- size: 8388608
   success: true
   extractor: mbr_built_in
   do_not_recurse: false

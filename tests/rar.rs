@@ -5,19 +5,24 @@ use std::path::Path;
 
 use binwalk_ng::Binwalk;
 
+/// The RAR3 fixtures (rar3.rar / rar3.solid.rar / rar3.dos_sfx.exe) are
+/// committed upstream archives whose inner file is testfile.txt. The
+/// generated RAR5 samples (rar5.rar / rar5.solid.rar) store the samples
+/// repo's shared payload text as readme.txt (see generate_samples.py:
+/// `rar a -ep1 readme.txt`).
 const TESTFILE_TXT: &[u8] = b"Testing 123\n";
 
 /// Smoke test: exactly one RAR signature is detected at offset 0, and its
 /// extraction reports success.
 #[test]
 fn integration_test() {
-    common::integration_test("rar", "testfile.rar3.rar");
+    common::integration_test("rar", "rar3.rar");
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
 fn run_rar_binwalk(input: &str, output_dir: &Path) -> binwalk_ng::AnalysisResults {
-    let path = Path::new("tests").join("inputs").join(input);
+    let path = Path::new(common::SAMPLES_DIR).join(input);
     let binwalker = Binwalk::builder()
         .include("rar")
         .build()
@@ -45,7 +50,7 @@ fn extract_and_verify(input: &str, checker: impl Fn(&Path)) {
 
 #[test]
 fn v3_extraction() {
-    extract_and_verify("testfile.rar3.rar", |root| {
+    extract_and_verify("rar3.rar", |root| {
         let p = root.join("testfile.txt");
         assert!(p.exists());
         assert_eq!(fs::read(&p).unwrap(), TESTFILE_TXT);
@@ -54,16 +59,16 @@ fn v3_extraction() {
 
 #[test]
 fn v5_extraction() {
-    extract_and_verify("testfile.rar5.rar", |root| {
-        let p = root.join("testfile.txt");
+    extract_and_verify("rar5.rar", |root| {
+        let p = root.join("readme.txt");
         assert!(p.exists());
-        assert_eq!(fs::read(&p).unwrap(), TESTFILE_TXT);
+        assert_eq!(fs::read(&p).unwrap(), common::reference_payload());
     });
 }
 
 #[test]
 fn v3_solid_extraction() {
-    extract_and_verify("testfile.rar3.solid.rar", |root| {
+    extract_and_verify("rar3.solid.rar", |root| {
         let p = root.join("testfile.txt");
         assert!(p.exists());
         assert_eq!(fs::read(&p).unwrap(), TESTFILE_TXT);
@@ -72,19 +77,19 @@ fn v3_solid_extraction() {
 
 #[test]
 fn v5_solid_extraction() {
-    extract_and_verify("testfile.rar5.solid.rar", |root| {
-        let p = root.join("testfile.txt");
+    extract_and_verify("rar5.solid.rar", |root| {
+        let p = root.join("readme.txt");
         assert!(p.exists());
-        assert_eq!(fs::read(&p).unwrap(), TESTFILE_TXT);
+        assert_eq!(fs::read(&p).unwrap(), common::reference_payload());
     });
 }
 
 #[test]
 fn sfx_extraction() {
-    extract_and_verify("testfile.rar3.dos_sfx.exe", |root| {
+    extract_and_verify("rar3.dos_sfx.exe", |root| {
         let p = root.join("testfile.txt");
         assert!(p.exists(), "missing testfile.txt");
-        assert_eq!(&fs::read(&p).unwrap(), TESTFILE_TXT);
+        assert_eq!(fs::read(&p).unwrap(), TESTFILE_TXT);
 
         let p = root.join("acknow.txt");
         assert!(p.exists(), "missing acknowledg.txt");

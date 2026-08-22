@@ -3,7 +3,7 @@ mod common;
 #[test]
 fn integration_test() {
     const SIGNATURE_TYPE: &str = "qcow";
-    const INPUT_FILE_NAME: &str = "qcow.bin";
+    const INPUT_FILE_NAME: &str = "qcow2.image";
 
     let expected_signature_offsets: Vec<usize> = vec![0];
     let expected_extraction_offsets: Vec<usize> = vec![];

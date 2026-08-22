@@ -34,10 +34,13 @@ fn fixture(name: &str) -> String {
 fn ensure_fixtures() {
     static INIT: OnceLock<()> = OnceLock::new();
     INIT.get_or_init(|| {
-        let inputs = workspace_root().join("tests").join("inputs");
+        let inputs = workspace_root()
+            .join("tests")
+            .join("testdata")
+            .join("samples");
         let mut files: Vec<PathBuf> = fs::read_dir(&inputs)
-            .expect("tests/inputs must exist; run cargo bench from the repo root")
-            .map(|entry| entry.expect("read tests/inputs entry").path())
+            .expect("samples submodule must exist; run cargo bench from the repo root")
+            .map(|entry| entry.expect("read samples entry").path())
             .filter(|p| p.is_file())
             .collect();
         files.sort();
@@ -45,7 +48,10 @@ fn ensure_fixtures() {
         for f in &files {
             corpus.extend(fs::read(f).expect("read input file"));
         }
-        assert!(!corpus.is_empty(), "tests/inputs contains no files");
+        assert!(
+            !corpus.is_empty(),
+            "tests/testdata/samples contains no files"
+        );
 
         let dir = workspace_root()
             .join("target")
@@ -54,19 +60,15 @@ fn ensure_fixtures() {
         fs::create_dir_all(&dir).expect("create fixtures dir");
         fs::write(dir.join("corpus.bin"), &corpus).expect("write corpus.bin");
 
+        // Always regenerated, so derived fixtures can never go stale when the
+        // samples submodule changes.
         let size = LARGE_MB * 1024 * 1024;
-        let large_path = dir.join("large.bin");
-        let stale = fs::metadata(&large_path)
-            .map(|meta| meta.len() as usize != size)
-            .unwrap_or(true);
-        if stale {
-            let mut large = Vec::with_capacity(size);
-            while large.len() < size {
-                large.extend_from_slice(&corpus);
-            }
-            large.truncate(size);
-            fs::write(large_path, large).expect("write large.bin");
+        let mut large = Vec::with_capacity(size);
+        while large.len() < size {
+            large.extend_from_slice(&corpus);
         }
+        large.truncate(size);
+        fs::write(dir.join("large.bin"), large).expect("write large.bin");
     });
 }
 

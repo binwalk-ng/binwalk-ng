@@ -3,7 +3,7 @@ mod common;
 #[test]
 fn integration_test() {
     const SIGNATURE_TYPE: &str = "png";
-    const INPUT_FILE_NAME: &str = "png_malformed.bin";
+    const INPUT_FILE_NAME: &str = "png.malformed.png";
 
     let expected_signature_offsets: Vec<usize> = vec![];
     let expected_extraction_offsets: Vec<usize> = vec![];
