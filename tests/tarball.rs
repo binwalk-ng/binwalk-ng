@@ -1,7 +1,7 @@
 mod common;
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use binwalk_ng::Binwalk;
 
@@ -141,4 +141,237 @@ fn extraction_produces_expected_files() {
             "sticky bit not preserved on subdir (mode {subdir_mode:#o})"
         );
     }
+}
+
+/// Recursively collects every path under `dir` (files, directories, symlinks;
+/// symlinked directories are not followed).
+#[allow(dead_code)]
+fn walk_paths(dir: &Path, collected: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        collected.push(path.clone());
+        if is_dir {
+            walk_paths(&path, collected);
+        }
+    }
+}
+
+/// Appends one raw tar entry, bypassing the tar crate's Builder sanitization
+/// (which refuses absolute member names and `..` components). This lets the
+/// test craft entries exactly as an attacker would.
+fn append_tar_entry(
+    builder: &mut tar::Builder<Vec<u8>>,
+    name: &str,
+    entry_type: tar::EntryType,
+    data: &[u8],
+    link_name: Option<&str>,
+) {
+    let mut header = tar::Header::new_gnu();
+    {
+        let gnu = header.as_gnu_mut().expect("GNU header representation");
+        let bytes = name.as_bytes();
+        assert!(bytes.len() <= gnu.name.len(), "entry name too long: {name}");
+        gnu.name[..bytes.len()].copy_from_slice(bytes);
+        if let Some(link) = link_name {
+            let link_bytes = link.as_bytes();
+            assert!(
+                link_bytes.len() <= gnu.linkname.len(),
+                "link name too long: {link}"
+            );
+            gnu.linkname[..link_bytes.len()].copy_from_slice(link_bytes);
+        }
+    }
+    header.set_entry_type(entry_type);
+    header.set_mode(0o644);
+    header.set_uid(0);
+    header.set_gid(0);
+    header.set_mtime(0);
+    header.set_size(data.len() as u64);
+    // Checksum last: it covers every field mutated above.
+    header.set_cksum();
+    builder.append(&header, data).expect("append tar entry");
+}
+
+/// Lexically resolves `link_path`'s stored target relative to the link's own
+/// directory and reports whether it stays inside `root` (never climbing above
+/// it). Purely lexical: unlike `fs::canonicalize`, this also works for links
+/// whose rewritten targets dangle inside the extraction root.
+#[allow(dead_code)]
+fn symlink_target_stays_within(root: &Path, link_path: &Path) -> bool {
+    let Ok(target) = fs::read_link(link_path) else {
+        return false;
+    };
+    if target.is_absolute() {
+        return false;
+    }
+    let base = link_path.parent().unwrap_or_else(|| Path::new("/"));
+    let Ok(relative_base) = base.strip_prefix(root) else {
+        return false;
+    };
+    let mut depth = relative_base.components().count();
+    for component in target.components() {
+        match component {
+            std::path::Component::Normal(_) => depth += 1,
+            std::path::Component::ParentDir => match depth.checked_sub(1) {
+                Some(new_depth) => depth = new_depth,
+                None => return false,
+            },
+            _ => return false,
+        }
+    }
+    true
+}
+
+/// End-to-end containment test with a hostile archive crafted in memory:
+/// traversal and absolute member names, escaping symlink targets, a hardlink,
+/// and a fifo. Nothing may be written outside the extraction directory, hostile
+/// symlinks must never resolve to host files, and the benign sibling entries
+/// must still be extracted.
+#[test]
+fn extraction_contains_hostile_entries() {
+    let payload = common::reference_payload();
+
+    // Entry order matters only in that the benign file comes first, proving the
+    // hostile entries neither abort nor corrupt the rest of the extraction.
+    let mut builder = tar::Builder::new(Vec::new());
+    append_tar_entry(
+        &mut builder,
+        "benign.txt",
+        tar::EntryType::Regular,
+        &payload,
+        None,
+    );
+    append_tar_entry(
+        &mut builder,
+        "../evil.txt",
+        tar::EntryType::Regular,
+        b"escaped?",
+        None,
+    );
+    append_tar_entry(
+        &mut builder,
+        "/tmp/abs_evil.txt",
+        tar::EntryType::Regular,
+        b"escaped?",
+        None,
+    );
+    append_tar_entry(
+        &mut builder,
+        "rel_escape",
+        tar::EntryType::Symlink,
+        b"",
+        Some("../../outside_readme.txt"),
+    );
+    append_tar_entry(
+        &mut builder,
+        "abs_escape",
+        tar::EntryType::Symlink,
+        b"",
+        Some("/etc/passwd"),
+    );
+    append_tar_entry(
+        &mut builder,
+        "hardlink.txt",
+        tar::EntryType::Link,
+        b"",
+        Some("benign.txt"),
+    );
+    append_tar_entry(&mut builder, "pipe.fifo", tar::EntryType::Fifo, b"", None);
+    let archive = builder.into_inner().unwrap();
+
+    let input = tempfile::NamedTempFile::new().unwrap();
+    fs::write(input.path(), &archive).unwrap();
+
+    // The extraction directory is nested inside an owned scratch directory, so
+    // anything that escapes lands somewhere we can inspect deterministically.
+    let scratch = tempfile::tempdir().unwrap();
+    let output_directory = tempfile::tempdir_in(scratch.path()).unwrap();
+
+    let binwalker = Binwalk::builder()
+        .include("tarball")
+        .build()
+        .expect("Binwalk initialization failed");
+    let results = binwalker.analyze(input.path(), Some(output_directory.path()));
+
+    // One signature at offset 0; extraction succeeds despite the hostile entries.
+    assert_eq!(results.file_map.len(), 1);
+    assert_eq!(results.file_map[0].offset, 0);
+    assert_eq!(results.extractions.len(), 1);
+    let extraction = results.extractions.values().next().unwrap();
+    assert!(
+        extraction.success,
+        "hostile entries must not fail extraction"
+    );
+
+    // Containment: every path created under the scratch dir is inside the
+    // directory we handed to binwalk. The scratch dir is fresh and owned by
+    // this test, so any escape would show up here.
+    let mut found = Vec::new();
+    walk_paths(scratch.path(), &mut found);
+    for path in found {
+        assert!(
+            path.starts_with(output_directory.path()),
+            "extraction escaped the output directory: {}",
+            path.display()
+        );
+    }
+
+    let root = &extraction.output_directory;
+
+    // The benign sibling entry was extracted with intact contents...
+    assert_eq!(fs::read(root.join("benign.txt")).unwrap(), payload);
+
+    // ...and hostile member names were clamped inside the root (`..` collapsed,
+    // leading '/' stripped), not skipped outright.
+    assert!(
+        root.join("evil.txt").is_file(),
+        "'../evil.txt' should be clamped to 'evil.txt' inside the root"
+    );
+    assert!(
+        root.join("tmp/abs_evil.txt").is_file(),
+        "'/tmp/abs_evil.txt' should be clamped to 'tmp/abs_evil.txt' inside the root"
+    );
+
+    // Escaping symlink targets are rewritten to chroot-relative paths: still
+    // relative, lexically pinned inside the root, and dangling (the rewritten
+    // targets were never created), so no host file is reachable through them.
+    for link in ["rel_escape", "abs_escape"] {
+        let link_path = root.join(link);
+        let is_symlink = fs::symlink_metadata(&link_path)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false);
+        assert!(
+            is_symlink,
+            "{link} must be extracted as a symlink inside the root"
+        );
+        assert!(
+            symlink_target_stays_within(root, &link_path),
+            "{link}'s target must resolve inside the extraction root"
+        );
+        assert!(
+            fs::read(&link_path).is_err(),
+            "{link} must not resolve to any host file"
+        );
+    }
+
+    // Hardlinks are represented as symlinks to their target's contents.
+    let hardlink = root.join("hardlink.txt");
+    let hardlink_metadata =
+        fs::symlink_metadata(&hardlink).expect("expected hardlink.txt to be extracted");
+    assert!(
+        hardlink_metadata.file_type().is_symlink(),
+        "hardlink.txt must be extracted as a symlink"
+    );
+    assert_eq!(
+        fs::read(&hardlink).unwrap(),
+        payload,
+        "hardlink.txt must resolve to benign.txt within the extraction tree"
+    );
+
+    // Metadata-only entries (fifo) carve nothing but must not fail extraction.
+    assert!(!root.join("pipe.fifo").exists());
 }
