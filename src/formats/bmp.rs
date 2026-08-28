@@ -45,6 +45,9 @@ pub fn bmp_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
 pub struct BMPFileHeader {
     pub size: usize,
     pub bitmap_bits_offset: usize,
+    /// Size in bytes of the DIB header that follows the file header, as declared
+    /// by its first field; validated to be one of the known DIB header sizes.
+    pub dib_header_size: usize,
 }
 
 #[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
@@ -58,8 +61,17 @@ struct RawHeader {
     bf_off_bits: zerocopy::U32<LE>,
 }
 
+/// Every DIB header (BITMAPCOREHEADER/INFOHEADER/V4/V5) begins with a little-endian
+/// u32 giving that header's size in bytes; this models that leading field, which is
+/// all `parse_bmp_file_header` needs from the DIB header.
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct RawDibHeader {
+    bi_size: zerocopy::U32<LE>,
+}
+
 pub fn parse_bmp_file_header(bmp_data: &[u8]) -> Result<BMPFileHeader, StructureError> {
-    let (raw_header, _rest) = RawHeader::ref_from_prefix(bmp_data).map_err(|_| StructureError)?;
+    let (raw_header, rest) = RawHeader::ref_from_prefix(bmp_data).map_err(|_| StructureError)?;
     let bmp_data_size = bmp_data.len();
 
     let bf_size = raw_header.bf_size.get() as usize;
@@ -85,30 +97,29 @@ pub fn parse_bmp_file_header(bmp_data: &[u8]) -> Result<BMPFileHeader, Structure
         return Err(StructureError);
     }
 
+    // The DIB header immediately follows the file header; its first field is its own
+    // size in bytes, which must be one of the known DIB header sizes. Reading it here
+    // (instead of re-slicing at the call site) means a truncated image is rejected
+    // rather than indexed out of bounds.
+    const VALID_DIB_HEADER_SIZES: [u32; 4] = [
+        12,  // BITMAPCOREHEADER
+        40,  // BITMAPINFOHEADER
+        108, // BITMAPV4HEADER
+        124, // BITMAPV5HEADER
+    ];
+    let (raw_dib_header, _dib_rest) =
+        RawDibHeader::ref_from_prefix(rest).map_err(|_| StructureError)?;
+    let dib_header_size = raw_dib_header.bi_size.get();
+    if !VALID_DIB_HEADER_SIZES.contains(&dib_header_size) {
+        return Err(StructureError);
+    }
+
     // If everything is Ok so far, return a BMPFileHeader
     Ok(BMPFileHeader {
         size: bf_size,
         bitmap_bits_offset: bf_off_bits,
+        dib_header_size: dib_header_size as usize,
     })
-}
-
-// https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-bitmapv5header
-// "The number of bytes required by the structure. Applications should use this member to determine which bitmap information header structure is being used."
-pub fn get_dib_header_size(bmp_data: &[u8]) -> Result<usize, StructureError> {
-    let valid_header_sizes = [
-        12,  // BITMAPCOREHEADER
-        40,  // BITMAPINFOHEADER
-        108, // BITMAPV4HEADER
-        124,
-    ];
-
-    let header_size = u32::from_le_bytes(bmp_data[..4].try_into().unwrap());
-
-    if !valid_header_sizes.contains(&header_size) {
-        return Err(StructureError);
-    }
-
-    Ok(header_size as usize)
 }
 
 /// Defines the internal extractor function for carving out GIF images
@@ -150,27 +161,27 @@ pub fn extract_bmp_image(
 
     let mut result = ExtractionResult::default();
 
-    // Parse the bmp_file_header
+    // Parse the bmp_file_header (which also parses and validates the DIB header size)
     if let Ok(bmp_file_header) = parse_bmp_file_header(&file_data[offset..]) {
-        // https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-bitmapfileheader
-        // The size of the BMP file header
-        const BMP_FILE_HEADER_SIZE: usize = 14;
+        // The size of the BMP file header, per the RawHeader layout
+        const BMP_FILE_HEADER_SIZE: usize = std::mem::size_of::<RawHeader>();
 
-        // Retrieve the size of the header following the BMP file header
-        if let Ok(bmp_header_size) =
-            get_dib_header_size(&file_data[(offset + BMP_FILE_HEADER_SIZE)..])
+        // The offset that points to the image data cannot point into the second
+        // header, and must fall within the declared BMP file size; otherwise a
+        // malformed image could be reported as successfully extracted even though
+        // its bitmap data lies outside bf_size.
+        if bmp_file_header.bitmap_bits_offset
+            >= (BMP_FILE_HEADER_SIZE + bmp_file_header.dib_header_size)
+            && bmp_file_header.bitmap_bits_offset <= bmp_file_header.size
         {
-            // The offset that points to the image data cannot point into the second header
-            if bmp_file_header.bitmap_bits_offset >= (BMP_FILE_HEADER_SIZE + bmp_header_size) {
-                // If it was parsed successfully, get the file size
-                result.size = Some(bmp_file_header.size);
-                result.success = true;
+            // If it was parsed successfully, get the file size
+            result.size = Some(bmp_file_header.size);
+            result.success = true;
 
-                if let Some(output_directory) = output_directory {
-                    let chroot = Chroot::new(output_directory);
-                    result.success =
-                        chroot.carve_file(OUTFILE_NAME, file_data, offset, bmp_file_header.size);
-                }
+            if let Some(output_directory) = output_directory {
+                let chroot = Chroot::new(output_directory);
+                result.success =
+                    chroot.carve_file(OUTFILE_NAME, file_data, offset, bmp_file_header.size);
             }
         }
     }

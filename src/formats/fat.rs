@@ -115,11 +115,13 @@ pub fn parse_fat_header(fat_data: &[u8]) -> Result<FATHeader, StructureError> {
                 // total_sectors_16 is used for FAT12/16 that have less than 0x10000 sectors
                 if bs_header.total_sectors_16 != 0 {
                     result.total_size = (bs_header.total_sectors_16.get() as usize)
-                        * (bs_header.bytes_per_sector.get() as usize);
+                        .checked_mul(bs_header.bytes_per_sector.get() as usize)
+                        .ok_or(StructureError)?;
                 // Else, total_sectors_32 is used to define the number of sectors
                 } else {
                     result.total_size = (bs_header.total_sectors_32.get() as usize)
-                        * (bs_header.bytes_per_sector.get() as usize);
+                        .checked_mul(bs_header.bytes_per_sector.get() as usize)
+                        .ok_or(StructureError)?;
                 }
 
                 // If both total_sectors_32 and total_sectors_16 is 0, this is not a valid FAT

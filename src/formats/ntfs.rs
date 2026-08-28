@@ -21,9 +21,17 @@ pub fn ntfs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
     };
 
     if let Ok(ntfs_header) = parse_ntfs_header(&file_data[offset..]) {
-        // The reported sector count does not include the NTFS boot sector itself
+        // The reported sector count does not include the NTFS boot sector itself.
+        // An overflowing count or product cannot describe data in this file.
         let sector_size = ntfs_header.sector_size as usize;
-        result.size = sector_size * (ntfs_header.sector_count as usize + 1);
+        let Some(reported_size) = ntfs_header
+            .sector_count
+            .checked_add(1)
+            .and_then(|count| sector_size.checked_mul(count as usize))
+        else {
+            return Err(SignatureError);
+        };
+        result.size = reported_size;
 
         // Simple sanity check on the reported total size
         if result.size > sector_size {

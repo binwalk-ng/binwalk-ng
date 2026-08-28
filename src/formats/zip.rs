@@ -101,7 +101,9 @@ pub fn find_zip_eof(file_data: &[u8], offset: usize) -> Result<ZipEOCDInfo, Sign
             && let Ok(eocd_header) = parse_eocd_header(eocd_data)
         {
             return Ok(ZipEOCDInfo {
-                eof: eocd_start + eocd_header.size,
+                // The comment length is attacker-controlled and may claim more bytes
+                // than the file holds; clamp the archive end to the actual file size.
+                eof: (eocd_start.saturating_add(eocd_header.size)).min(file_data.len()),
                 file_count: eocd_header.file_count,
             });
         }

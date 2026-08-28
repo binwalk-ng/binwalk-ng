@@ -23,8 +23,19 @@ pub fn autel_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
         ..Default::default()
     };
 
-    if let Ok(autel_header) = parse_autel_header(&file_data[offset..]) {
-        result.size = autel_header.header_size + autel_header.data_size;
+    let autel_data = file_data.get(offset..).ok_or(SignatureError)?;
+    if let Ok(autel_header) = parse_autel_header(autel_data) {
+        let total_size = autel_header
+            .header_size
+            .checked_add(autel_header.data_size)
+            .ok_or(SignatureError)?;
+        if offset
+            .checked_add(total_size)
+            .is_none_or(|e| e > file_data.len())
+        {
+            return Err(SignatureError);
+        }
+        result.size = total_size;
         result.description = format!(
             "{}, header size: {} bytes, data size: {}, total size: {}",
             result.description, autel_header.header_size, autel_header.data_size, result.size
@@ -120,7 +131,9 @@ pub fn autel_deobfuscate(
 
     let mut result = ExtractionResult::default();
 
-    let data = &file_data[offset..];
+    let Some(data) = file_data.get(offset..) else {
+        return result;
+    };
     let Ok(autel_header) = parse_autel_header(data) else {
         return result;
     };

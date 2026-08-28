@@ -16,10 +16,18 @@ pub fn sevenzip_magic() -> Vec<Vec<u8>> {
 pub fn sevenzip_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, SignatureError> {
     // Parse the 7z header
     if let Ok(sevenzip_header) = parse_7z_header(&file_data[offset..]) {
-        // Calculate the start and end offsets that the next header CRC was calculated over
-        let next_crc_start: usize =
-            offset + sevenzip_header.header_size + sevenzip_header.next_header_offset;
-        let next_crc_end: usize = next_crc_start + sevenzip_header.next_header_size;
+        // Calculate the start and end offsets that the next header CRC was calculated
+        // over; overflowing sums cannot point into this file.
+        let Some(next_crc_start) = offset
+            .checked_add(sevenzip_header.header_size)
+            .and_then(|sum| sum.checked_add(sevenzip_header.next_header_offset))
+        else {
+            return Err(SignatureError);
+        };
+        let Some(next_crc_end) = next_crc_start.checked_add(sevenzip_header.next_header_size)
+        else {
+            return Err(SignatureError);
+        };
 
         if let Some(crc_data) = file_data.get(next_crc_start..next_crc_end) {
             // Calculate the next_header CRC
@@ -28,9 +36,13 @@ pub fn sevenzip_parser(file_data: &[u8], offset: usize) -> Result<SignatureResul
             // Validate the next_header CRC
             if calculated_next_crc == sevenzip_header.next_header_crc {
                 // Calculate total size of the 7zip archive
-                let total_size: usize = sevenzip_header.header_size
-                    + sevenzip_header.next_header_offset
-                    + sevenzip_header.next_header_size;
+                let Some(total_size) = sevenzip_header
+                    .header_size
+                    .checked_add(sevenzip_header.next_header_offset)
+                    .and_then(|sum| sum.checked_add(sevenzip_header.next_header_size))
+                else {
+                    return Err(SignatureError);
+                };
 
                 // Report signature result
                 return Ok(SignatureResult {

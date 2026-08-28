@@ -84,12 +84,19 @@ pub fn extract_obfuscated_lzma(
     const MIN_DATA_SIZE: usize = 0x100;
     const MAX_DATA_SIZE: usize = 0x1B0000;
 
-    let available_data: usize = file_data.len() - offset;
+    let Some(available_data) = file_data.len().checked_sub(offset) else {
+        return ExtractionResult::default();
+    };
 
     // Sanity check data size
     if available_data <= MAX_DATA_SIZE && available_data > MIN_DATA_SIZE {
         // De-obfuscate the LZMA data
-        let deobfuscated_data = arcadyan_deobfuscator(&file_data[offset..]);
+        let Some(file_slice) = file_data.get(offset..) else {
+            return ExtractionResult::default();
+        };
+        let Some(deobfuscated_data) = arcadyan_deobfuscator(file_slice) else {
+            return ExtractionResult::default();
+        };
 
         // Do a decompression on the LZMA data (actual LZMA data starts 4 bytes into the deobfuscated data)
         return lzma_decompress(&deobfuscated_data, LZMA_DATA_OFFSET, output_directory);
@@ -98,7 +105,7 @@ pub fn extract_obfuscated_lzma(
     ExtractionResult::default()
 }
 
-fn arcadyan_deobfuscator(obfuscated_data: &[u8]) -> Vec<u8> {
+fn arcadyan_deobfuscator(obfuscated_data: &[u8]) -> Option<Vec<u8>> {
     const BLOCK_SIZE: usize = 32;
 
     const P1_START: usize = 0;
@@ -118,11 +125,11 @@ fn arcadyan_deobfuscator(obfuscated_data: &[u8]) -> Vec<u8> {
     let mut deobfuscated_data: Vec<u8> = Vec::with_capacity(obfuscated_data.len());
 
     // Get the "parts" and "blocks" of the obfuscated header
-    let p1 = &obfuscated_data[P1_START..P1_END];
-    let b1 = &obfuscated_data[BLOCK1_START..BLOCK1_END];
-    let p2 = &obfuscated_data[P2_START..P2_END];
-    let b2 = &obfuscated_data[BLOCK2_START..BLOCK2_END];
-    let p3 = &obfuscated_data[P3_START..];
+    let p1 = obfuscated_data.get(P1_START..P1_END)?;
+    let b1 = obfuscated_data.get(BLOCK1_START..BLOCK1_END)?;
+    let p2 = obfuscated_data.get(P2_START..P2_END)?;
+    let b2 = obfuscated_data.get(BLOCK2_START..BLOCK2_END)?;
+    let p3 = obfuscated_data.get(P3_START..)?;
 
     // Swap "block1" and "block2"
     deobfuscated_data.extend_from_slice(p1);
@@ -132,14 +139,12 @@ fn arcadyan_deobfuscator(obfuscated_data: &[u8]) -> Vec<u8> {
     deobfuscated_data.extend_from_slice(p3);
 
     // Swap nibbles and pairs of bytes in what is now block 1
-    for chunk in deobfuscated_data[BLOCK1_START..BLOCK1_END]
-        .as_chunks_mut::<2>()
-        .0
-    {
+    let block_slice = deobfuscated_data.get_mut(BLOCK1_START..BLOCK1_END)?;
+    for chunk in block_slice.as_chunks_mut::<2>().0 {
         let orig_0 = chunk[0];
         chunk[0] = chunk[1].rotate_left(4);
         chunk[1] = orig_0.rotate_left(4);
     }
 
-    deobfuscated_data
+    Some(deobfuscated_data)
 }

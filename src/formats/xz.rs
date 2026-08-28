@@ -26,10 +26,11 @@ pub fn xz_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Sig
     let mut next_offset = offset;
     let mut previous_offset = None;
     let mut stream_header_count = 0;
-    let available_data = file_data.len() - offset;
 
     // XZ streams can be concatenated together, need to process them all to determine the size of an XZ file
-    while is_offset_safe(available_data, next_offset, previous_offset) {
+    // NOTE: next_offset is an absolute offset into file_data, so the bounds check must use
+    // the absolute data length, not a length relative to the match offset.
+    while is_offset_safe(file_data.len(), next_offset, previous_offset) {
         // Parse the next XZ header to validate the header CRC
         match parse_xz_header(&file_data[next_offset..]) {
             Err(_) => break,

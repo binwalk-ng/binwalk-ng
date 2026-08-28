@@ -35,7 +35,13 @@ pub fn yaffs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
     };
 
     let available_data = file_data.len();
-    let required_min_offset = offset + (MAX_OBJ_SIZE * MIN_NUMBER_OF_OBJS);
+    let required_min_offset = offset
+        .checked_add(
+            MAX_OBJ_SIZE
+                .checked_mul(MIN_NUMBER_OF_OBJS)
+                .ok_or(SignatureError)?,
+        )
+        .ok_or(SignatureError)?;
 
     // Sanity check the amount of available data
     if is_offset_safe(available_data, required_min_offset, None) {
@@ -114,7 +120,10 @@ fn get_spare_size(
     // This is only for YAFFS2! It will fail for YAFFS1 images.
     for spare_size in &spare_sizes {
         // If this spare size is correct, this should be the location of the next object header
-        let next_obj_offset: usize = (page_size + *spare_size) * MIN_NUMBER_OF_OBJS;
+        let next_obj_offset = page_size
+            .checked_add(*spare_size)
+            .and_then(|v| v.checked_mul(MIN_NUMBER_OF_OBJS))
+            .ok_or(SignatureError)?;
 
         if let Some(obj_header_data) = file_data.get(next_obj_offset..) {
             // Attempt to parse this data as a YAFFS object header
@@ -143,7 +152,7 @@ fn get_image_size(
     let mut previous_obj_offset = None;
 
     let available_data = file_data.len();
-    let block_size: usize = page_size + spare_size;
+    let block_size = page_size.checked_add(spare_size).ok_or(SignatureError)?;
 
     // Loop through all available data, parsing YAFFS object headers
     while is_offset_safe(available_data, next_obj_offset, previous_obj_offset) {
@@ -169,14 +178,18 @@ fn get_image_size(
                                     return Err(e);
                                 }
                                 Ok(block_count) => {
-                                    data_blocks += block_count;
+                                    data_blocks = data_blocks
+                                        .checked_add(block_count)
+                                        .ok_or(SignatureError)?;
                                 }
                             }
                         }
 
                         // Update calculated image size and object header offsets
                         previous_obj_offset = Some(next_obj_offset);
-                        image_size += data_blocks * block_size;
+                        let data_size =
+                            data_blocks.checked_mul(block_size).ok_or(SignatureError)?;
+                        image_size = image_size.checked_add(data_size).ok_or(SignatureError)?;
                         next_obj_offset = image_size;
                     }
                 }
@@ -185,7 +198,10 @@ fn get_image_size(
     }
 
     // Sanity check the calculated image size; should be large enough to fit MIN_NUMBER_OF_OBJS, but not extend past EOF
-    if (block_size * MIN_NUMBER_OF_OBJS) < image_size && image_size <= available_data {
+    if let Some(min_image_size) = block_size.checked_mul(MIN_NUMBER_OF_OBJS)
+        && min_image_size < image_size
+        && image_size <= available_data
+    {
         return Ok(image_size);
     }
 
@@ -205,8 +221,7 @@ fn get_file_block_count(
         // Parse the partial object header.
         if let Ok(file_info) = parse_yaffs_file_header(file_header_data, endianness) {
             // File data is broken up into blocks of page_size bytes
-            let file_block_count: usize =
-                ((file_info.file_size as f64) / (page_size as f64)).ceil() as usize;
+            let file_block_count = file_info.file_size.div_ceil(page_size);
             return Ok(file_block_count);
         }
     }
