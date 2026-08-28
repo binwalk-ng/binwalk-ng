@@ -83,14 +83,23 @@ pub fn zlib_decompress(
     let mut exresult = ExtractionResult::default();
 
     // Do the decompression, ignoring the ZLIB header
-    let inflate_result =
-        inflate::inflate_decompressor(file_data, offset + HEADER_SIZE, output_directory);
+    let Some(data_offset) = offset.checked_add(HEADER_SIZE) else {
+        return exresult;
+    };
+    let inflate_result = inflate::inflate_decompressor(file_data, data_offset, output_directory);
 
     // Check that the data decompressed OK
     if inflate_result.success {
         // Calculate the ZLIB checksum offsets
-        let checksum_start = offset + HEADER_SIZE + inflate_result.size;
-        let checksum_end = checksum_start + CHECKSUM_SIZE;
+        let Some(checksum_start) = offset
+            .checked_add(HEADER_SIZE)
+            .and_then(|v| v.checked_add(inflate_result.size))
+        else {
+            return exresult;
+        };
+        let Some(checksum_end) = checksum_start.checked_add(CHECKSUM_SIZE) else {
+            return exresult;
+        };
 
         // Get the ZLIB checksum
         if let Some(adler32_checksum_bytes) = file_data.get(checksum_start..checksum_end) {
@@ -98,8 +107,14 @@ pub fn zlib_decompress(
 
             // Make sure the checksum matches
             if reported_checksum == inflate_result.adler32 {
+                let Some(total_size) = HEADER_SIZE
+                    .checked_add(inflate_result.size)
+                    .and_then(|v| v.checked_add(CHECKSUM_SIZE))
+                else {
+                    return exresult;
+                };
                 exresult.success = true;
-                exresult.size = Some(HEADER_SIZE + inflate_result.size + CHECKSUM_SIZE);
+                exresult.size = Some(total_size);
             }
         }
     }

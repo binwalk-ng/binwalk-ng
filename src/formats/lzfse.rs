@@ -38,8 +38,14 @@ pub fn lzfse_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
         previous_block_offset = Some(next_block_offset);
 
         // Parse the next block
-        if let Ok(lzfse_block) = parse_lzfse_block_header(&file_data[next_block_offset..]) {
-            next_block_offset += lzfse_block.header_size + lzfse_block.data_size;
+        let Some(block_data) = file_data.get(next_block_offset..) else {
+            break;
+        };
+        if let Ok(lzfse_block) = parse_lzfse_block_header(block_data) {
+            next_block_offset = next_block_offset
+                .checked_add(lzfse_block.header_size)
+                .and_then(|v| v.checked_add(lzfse_block.data_size))
+                .ok_or(SignatureError)?;
 
             // Only return success if an end-of-stream block is found
             if lzfse_block.eof {
@@ -151,10 +157,12 @@ fn parse_compressedv1_block_header(lzfse_data: &[u8]) -> Result<LZFSEBlock, Stru
     const HEADER_SIZE: usize = 770;
 
     let (header, _) = BlockV1Header::ref_from_prefix(lzfse_data).map_err(|_| StructureError)?;
+    let data_size = (header.n_literal_payload_bytes.get() as usize)
+        .checked_add(header.n_lmd_payload_bytes.get() as usize)
+        .ok_or(StructureError)?;
     Ok(LZFSEBlock {
         eof: false,
-        data_size: (header.n_literal_payload_bytes.get() + header.n_lmd_payload_bytes.get())
-            as usize,
+        data_size,
         header_size: HEADER_SIZE,
         uncompressed_size: header.n_raw_bytes.get() as usize,
     })
@@ -186,9 +194,12 @@ fn parse_compressedv2_block_header(lzfse_data: &[u8]) -> Result<LZFSEBlock, Stru
     let n_literal_payload_bytes =
         (block_header.packed_field_1.get() >> N_PAYLOAD_SHIFT) & PAYLOAD_MASK;
 
+    let data_size = (n_lmd_payload_bytes as usize)
+        .checked_add(n_literal_payload_bytes as usize)
+        .ok_or(StructureError)?;
     Ok(LZFSEBlock {
         eof: false,
-        data_size: (n_lmd_payload_bytes + n_literal_payload_bytes) as usize,
+        data_size,
         header_size: block_header.header_size.get() as usize,
         uncompressed_size: block_header.uncompressed_size.get() as usize,
     })
@@ -252,14 +263,33 @@ fn lzfse_decompress(
 
     let mut exresult = ExtractionResult::default();
 
-    let data = &file_data[offset..];
-    let mut dst_size = 0;
+    let Some(data) = file_data.get(offset..) else {
+        return exresult;
+    };
+    let mut dst_size: usize = 0;
+    // Cap decompressed size to avoid allocation DoS
+    const MAX_DST_SIZE: usize = 100 * 1024 * 1024;
     let src_size = {
         let mut remaining_data = data;
         while let Ok(lzfse_block) = parse_lzfse_block_header(remaining_data) {
-            let block_size = lzfse_block.header_size + lzfse_block.data_size;
-            dst_size += lzfse_block.uncompressed_size;
-            remaining_data = &remaining_data[block_size..];
+            let block_size = lzfse_block
+                .header_size
+                .checked_add(lzfse_block.data_size)
+                .unwrap_or(0);
+            if block_size == 0 {
+                break;
+            }
+            let Some(next_dst_size) = dst_size.checked_add(lzfse_block.uncompressed_size) else {
+                break;
+            };
+            if next_dst_size > MAX_DST_SIZE {
+                break;
+            }
+            dst_size = next_dst_size;
+            let Some(next_data) = remaining_data.get(block_size..) else {
+                break;
+            };
+            remaining_data = next_data;
             if lzfse_block.eof {
                 break;
             }
@@ -272,7 +302,13 @@ fn lzfse_decompress(
     // The LZFSE API can't differentiate between decompressing exactly the right amount of data and
     // truncation (see https://github.com/lzfse/lzfse/issues/5#issuecomment-237134992), so
     // give it an extra byte so we can differentiate.
-    let mut dst = vec![0; dst_size + 1];
+    let Some(dst_alloc_size) = dst_size.checked_add(1) else {
+        return exresult;
+    };
+    if dst_alloc_size > MAX_DST_SIZE + 1 {
+        return exresult;
+    }
+    let mut dst = vec![0; dst_alloc_size];
     if let Ok(actual_len) = lzfse::decode_buffer(&data[..src_size], &mut dst)
         && actual_len == dst_size
     {

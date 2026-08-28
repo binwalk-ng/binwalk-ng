@@ -73,9 +73,17 @@ pub fn tarball_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult
                         valid_header_count += 1;
 
                         // Update total size count, and next/previous header offsets
-                        tarball_total_size += entry_size;
+                        if let Some(new_total) = tarball_total_size.checked_add(entry_size) {
+                            tarball_total_size = new_total;
+                        } else {
+                            break;
+                        }
                         previous_header_start = Some(next_header_start);
-                        next_header_start += entry_size;
+                        if let Some(new_start) = next_header_start.checked_add(entry_size) {
+                            next_header_start = new_start;
+                        } else {
+                            break;
+                        }
                     }
                 }
             }

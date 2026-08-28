@@ -145,14 +145,23 @@ pub fn parse_mbr_image(mbr_data: &[u8]) -> Result<MBRHeader, StructureError> {
                     };
 
                     // Create an MBRPartition structure for this entry
+                    let start = (partition_entry.lba_start.get() as usize)
+                        .checked_mul(BLOCK_SIZE)
+                        .ok_or(StructureError)?;
+                    let size = (partition_entry.lba_size.get() as usize)
+                        .checked_mul(BLOCK_SIZE)
+                        .ok_or(StructureError)?;
                     let this_partition = MBRPartition {
-                        start: partition_entry.lba_start.get() as usize * BLOCK_SIZE,
-                        size: partition_entry.lba_size.get() as usize * BLOCK_SIZE,
+                        start,
+                        size,
                         name: this_partition_name.to_string(),
                     };
 
                     // Calculate where this partition ends
-                    let this_partition_end_offset = this_partition.start + this_partition.size;
+                    let this_partition_end_offset = this_partition
+                        .start
+                        .checked_add(this_partition.size)
+                        .ok_or(StructureError)?;
 
                     // Some valid MBRs have partitions that start/end out of bounds WRT the disk image.
                     // Not sure why? At any rate, don't include them in the reported partitions.

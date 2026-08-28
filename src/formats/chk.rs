@@ -22,11 +22,22 @@ pub fn chk_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
     };
 
     // Parse the CHK header
-    if let Ok(chk_header) = parse_chk_header(&file_data[offset..]) {
+    let chk_data = file_data.get(offset..).ok_or(SignatureError)?;
+    if let Ok(chk_header) = parse_chk_header(chk_data) {
         // Calculate reported image size and size of available data
-        let available_data: usize = file_data.len() - offset;
-        let image_total_size: usize =
-            chk_header.header_size + chk_header.kernel_size + chk_header.rootfs_size;
+        let available_data: usize = file_data.len().checked_sub(offset).ok_or(SignatureError)?;
+        let Some(tmp) = chk_header.header_size.checked_add(chk_header.kernel_size) else {
+            return Err(SignatureError);
+        };
+        let Some(image_total_size) = tmp.checked_add(chk_header.rootfs_size) else {
+            return Err(SignatureError);
+        };
+        if offset
+            .checked_add(image_total_size)
+            .is_none_or(|e| e > file_data.len())
+        {
+            return Err(SignatureError);
+        }
 
         // Total reported image size should be between the header size and the file size
         if available_data >= image_total_size && image_total_size > chk_header.header_size {

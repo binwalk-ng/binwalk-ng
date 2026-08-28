@@ -102,10 +102,9 @@ pub fn parse_efigpt_header(efi_data: &[u8]) -> Result<EFIGPTHeader, StructureErr
                 else {
                     return Err(StructureError);
                 };
-                // u32 values are widened before multiplying so the product itself
-                // cannot overflow.
-                let partition_entries_len = gpt_header.partition_entry_count.get() as usize
-                    * gpt_header.partition_entry_size.get() as usize;
+                let partition_entries_len = (gpt_header.partition_entry_count.get() as usize)
+                    .checked_mul(gpt_header.partition_entry_size.get() as usize)
+                    .ok_or(StructureError)?;
                 let Some(partition_entries_end) =
                     partition_entries_start.checked_add(partition_entries_len)
                 else {

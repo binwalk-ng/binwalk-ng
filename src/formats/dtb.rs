@@ -27,8 +27,14 @@ pub fn dtb_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
     // Parse the DTB header
     if let Ok(dtb_header) = parse_dtb_header(&file_data[offset..]) {
         // Calculate the offsets of where the dt_struct and dt_strings end
-        let dt_struct_end: usize = offset + dtb_header.struct_offset + dtb_header.struct_size;
-        let dt_strings_end: usize = offset + dtb_header.strings_offset + dtb_header.strings_size;
+        let dt_struct_end: usize = offset
+            .checked_add(dtb_header.struct_offset)
+            .and_then(|v| v.checked_add(dtb_header.struct_size))
+            .ok_or(SignatureError)?;
+        let dt_strings_end: usize = offset
+            .checked_add(dtb_header.strings_offset)
+            .and_then(|v| v.checked_add(dtb_header.strings_size))
+            .ok_or(SignatureError)?;
 
         // Sanity check the dt_struct and dt_strings offsets
         if file_data.len() >= dt_struct_end && file_data.len() >= dt_strings_end {
@@ -264,7 +270,9 @@ pub fn extract_dtb(
     // Parse the DTB file header
     if let Ok(dtb_header) = parse_dtb_header(&file_data[offset..]) {
         // Get all the DTB data
-        if let Some(dtb_data) = file_data.get(offset..offset + dtb_header.total_size) {
+        if let Some(dtb_end) = offset.checked_add(dtb_header.total_size)
+            && let Some(dtb_data) = file_data.get(offset..dtb_end)
+        {
             // DTB node entries start at the structure offset specified in the DTB header
             let mut entry_offset = dtb_header.struct_offset;
             let mut previous_entry_offset = None;

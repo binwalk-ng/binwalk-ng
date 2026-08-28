@@ -286,15 +286,17 @@ pub fn extract_matter_ota(
             return result;
         };
 
-        result.success = true;
         result.size = Some(ota_header.total_size);
 
         // Sanity check reported payload size and get the payload data
-        if let Some(payload_data) = file_data.get(payload_start..payload_end)
-            && let Some(output_directory) = output_directory
-        {
-            let chroot = Chroot::new(output_directory);
-            result.success = chroot.carve_file(OUTFILE_NAME, payload_data, 0, payload_data.len());
+        if let Some(payload_data) = file_data.get(payload_start..payload_end) {
+            if let Some(output_directory) = output_directory {
+                let chroot = Chroot::new(output_directory);
+                result.success =
+                    chroot.carve_file(OUTFILE_NAME, payload_data, 0, payload_data.len());
+            } else {
+                result.success = true;
+            }
         }
     }
 

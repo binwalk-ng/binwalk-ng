@@ -78,7 +78,7 @@ pub fn uefi_capsule_parser(
         ..Default::default()
     };
 
-    let available_data: usize = file_data.len() - offset;
+    let available_data = file_data.len().checked_sub(offset).ok_or(SignatureError)?;
 
     if let Ok(capsule_header) = parse_uefi_capsule_header(&file_data[offset..]) {
         // Sanity check on header total size field: the capsule must fit within the

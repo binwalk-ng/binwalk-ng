@@ -96,10 +96,6 @@ const HDR_DATA_OFFSET: usize = std::mem::offset_of!(ARJHeaderBytes, first_hdr_si
 /// epoch seconds: bits 25-31 year-1980, 21-24 month, 16-20 day, 11-15 hour,
 /// 5-10 minute, 0-4 seconds/2. Returns None if the fields don't form a valid
 /// date/time.
-/// Converts an MS-DOS packed date/time value (as stored in ARJ headers) to Unix
-/// epoch seconds: bits 25-31 year-1980, 21-24 month, 16-20 day, 11-15 hour,
-/// 5-10 minute, 0-4 seconds/2. Returns None if the fields don't form a valid
-/// date/time.
 fn dos_datetime_to_epoch(dos: u32) -> Option<i64> {
     let year = 1980 + ((dos >> 25) & 0x7F) as i16;
     let month = ((dos >> 21) & 0x0F) as i8;
@@ -236,8 +232,10 @@ pub fn parse_arj_header(arj_data: &[u8]) -> Result<ARJHeader, StructureError> {
         compression_method,
         file_type,
         original_name,
-        original_file_date: dos_datetime_to_epoch(arj_header.datetime_file.get())
-            .map_or_else(String::new, epoch_to_string),
+        original_file_date: epoch_to_string(
+            dos_datetime_to_epoch(arj_header.datetime_file.get())
+                .unwrap_or_else(|| arj_header.datetime_file.get() as i64),
+        ),
         compressed_file_size: compressed_file_size as usize,
         uncompressed_file_size: uncompressed_file_size as usize,
         basic_hdr_size,

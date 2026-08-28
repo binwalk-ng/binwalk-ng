@@ -76,9 +76,13 @@ pub fn parse_png_chunk_header(chunk_data: &[u8]) -> Result<PNGChunkHeader, Struc
     // Parse the chunk header
     let (chunk_header, _) =
         PNGChunkBytes::ref_from_prefix(chunk_data).map_err(|_| StructureError)?;
+    let total_size = chunk_structure_size
+        .checked_add(chunk_header.length.get() as usize)
+        .and_then(|v| v.checked_add(CRC_SIZE))
+        .ok_or(StructureError)?;
     Ok(PNGChunkHeader {
         is_last_chunk: chunk_header.chunk_type == IEND_CHUNK_TYPE,
-        total_size: chunk_structure_size + chunk_header.length.get() as usize + CRC_SIZE,
+        total_size,
     })
 }
 
@@ -123,11 +127,13 @@ pub fn extract_png_image(
     let mut result = ExtractionResult::default();
 
     // Parse all the PNG chunks to determine the size of PNG data; first chunk starts immediately after the 8-byte PNG header
-    if let Some(png_data) = file_data.get(offset + PNG_HEADER_LEN..)
+    if let Some(header_end) = offset.checked_add(PNG_HEADER_LEN)
+        && let Some(png_data) = file_data.get(header_end..)
         && let Some(png_data_size) = get_png_data_size(png_data)
+        && let Some(total_size) = png_data_size.checked_add(PNG_HEADER_LEN)
     {
         // Total size is the size of the header plus the size of the data
-        result.size = Some(png_data_size + PNG_HEADER_LEN);
+        result.size = Some(total_size);
         result.success = true;
 
         // If extraction was requested, extract the PNG
@@ -153,7 +159,11 @@ fn get_png_data_size(png_chunk_data: &[u8]) -> Option<usize> {
             Ok(chunk_header) => {
                 // The next chunk header will start immediately after this chunk
                 previous_png_chunk_offset = Some(png_chunk_offset);
-                png_chunk_offset += chunk_header.total_size;
+                if let Some(next_offset) = png_chunk_offset.checked_add(chunk_header.total_size) {
+                    png_chunk_offset = next_offset;
+                } else {
+                    break;
+                }
 
                 // If this was the last chunk, then png_chunk_offset is the total size of the PNG data
                 if chunk_header.is_last_chunk {

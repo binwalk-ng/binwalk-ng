@@ -20,8 +20,19 @@ pub fn shrs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
         ..Default::default()
     };
 
-    if let Ok(shrs_header) = parse_shrs_header(&file_data[offset..]) {
-        result.size = shrs_header.header_size + shrs_header.data_size as usize;
+    let shrs_data = file_data.get(offset..).ok_or(SignatureError)?;
+    if let Ok(shrs_header) = parse_shrs_header(shrs_data) {
+        let total_size = shrs_header
+            .header_size
+            .checked_add(shrs_header.data_size as usize)
+            .ok_or(SignatureError)?;
+        if offset
+            .checked_add(total_size)
+            .is_none_or(|e| e > file_data.len())
+        {
+            return Err(SignatureError);
+        }
+        result.size = total_size;
         result.description = format!(
             "{}, header size: {} bytes, encrypted data size: {} bytes, IV: {}",
             result.description,

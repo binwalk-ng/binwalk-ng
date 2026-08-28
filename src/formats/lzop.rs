@@ -24,12 +24,16 @@ pub fn lzop_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
 
     // Parse the LZOP file header
     if let Ok(lzop_header) = parse_lzop_file_header(&file_data[offset..])
-        && let Some(lzop_data) = file_data.get(offset + lzop_header.header_size..)
+        && let Some(hdr_end) = offset.checked_add(lzop_header.header_size)
+        && let Some(lzop_data) = file_data.get(hdr_end..)
     {
         // Get the size of the compressed LZO data
         if let Ok(data_size) = get_lzo_data_size(lzop_data, lzop_header.block_checksum_present) {
             // Update the total size to include the LZO data
-            result.size = lzop_header.header_size + data_size;
+            result.size = lzop_header
+                .header_size
+                .checked_add(data_size)
+                .ok_or(SignatureError)?;
             result.description =
                 format!("{}, total size: {} bytes", result.description, result.size);
             return Ok(result);
@@ -64,9 +68,11 @@ fn get_lzo_data_size(
                 // Update block count, offset, and size
                 block_count += 1;
                 last_offset = Some(data_size);
-                data_size += block_header.header_size
-                    + block_header.compressed_size
-                    + block_header.checksum_size;
+                data_size = data_size
+                    .checked_add(block_header.header_size)
+                    .and_then(|v| v.checked_add(block_header.compressed_size))
+                    .and_then(|v| v.checked_add(block_header.checksum_size))
+                    .ok_or(SignatureError)?;
             }
         }
     }
@@ -77,7 +83,9 @@ fn get_lzo_data_size(
         if let Some(eof_marker_data) = lzo_data.get(data_size..)
             && let Ok(eof_marker_size) = parse_lzop_eof_marker(eof_marker_data)
         {
-            data_size += eof_marker_size;
+            data_size = data_size
+                .checked_add(eof_marker_size)
+                .ok_or(SignatureError)?;
             return Ok(data_size);
         }
     }
@@ -150,11 +158,15 @@ pub fn parse_lzop_file_header(lzop_data: &[u8]) -> Result<LZOPFileHeader, Struct
 
             // Next part of the header may or may not have an optional filter field
             if (lzo_header_p1.flags & FLAG_FILTER) != 0 {
-                header_p2_start += FILTER_SIZE;
+                header_p2_start = header_p2_start
+                    .checked_add(FILTER_SIZE)
+                    .ok_or(StructureError)?;
             }
 
             // Calculate the end of the second part of the header
-            let header_p2_end: usize = header_p2_start + LZO_HEADER_SIZE_P2;
+            let header_p2_end: usize = header_p2_start
+                .checked_add(LZO_HEADER_SIZE_P2)
+                .ok_or(StructureError)?;
 
             if let Some(header_p2_data) = lzop_data.get(header_p2_start..header_p2_end) {
                 // Parse the second part of the header
@@ -162,8 +174,10 @@ pub fn parse_lzop_file_header(lzop_data: &[u8]) -> Result<LZOPFileHeader, Struct
                     LZOHeaderP2::ref_from_prefix(header_p2_data).map_err(|_| StructureError)?;
 
                 // Calculate the total header size; compressed data blocks will immediately follow
-                lzop_info.header_size =
-                    header_p2_end + lzo_header_p2.file_name_length as usize + LZO_CHECKSUM_SIZE;
+                lzop_info.header_size = header_p2_end
+                    .checked_add(lzo_header_p2.file_name_length as usize)
+                    .and_then(|v| v.checked_add(LZO_CHECKSUM_SIZE))
+                    .ok_or(StructureError)?;
 
                 // Check if block headers include an optional compressed data checksum field
                 lzop_info.block_checksum_present =

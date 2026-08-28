@@ -29,7 +29,13 @@ pub fn pch_rom_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult
 
         // Parse the header; if this succeeds, assume it is valid
         if let Ok(pchrom_header) = parse_pchrom_header(&file_data[result.offset..]) {
-            result.size = pchrom_header.header_size + pchrom_header.data_size;
+            let Some(total) = pchrom_header
+                .header_size
+                .checked_add(pchrom_header.data_size)
+            else {
+                return Err(SignatureError);
+            };
+            result.size = total;
             return Ok(result);
         }
     }

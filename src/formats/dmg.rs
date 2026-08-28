@@ -53,7 +53,9 @@ pub fn dmg_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
                 // Make sure the XML data comes after the image data
                 if xml_offset >= dmg_footer.data_length {
                     // Report the result
-                    result.size = offset + dmg_footer.footer_size;
+                    result.size = offset
+                        .checked_add(dmg_footer.footer_size)
+                        .ok_or(SignatureError)?;
                     result.offset = xml_offset - dmg_footer.data_length;
                     result.description =
                         format!("{}, total size: {} bytes", result.description, result.size);

@@ -23,7 +23,15 @@ pub fn riff_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
     };
 
     // Parse the RIFF header
-    if let Ok(riff_header) = parse_riff_header(&file_data[offset..]) {
+    let riff_data = file_data.get(offset..).ok_or(SignatureError)?;
+    if let Ok(riff_header) = parse_riff_header(riff_data) {
+        // Validate that the reported size does not exceed EOF
+        if offset
+            .checked_add(riff_header.size)
+            .is_none_or(|e| e > file_data.len())
+        {
+            return Err(SignatureError);
+        }
         // No sense in extracting an image if the entire file is just the image itself
         if offset == 0 && riff_header.size == file_data.len() {
             result.extraction_declined = true;
@@ -65,12 +73,18 @@ pub fn parse_riff_header(riff_data: &[u8]) -> Result<RIFFHeader, StructureError>
 
     let (riff_header, _) =
         RIFFHeaderBytes::ref_from_prefix(riff_data).map_err(|_| StructureError)?;
+    let type_bytes = riff_data
+        .get(CHUNK_TYPE_START..CHUNK_TYPE_END)
+        .ok_or(StructureError)?;
     if riff_header.magic == MAGIC
         && let Ok(type_str) = // Get the RIFF type string (e.g., "WAVE")
-            std::str::from_utf8(&riff_data[CHUNK_TYPE_START..CHUNK_TYPE_END])
+            std::str::from_utf8(type_bytes)
     {
+        let size = (riff_header.file_size.get() as usize)
+            .checked_add(FILE_SIZE_OFFSET)
+            .ok_or(StructureError)?;
         return Ok(RIFFHeader {
-            size: riff_header.file_size.get() as usize + FILE_SIZE_OFFSET,
+            size,
             chunk_type: type_str.trim().to_string(),
         });
     }
@@ -120,7 +134,16 @@ pub fn extract_riff_image(
 
     let mut result = ExtractionResult::default();
 
-    if let Ok(riff_header) = parse_riff_header(&file_data[offset..]) {
+    let Some(riff_data) = file_data.get(offset..) else {
+        return result;
+    };
+    if let Ok(riff_header) = parse_riff_header(riff_data) {
+        if offset
+            .checked_add(riff_header.size)
+            .is_none_or(|e| e > file_data.len())
+        {
+            return result;
+        }
         result.size = Some(riff_header.size);
         result.success = true;
 

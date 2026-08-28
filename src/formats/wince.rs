@@ -225,7 +225,7 @@ fn process_wince_blocks(blocks_data: &[u8]) -> Option<BlockData> {
             }
             Ok(block_header) => {
                 // Include the block header size in the total size of the block data
-                blocks.total_size += block_header.header_size;
+                blocks.total_size = blocks.total_size.checked_add(block_header.header_size)?;
 
                 // A block header address of NULL indicates EOF
                 if block_header.address == 0 {
@@ -237,18 +237,20 @@ fn process_wince_blocks(blocks_data: &[u8]) -> Option<BlockData> {
                     }
                 } else {
                     // Include this block's size in the total size of the block data
-                    blocks.total_size += block_header.data_size;
+                    blocks.total_size = blocks.total_size.checked_add(block_header.data_size)?;
 
                     // Add this block to the list of block entries
                     blocks.entries.push(BlockInfo {
                         address: block_header.address,
-                        offset: next_offset + block_header.header_size,
+                        offset: next_offset.checked_add(block_header.header_size)?,
                         size: block_header.data_size,
                     });
 
                     // Update the offsets for the next loop iteration
                     previous_offset = Some(next_offset);
-                    next_offset += block_header.header_size + block_header.data_size;
+                    next_offset = next_offset
+                        .checked_add(block_header.header_size)?
+                        .checked_add(block_header.data_size)?;
                 }
             }
         }
