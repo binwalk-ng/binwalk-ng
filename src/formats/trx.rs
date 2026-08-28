@@ -206,11 +206,13 @@ pub fn extract_trx_partitions(
                             .checked_sub(this_partition_relative_offset)
                     };
                     let Some(this_partition_size) = this_partition_size else {
+                        result.success = false;
                         break;
                     };
                     let Some(this_partition_absolute_offset) =
                         offset.checked_add(this_partition_relative_offset)
                     else {
+                        result.success = false;
                         break;
                     };
 

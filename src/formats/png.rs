@@ -131,6 +131,11 @@ pub fn extract_png_image(
         && let Some(png_data) = file_data.get(header_end..)
         && let Some(png_data_size) = get_png_data_size(png_data)
         && let Some(total_size) = png_data_size.checked_add(PNG_HEADER_LEN)
+        // The whole PNG (header + data) must fit within the file before we
+        // report success; otherwise a truncated IEND chunk could report a size
+        // that extends past EOF.
+        && let Some(total_end) = offset.checked_add(total_size)
+        && total_end <= file_data.len()
     {
         // Total size is the size of the header plus the size of the data
         result.size = Some(total_size);

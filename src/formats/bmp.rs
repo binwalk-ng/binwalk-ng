@@ -166,9 +166,13 @@ pub fn extract_bmp_image(
         // The size of the BMP file header, per the RawHeader layout
         const BMP_FILE_HEADER_SIZE: usize = std::mem::size_of::<RawHeader>();
 
-        // The offset that points to the image data cannot point into the second header
+        // The offset that points to the image data cannot point into the second
+        // header, and must fall within the declared BMP file size; otherwise a
+        // malformed image could be reported as successfully extracted even though
+        // its bitmap data lies outside bf_size.
         if bmp_file_header.bitmap_bits_offset
             >= (BMP_FILE_HEADER_SIZE + bmp_file_header.dib_header_size)
+            && bmp_file_header.bitmap_bits_offset <= bmp_file_header.size
         {
             // If it was parsed successfully, get the file size
             result.size = Some(bmp_file_header.size);
