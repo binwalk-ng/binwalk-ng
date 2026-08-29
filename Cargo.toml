@@ -23,10 +23,9 @@ redundant_as_str = "warn"
 panic = "warn"
 nursery = "warn"
 
-
 [features]
-default = []
-entropy-plot = ["dep:plotly", "dep:entropy"]
+default = ["entropy-plot"]
+entropy-plot = ["dep:entropy", "dep:plotters", "dep:dejavu"]
 
 [dependencies]
 log = "0.4.22"
@@ -54,10 +53,13 @@ clap = { version = "4.5.16", features = ["derive"] }
 xxhash-rust = { version = "0.8.12", features = ["xxh32"] }
 hex = "0.4.3"
 delink = { git = "https://github.com/binwalk-ng/delink" }
-plotly = { version = "0.14", features = [
-    "kaleido",
-    "kaleido_download",
+plotters = { version = "0.3.7", default-features = false, features = [
+    "bitmap_backend",
+    "bitmap_encoder",
+    "line_series",
+    "ab_glyph",
 ], optional = true }
+dejavu = { version = "2.37.0", optional = true }
 jiff = "0.2.20"
 zerocopy = { version = "0.8.28", features = ["derive"] }
 u24 = "0.6.0"
