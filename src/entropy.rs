@@ -79,16 +79,15 @@ fn blocks(data: &[u8]) -> Vec<BlockEntropy> {
     entropy_blocks
 }
 
-static FONT_INIT: OnceLock<()> = OnceLock::new();
+static FONT_INIT: OnceLock<Result<(), String>> = OnceLock::new();
 
-fn ensure_font() {
-    FONT_INIT.get_or_init(|| {
-        let _ = plotters::style::register_font(
-            "sans-serif",
-            FontStyle::Normal,
-            dejavu::sans::regular(),
-        );
-    });
+fn ensure_font() -> Result<(), String> {
+    FONT_INIT
+        .get_or_init(|| {
+            plotters::style::register_font("sans-serif", FontStyle::Normal, dejavu::sans::regular())
+                .map_err(|_| "Failed to register DejaVu font".to_string())
+        })
+        .clone()
 }
 
 fn draw_chart<DB: DrawingBackend>(
@@ -98,7 +97,7 @@ fn draw_chart<DB: DrawingBackend>(
 where
     DB::ErrorType: std::fmt::Debug,
 {
-    ensure_font();
+    ensure_font()?;
     root.fill(&WHITE).map_err(|e| format!("{e:?}"))?;
 
     let max_x = blocks.last().map(|b| b.end).unwrap_or(0);
