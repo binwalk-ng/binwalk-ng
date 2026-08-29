@@ -155,8 +155,15 @@ fn image_output_path(target_file: &Path) -> PathBuf {
         .and_then(|stem| stem.to_str())
         .unwrap_or("file");
 
+    let max_stem = 64;
+    let truncated_stem = if file_stem.len() > max_stem {
+        &file_stem[..max_stem]
+    } else {
+        file_stem
+    };
+
     std::env::temp_dir().join(format!(
-        "binwalk-{file_stem}-entropy-{}.png",
+        "binwalk-{truncated_stem}-entropy-{}.png",
         uuid::Uuid::new_v4()
     ))
 }

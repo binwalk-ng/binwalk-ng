@@ -90,7 +90,13 @@ fn main() -> ExitCode {
             json_logger.close();
 
             let graph_path_message = format!("Entropy graph saved to '{}'", png_path.display());
-            display::println_plain(cli_args.quiet, &graph_path_message);
+            if cli_args.log.as_deref() == Some(Path::new("-")) {
+                if !cli_args.quiet {
+                    eprintln!("{graph_path_message}");
+                }
+            } else {
+                display::println_plain(cli_args.quiet, &graph_path_message);
+            }
 
             return ExitCode::SUCCESS;
         }
