@@ -47,12 +47,18 @@ pub struct CliArgs {
     #[arg(short = 'a', long)]
     pub search_all: bool,
 
-    /// Generate an entropy graph with Plotly
+    /// Generate an entropy graph
     #[arg(short = 'E', long, conflicts_with = "extract")]
     pub entropy: bool,
 
-    /// Save entropy graph as a PNG file
-    #[arg(short, long, value_name = "PATH", value_hint = clap::ValueHint::FilePath)]
+    /// Save the entropy graph as a PNG file (requires --entropy)
+    #[arg(
+        short,
+        long,
+        requires = "entropy",
+        value_name = "PATH",
+        value_hint = clap::ValueHint::FilePath
+    )]
     pub png: Option<PathBuf>,
 
     /// Log JSON results to a file ('-' for stdout)
