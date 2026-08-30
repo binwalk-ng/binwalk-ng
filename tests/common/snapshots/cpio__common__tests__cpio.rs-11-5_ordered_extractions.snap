@@ -7,4 +7,3 @@ expression: ordered_extractions
   extractor: 7z
   do_not_recurse: false
   output_directory: "[output_directory]"
-- ~

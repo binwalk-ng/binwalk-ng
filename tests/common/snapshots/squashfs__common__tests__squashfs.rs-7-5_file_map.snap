@@ -4,9 +4,9 @@ expression: results.file_map
 ---
 - offset: 0
   id: "[uuid]"
-  size: 315
+  size: 427697
   name: squashfs
   confidence: 250
-  description: "SquashFS file system, Little Endian, version: 4.0, compression: gzip, inode count: 2, block size: 131072, image size: 315 bytes, created: 2024-11-02 21:29:35"
+  description: "SquashFS file system, Little Endian, version: 4.0, compression: gzip, inode count: 5, block size: 131072, image size: 427697 bytes, created: 1970-01-01 00:00:00"
   always_display: false
   extraction_declined: false

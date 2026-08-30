@@ -4,9 +4,9 @@ expression: results.file_map
 ---
 - offset: 0
   id: "[uuid]"
-  size: 186
-  name: bmp
+  size: 8044
+  name: riff
   confidence: 128
-  description: "BMP image, total size: 186"
+  description: "RIFF image, encoding type: WAVE, total size: 8044 bytes"
   always_display: false
-  extraction_declined: false
+  extraction_declined: true

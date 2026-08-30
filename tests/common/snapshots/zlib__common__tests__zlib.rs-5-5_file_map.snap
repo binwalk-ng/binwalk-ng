@@ -4,9 +4,9 @@ expression: results.file_map
 ---
 - offset: 0
   id: "[uuid]"
-  size: 186
-  name: bmp
-  confidence: 128
-  description: "BMP image, total size: 186"
+  size: 88089
+  name: zlib
+  confidence: 250
+  description: "Zlib compressed file, total size: 88089 bytes"
   always_display: false
   extraction_declined: false

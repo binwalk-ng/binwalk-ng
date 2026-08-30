@@ -3,7 +3,7 @@ mod common;
 #[test]
 fn integration_test() {
     const SIGNATURE_TYPE: &str = "srecord";
-    const INPUT_FILE_NAME: &str = "srec.hex";
+    const INPUT_FILE_NAME: &str = "srec.hdr.srec";
     common::integration_test(SIGNATURE_TYPE, INPUT_FILE_NAME);
 }
 

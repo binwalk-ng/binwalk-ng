@@ -4,9 +4,9 @@ expression: results.file_map
 ---
 - offset: 0
   id: "[uuid]"
-  size: 109
+  size: 88055
   name: gzip
   confidence: 250
-  description: "gzip compressed data, original file name: \"lsb-release\", operating system: Unix, timestamp: 2024-11-01 15:31:16, total size: 109 bytes"
+  description: "gzip compressed data, operating system: Unix, timestamp: 1970-01-01 00:00:00, total size: 88055 bytes"
   always_display: false
   extraction_declined: false

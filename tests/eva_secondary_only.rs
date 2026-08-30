@@ -12,9 +12,7 @@ fn integration_test_secondary_only_eva() {
 
 #[test]
 fn secondary_only_eva_reports_full_size_and_validates_crcs() {
-    let file_path = std::path::Path::new("tests")
-        .join("inputs")
-        .join(INPUT_FILE_NAME);
+    let file_path = std::path::Path::new(common::SAMPLES_DIR).join(INPUT_FILE_NAME);
     let expected_size = std::fs::metadata(&file_path).unwrap().len() as usize;
 
     let results = common::run_binwalk(SIGNATURE_TYPE, INPUT_FILE_NAME);

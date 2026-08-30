@@ -2,13 +2,15 @@
 source: tests/common/mod.rs
 expression: ordered_extractions
 ---
-- size: 89022
+- size: ~
   success: true
-  extractor: jpeg_built_in
-  do_not_recurse: true
+  extractor: 7z
+  do_not_recurse: false
   output_directory: "[output_directory]"
-- size: 14573
+- ~
+- size: ~
   success: true
-  extractor: jpeg_built_in
-  do_not_recurse: true
+  extractor: 7z
+  do_not_recurse: false
   output_directory: "[output_directory]"
+- ~

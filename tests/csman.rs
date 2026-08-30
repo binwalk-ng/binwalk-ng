@@ -21,9 +21,7 @@ fn integration_test() {
 /// (This exercises the scan phase only, so no extraction/file writes occur even on regression.)
 #[test]
 fn decompression_bomb_test() {
-    let file_path = std::path::Path::new("tests")
-        .join("inputs")
-        .join("csman_decompression_bomb.bin");
+    let file_path = std::path::Path::new(common::SAMPLES_DIR).join("csman_decompression_bomb.bin");
     let file_data = std::fs::read(&file_path).expect("failed to read decompression bomb fixture");
 
     let binwalker = Binwalk::builder()
