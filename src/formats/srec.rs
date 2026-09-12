@@ -296,7 +296,7 @@ fn read_addr(addr_digits: &[HexByte], checksum: &mut u8) -> Option<u32> {
 }
 
 #[inline]
-fn take_newline(rest: &[u8]) -> Option<(LineEnd, &[u8])> {
+const fn take_newline(rest: &[u8]) -> Option<(LineEnd, &[u8])> {
     match rest {
         [b'\n', rest @ ..] => Some((LineEnd::Lf, rest)),
         [b'\r', b'\n', rest @ ..] => Some((LineEnd::CrLf, rest)),

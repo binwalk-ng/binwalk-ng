@@ -2,7 +2,7 @@ use crate::common::is_offset_safe;
 use crate::formats::dahua_zip::DAHUA_ZIP_LOCAL_FILE_MAGIC;
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
 use crate::structures::StructureError;
-use aho_corasick::AhoCorasick;
+use memchr::memmem;
 use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
 /// Human readable description
@@ -91,13 +91,10 @@ pub fn find_zip_eof(file_data: &[u8], offset: usize) -> Result<ZipEOCDInfo, Sign
     // This magic string assumes that the disk_number and central_directory_disk_number are 0
     const ZIP_EOCD_MAGIC: &[u8; 8] = b"PK\x05\x06\x00\x00\x00\x00";
 
-    // Instatiate AhoCorasick search with the ZIP EOCD magic bytes
-    let grep = AhoCorasick::new(vec![ZIP_EOCD_MAGIC]).unwrap();
-
     // Find all matching ZIP EOCD patterns
-    for eocd_match in grep.find_overlapping_iter(&file_data[offset..]) {
+    for eocd_start in memmem::find_iter(&file_data[offset..], ZIP_EOCD_MAGIC) {
         // Calculate the start and end of the fixed-size portion of the ZIP EOCD header in the file data
-        let eocd_start: usize = eocd_match.start() + offset;
+        let eocd_start: usize = eocd_start + offset;
 
         // Parse the end-of-central-directory header
         if let Some(eocd_data) = file_data.get(eocd_start..)
@@ -184,12 +181,19 @@ pub fn parse_zip_header(zip_data: &[u8]) -> Result<ZipFileHeader, StructureError
         return Err(StructureError);
     }
 
+    // The version needed to extract is a decimal field; the ZIP specification defines versions
+    // 1.0 (10) through 6.3 (63), and some non-conforming writers emit 0
+    let version = zip_local_file_header.version.get();
+    if version != 0 && !(10..=63).contains(&version) {
+        return Err(StructureError);
+    }
+
     // Unused/reserved flag bits should be 0
     if (zip_local_file_header.flags & UNUSED_FLAGS_MASK) == 0 {
         // Specified compression method should be one of the defined ZIP compression methods
         if allowed_compression_methods.contains(&zip_local_file_header.compression.get()) {
-            result.version_major = zip_local_file_header.version.get() / 10;
-            result.version_minor = (zip_local_file_header.version.get() % 10) as u8;
+            result.version_major = version / 10;
+            result.version_minor = (version % 10) as u8;
             result.header_size = std::mem::size_of::<ZipHeaderBytes>()
                 + zip_local_file_header.file_name_len.get() as usize
                 + zip_local_file_header.extra_field_len.get() as usize;

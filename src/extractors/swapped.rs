@@ -87,6 +87,7 @@ fn extract_swapped<const N: usize>(
 ///
 /// assert_eq!(byte_swap::<2>(b"ABCD12"), b"CDAB12");
 /// ```
+#[allow(clippy::chunks_exact_to_as_chunks)]
 pub fn byte_swap<const N: usize>(data: &[u8]) -> Vec<u8> {
     let mut swapped_data: Vec<u8> = vec![0; data.len()];
 

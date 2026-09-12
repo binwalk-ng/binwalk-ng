@@ -4,34 +4,32 @@ use aho_corasick::AhoCorasick;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs;
-use std::path;
+use std::fmt;
+use std::num::NonZeroUsize;
 use std::path::Path;
 use std::path::PathBuf;
 use uuid::Uuid;
 
-#[cfg(windows)]
-use std::os::windows;
-
-#[cfg(unix)]
-use std::os::unix;
-
-use crate::common::{is_offset_safe, read_file};
+use crate::common::{is_offset_safe, read_or_map_file};
 use crate::extractors;
+use crate::formats::program_store;
 use crate::magic;
 use crate::signatures;
 
-/// Returned on initialization error
-#[derive(Debug, Default, Clone)]
-pub struct BinwalkError {
-    pub message: String,
+/// Returned by [`BinwalkBuilder::build`] when the configured signatures cannot be
+/// searched for, e.g. because their magic patterns are too numerous or too large.
+#[derive(Debug)]
+pub struct BuildError(aho_corasick::BuildError);
+
+impl fmt::Display for BuildError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "failed to build the magic pattern searcher: {}", self.0)
+    }
 }
 
-impl BinwalkError {
-    pub fn new(message: &str) -> Self {
-        Self {
-            message: message.to_string(),
-        }
+impl std::error::Error for BuildError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.0)
     }
 }
 
@@ -65,29 +63,293 @@ pub struct AnalysisResults {
 ///     println!("Found '{}' at offset {:#X}", result.description, result.offset);
 /// }
 /// ```
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct Binwalk {
     /// Count of all signatures (short and regular)
-    pub signature_count: usize,
+    signature_count: usize,
     /// Count of all magic patterns (short and regular)
-    pub pattern_count: usize,
-    /// The base file requested for analysis
-    pub base_target_file: PathBuf,
-    /// The base output directory for extracted files
-    pub base_output_directory: PathBuf,
+    pattern_count: usize,
     /// A list of signatures that must start at offset 0
-    pub short_signatures: Vec<signatures::Signature>,
-    /// A list of magic bytes to search for throughout the entire file
-    pub patterns: Vec<Vec<u8>>,
-    /// Maps patterns to their corresponding signature
-    pub pattern_signature_table: HashMap<usize, signatures::Signature>,
+    short_signatures: Vec<signatures::Signature>,
+    /// Searches for all magic byte patterns throughout the entire file, all at once
+    grep: AhoCorasick,
+    /// Signatures, indexed by their pattern's index in `grep`
+    ///
+    /// The synthetic all-zero pattern has no signature, so it has no entry here; it is
+    /// always the last pattern in `grep`, so this is one shorter whenever there is one.
+    signatures: Vec<signatures::Signature>,
     /// Maps signatures to their corresponding extractors
-    pub extractor_lookup_table: HashMap<String, Option<extractors::Extractor>>,
+    extractor_lookup_table: HashMap<String, Option<extractors::Extractor>>,
+    /// If the mmap call is allowed to be used for reading files
+    ///
+    /// Binwalk may abort unexpectedly if mmap is used and the analyzed file(s) are simultaneously
+    /// truncated.
+    mmap_usage: MmapUsage,
+    /// The most leading zero bytes in any magic pattern that has a non-zero byte
+    ///
+    /// A pattern match can begin at most this many bytes before the pattern's first non-zero
+    /// byte, which bounds how far a scan may skip ahead through a run of zero bytes. An all-zero
+    /// magic has no first non-zero byte and so is not counted here; see
+    /// [`Binwalk::zero_run_pattern_len`] for how one is accounted for instead.
+    max_leading_zeros: usize,
+    /// Length of the synthetic all-zero pattern that [`Binwalk::scan`] searches for in order to
+    /// spot a run of zero bytes it can skip past, or `None` if no run can be skipped
+    ///
+    /// It is the last pattern in [`Binwalk::grep`] when present; see
+    /// [`Binwalk::zero_run_pattern_index`].
+    ///
+    /// Runs of zero bytes are common padding, and a magic pattern of all zero bytes matches at
+    /// every offset in one, so a scan would otherwise validate a candidate per byte of padding.
+    /// Searching for a longer run of zeros alongside the real patterns says when the scan has
+    /// reached one, and [`Binwalk::resume_offset_after_zero_run`] says where it may resume.
+    ///
+    /// A match of this pattern makes the scan abandon the current Aho-Corasick search, which is
+    /// only safe if every real match overlapping it is either already reported or re-found by the
+    /// search that resumes. Matches are reported in order of where they end, so a real match that
+    /// is not yet reported ends after this pattern's match, and is one of two shapes:
+    ///
+    /// - it starts at or before the run, and so contains the whole of it. Making this pattern
+    ///   longer than the longest run of zero bytes within any pattern being searched puts that out
+    ///   of reach, so no such match exists.
+    /// - it starts inside the run, and so its own leading zeros have to reach the next non-zero
+    ///   byte in the file. That puts its start at or after the offset
+    ///   [`Binwalk::resume_offset_after_zero_run`] returns, which re-finds it. Note this is what
+    ///   `max_leading_zeros` is for; a resume that did not rewind would lose it.
+    ///
+    /// An all-zero magic has no first non-zero byte and so fits neither shape: it matches at every
+    /// offset in the run, and nothing but a byte its signature requires to be non-zero can rule
+    /// one out. Making this pattern longer than any such magic plus the distance back to that byte
+    /// keeps the byte inside the run, and so zero, for every match of it not reported first.
+    zero_run_pattern_len: Option<NonZeroUsize>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum MmapUsage {
+    #[default]
+    WhenPossible,
+    Never,
+}
+
+/// The longest run of consecutive zero bytes anywhere in `pattern`
+fn longest_zero_run(pattern: &[u8]) -> usize {
+    pattern
+        .split(|&byte| byte != 0)
+        .map(<[u8]>::len)
+        .max()
+        .unwrap_or(0)
+}
+
+impl Default for Binwalk {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Configures and builds a [`Binwalk`] instance.
+///
+/// ## Example
+///
+/// ```
+/// use binwalk_ng::Binwalk;
+///
+/// // Don't scan for these file signatures
+/// let binwalker = Binwalk::builder()
+///     .exclude("jpeg")
+///     .exclude("png")
+///     .build()
+///     .unwrap();
+/// ```
+#[must_use = "Builder does nothing unless built"]
+#[derive(Debug, Default, Clone)]
+pub struct BinwalkBuilder {
+    include: Vec<String>,
+    exclude: Vec<String>,
+    signatures: Vec<signatures::Signature>,
+    full_search: bool,
+    mmap_usage: MmapUsage,
+}
+
+impl BinwalkBuilder {
+    /// Only scan for the signature with this name, in addition to any others already included.
+    ///
+    /// The name must match a `Signature.name` value defined in magic.rs.
+    pub fn include(mut self, signature_name: impl Into<String>) -> Self {
+        self.include.push(signature_name.into());
+        self
+    }
+
+    /// Only scan for signatures with these names, in addition to any others already included.
+    ///
+    /// The names must match `Signature.name` values defined in magic.rs.
+    pub fn includes(mut self, signature_names: Vec<String>) -> Self {
+        self.include.extend(signature_names);
+        self
+    }
+
+    /// Don't scan for the signature with this name.
+    ///
+    /// The name must match a `Signature.name` value defined in magic.rs.
+    pub fn exclude(mut self, signature_name: impl Into<String>) -> Self {
+        self.exclude.push(signature_name.into());
+        self
+    }
+
+    /// Don't scan for signatures with these names, in addition to any others already excluded.
+    ///
+    /// The names must match `Signature.name` values defined in magic.rs.
+    pub fn excludes(mut self, signature_names: Vec<String>) -> Self {
+        self.exclude.extend(signature_names);
+        self
+    }
+
+    /// Scan for this user-defined signature, in addition to the internal ones.
+    pub fn signature(mut self, signature: signatures::Signature) -> Self {
+        self.signatures.push(signature);
+        self
+    }
+
+    /// Scan for these user-defined signatures, in addition to the internal ones and any
+    /// user-defined signatures already added.
+    pub fn signatures(mut self, signatures: Vec<signatures::Signature>) -> Self {
+        self.signatures.extend(signatures);
+        self
+    }
+
+    /// Search for short signatures throughout the file, rather than only at offset 0.
+    pub const fn full_search(mut self, full_search: bool) -> Self {
+        self.full_search = full_search;
+        self
+    }
+
+    /// Configure the ability to use mmap for reading files.
+    ///
+    /// Defaults to [`MmapUsage::WhenPossible`]
+    ///
+    /// Binwalk may abort unexpectedly if mmap is used and the analyzed file(s) are simultaneously
+    /// truncated.
+    pub const fn mmap_usage(mut self, mmap_usage: MmapUsage) -> Self {
+        self.mmap_usage = mmap_usage;
+        self
+    }
+
+    /// Build a [`Binwalk`] instance with this configuration.
+    ///
+    /// ## Errors
+    ///
+    /// Returns a [`BuildError`] if the configured signatures' magic patterns cannot be
+    /// compiled into a searcher, which in practice means there are too many of them, or
+    /// they are too large.
+    pub fn build(self) -> Result<Binwalk, BuildError> {
+        let mut signature_count = 0;
+        let mut pattern_count = 0;
+        let mut short_signatures = vec![];
+        let mut patterns: Vec<Vec<u8>> = vec![];
+
+        let mut signatures = vec![];
+        let mut extractor_lookup_table = HashMap::new();
+
+        // The most leading zero bytes in any magic pattern that has a non-zero byte
+        let mut max_leading_zeros = 0;
+        // Length of the synthetic all-zero pattern; see Binwalk::zero_run_pattern_len
+        let mut zero_run_pattern_len = Some(0);
+
+        let mut signature_patterns = magic::patterns();
+        signature_patterns.extend(self.signatures);
+
+        // Load magic signatures
+        for signature in signature_patterns {
+            // Check if this signature should be included
+            if !include_signature(&signature, &self.include, &self.exclude) {
+                continue;
+            }
+
+            // Keep a count of total unique signatures that are supported
+            signature_count += 1;
+
+            // Keep a count of the total number of magic patterns
+            pattern_count += signature.magic.len();
+
+            // Create a lookup table which associates each signature to its respective extractor
+            extractor_lookup_table.insert(signature.name.clone(), signature.extractor.clone());
+
+            // Each signature may have multiple magic bytes associated with it
+            for pattern in &signature.magic {
+                if signature.short && !self.full_search {
+                    // These are short patterns, and should only be searched for at the very beginning of a file
+                    short_signatures.push(signature.clone());
+                    break;
+                }
+
+                // How long a run of zeros has to be for this pattern not to stand in the way of
+                // skipping it; see Binwalk::zero_run_pattern_len.
+                let longest_matching_zeros = match pattern.iter().position(|&b| b != 0) {
+                    Some(leading_zeros) => {
+                        max_leading_zeros = max_leading_zeros.max(leading_zeros);
+                        Some(longest_zero_run(pattern))
+                    }
+                    // An all-zero magic says nothing about where a valid signature can begin,
+                    // since it matches at every offset in a run of zeros. However, we know
+                    // something about program_store (the only built-in signature with all zero
+                    // magic): a valid header requires a non-zero byte `NONZERO_BEFORE_MAGIC` bytes
+                    // before the magic. Matches within a longer run of zeros still occur, but that
+                    // byte is itself a zero from the run, so none of them can be a valid header.
+                    None if signature.name == "program_store" => {
+                        Some(pattern.len() + program_store::NONZERO_BEFORE_MAGIC)
+                    }
+                    // If a user-provided Signature specifies an all-zero pattern, we have no info
+                    // on the max run of zeros which could match their pattern.
+                    None => {
+                        warn!(
+                            "pattern for {} contains only zeros, this may slow down scanning",
+                            signature.name,
+                        );
+                        None
+                    }
+                };
+                zero_run_pattern_len = match (zero_run_pattern_len, longest_matching_zeros) {
+                    (Some(len), Some(matchable_zeros)) => Some(len.max(matchable_zeros + 1)),
+                    _ => None,
+                };
+
+                signatures.push(signature.clone());
+
+                // Add these magic bytes to the list of patterns
+                patterns.push(pattern.to_vec());
+            }
+        }
+
+        // Searched alongside the real patterns to spot runs of zero bytes that can be skipped
+        // past. The length is only zero when there are no real patterns to search for at all, and
+        // an empty pattern would match at every offset.
+        let zero_run_pattern_len = zero_run_pattern_len.and_then(NonZeroUsize::new);
+        if let Some(zero_run_pattern_len) = zero_run_pattern_len {
+            patterns.push(vec![0; zero_run_pattern_len.get()]);
+        }
+
+        /*
+         * Same pattern matching algorithm used by fgrep.
+         * This searches for all magic byte patterns in the file data, all at once.
+         * https://en.wikipedia.org/wiki/Aho–Corasick_algorithm
+         */
+        let grep = AhoCorasick::new(patterns).map_err(BuildError)?;
+
+        Ok(Binwalk {
+            signature_count,
+            pattern_count,
+            short_signatures,
+            grep,
+            signatures,
+            extractor_lookup_table,
+            mmap_usage: self.mmap_usage,
+            max_leading_zeros,
+            zero_run_pattern_len,
+        })
+    }
 }
 
 impl Binwalk {
     /// Create a new Binwalk instance with all default values.
-    /// Equivalent to `Binwalk::configure(None, None, None, None, None, false)`.
+    /// Equivalent to `Binwalk::builder().build().unwrap()`.
     ///
     /// ## Example
     ///
@@ -97,147 +359,81 @@ impl Binwalk {
     /// let binwalker = Binwalk::new();
     /// ```
     pub fn new() -> Self {
-        Self::configure(None, None, vec![], vec![], None, false).unwrap()
+        // The internal signature patterns are compiled in, so this cannot fail at runtime
+        Self::builder()
+            .build()
+            .expect("the internal signature patterns must be valid")
     }
 
-    /// Create a new Binwalk instance.
-    ///
-    /// If `target_file_name` and `output_directory` are specified, the `output_directory` will be created if it does not
-    /// already exist, and a symlink to `target_file_name` will be placed inside the `output_directory`. The path to this
-    /// symlink is placed in `Binwalk.base_target_file`.
-    ///
-    /// The `include` and `exclude` arguments specify include and exclude signature filters. The String values contained
-    /// in these arguments must match the `Signature.name` values defined in magic.rs.
-    ///
-    /// Additional user-defined signatures may be provided via the `signatures` argument.
+    /// Create a [`BinwalkBuilder`], to configure a Binwalk instance.
     ///
     /// ## Example
     ///
     /// ```
-    /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_binwalk_rs_102_0() -> Result<binwalk_ng::Binwalk, binwalk_ng::BinwalkError> {
     /// use binwalk_ng::Binwalk;
     ///
-    /// // Don't scan for these file signatures
-    /// let exclude_filters: Vec<String> = vec!["jpeg".to_string(), "png".to_string()];
-    ///
-    /// let binwalker = Binwalk::configure(None,
-    ///                                    None,
-    ///                                    vec![],
-    ///                                    exclude_filters,
-    ///                                    None,
-    ///                                    false)?;
-    /// # Ok(binwalker)
-    /// # } _doctest_main_src_binwalk_rs_102_0(); }
+    /// let binwalker = Binwalk::builder().exclude("jpeg").build().unwrap();
     /// ```
-    pub fn configure(
-        target_file_name: Option<&Path>,
-        output_directory: Option<&Path>,
-        include: Vec<String>,
-        exclude: Vec<String>,
-        signatures: Option<Vec<signatures::Signature>>,
-        full_search: bool,
-    ) -> Result<Self, BinwalkError> {
-        let mut new_instance = Self::default();
+    pub fn builder() -> BinwalkBuilder {
+        BinwalkBuilder::default()
+    }
 
-        // Target file is optional, especially if being called via the library
-        if let Some(target_file) = target_file_name {
-            // Set the target file path, make it an absolute path
-            match path::absolute(target_file) {
-                Err(_) => {
-                    return Err(BinwalkError::new(&format!(
-                        "Failed to get absolute path for '{}'",
-                        target_file.display()
-                    )));
-                }
-                Ok(abspath) => {
-                    new_instance.base_target_file = abspath;
-                }
-            }
+    /// Count of all signatures being scanned for (short and regular)
+    pub const fn signature_count(&self) -> usize {
+        self.signature_count
+    }
 
-            // If an output extraction directory was also specified, initialize it
-            if let Some(extraction_directory) = output_directory {
-                // Make the extraction directory an absolute path
-                match path::absolute(extraction_directory) {
-                    Err(_) => {
-                        return Err(BinwalkError::new(&format!(
-                            "Failed to get absolute path for '{}'",
-                            extraction_directory.display()
-                        )));
-                    }
-                    Ok(absolute_path) => {
-                        new_instance.base_output_directory = absolute_path;
-                    }
-                }
+    /// Count of all magic patterns being scanned for (short and regular)
+    pub const fn pattern_count(&self) -> usize {
+        self.pattern_count
+    }
 
-                // Initialize the extraction directory. This will create the directory if it
-                // does not exist, and create a symlink inside the directory that points to
-                // the specified target file.
-                match init_extraction_directory(
-                    &new_instance.base_target_file,
-                    &new_instance.base_output_directory,
-                ) {
-                    Err(e) => {
-                        return Err(BinwalkError::new(&format!(
-                            "Failed to initialize extraction directory: {e}"
-                        )));
-                    }
-                    Ok(new_target_file_path) => {
-                        // This is the new base target path (a symlink inside the extraction directory)
-                        new_instance.base_target_file = new_target_file_path;
-                    }
-                }
-            }
-        }
+    /// If the mmap call is allowed to be used for reading files
+    pub const fn mmap_usage(&self) -> MmapUsage {
+        self.mmap_usage
+    }
 
-        // Load all internal signature patterns
-        let mut signature_patterns = magic::patterns();
+    /// Index in [`Binwalk::grep`] of the synthetic all-zero pattern, or `None` if there is none to
+    /// match
+    fn zero_run_pattern_index(&self) -> Option<usize> {
+        self.zero_run_pattern_len
+            .is_some()
+            .then(|| self.grep.patterns_len() - 1)
+    }
 
-        // Include any user-defined signature patterns
-        if let Some(user_defined_signature_patterns) = signatures {
-            signature_patterns.extend(user_defined_signature_patterns);
-        }
-
-        // Load magic signatures
-        for signature in signature_patterns.clone() {
-            // Check if this signature should be included
-            if !include_signature(&signature, &include, &exclude) {
-                continue;
-            }
-
-            // Keep a count of total unique signatures that are supported
-            new_instance.signature_count += 1;
-
-            // Keep a count of the total number of magic patterns
-            new_instance.pattern_count += signature.magic.len();
-
-            // Create a lookup table which associates each signature to its respective extractor
-            new_instance
-                .extractor_lookup_table
-                .insert(signature.name.clone(), signature.extractor.clone());
-
-            // Each signature may have multiple magic bytes associated with it
-            for pattern in signature.magic.clone() {
-                if signature.short && !full_search {
-                    // These are short patterns, and should only be searched for at the very beginning of a file
-                    new_instance.short_signatures.push(signature.clone());
-                    break;
-                } else {
-                    /*
-                     * Need to keep a mapping of the pattern index and its associated signature
-                     * so that when a match is found it can be resolved back to the signature from
-                     * which it came.
-                     */
-                    new_instance
-                        .pattern_signature_table
-                        .insert(new_instance.patterns.len(), signature.clone());
-
-                    // Add these magic bytes to the list of patterns
-                    new_instance.patterns.push(pattern.to_vec());
-                }
-            }
-        }
-
-        Ok(new_instance)
+    /// Where to resume scanning after the synthetic all-zero pattern matched, between
+    /// `synth_zeros_start` and `synth_zeros_end`
+    ///
+    /// A magic pattern can begin at most `max_leading_zeros` bytes before its first non-zero byte,
+    /// so nothing between here and that far ahead of the next non-zero byte could begin a *valid*
+    /// match. An all-zero magic does still match in there, but a byte its signature requires to be
+    /// non-zero lands inside the run; see [`Binwalk::zero_run_pattern_len`].
+    ///
+    /// The result is always past the start of the matched zeros, and so past the offset the
+    /// current search began at: a pattern's leading zeros are a run of zeros within it, and the
+    /// synthetic pattern is longer than every such run, hence longer than `max_leading_zeros`.
+    fn resume_offset_after_zero_run(
+        &self,
+        file_data: &[u8],
+        synth_zeros_start: usize,
+        synth_zeros_end: usize,
+    ) -> usize {
+        debug_assert!(
+            file_data[synth_zeros_start..synth_zeros_end]
+                .iter()
+                .all(|&b| b == 0)
+        );
+        debug_assert!(synth_zeros_end - synth_zeros_start > self.max_leading_zeros);
+        let Some(next_non_zero) = file_data[synth_zeros_end..]
+            .iter()
+            .position(|&byte| byte != 0)
+        else {
+            // Every pattern needs a non-zero byte, either in the pattern itself or, for an
+            // all-zero magic, in the data its signature requires to be non-zero nearby. With none
+            // left in the file, nothing can match from here on.
+            return file_data.len();
+        };
+        synth_zeros_end + next_non_zero - self.max_leading_zeros
     }
 
     /// Scan a file for magic signatures.
@@ -278,14 +474,14 @@ impl Binwalk {
          * These signatures are only valid if they occur at the very beginning of a file.
          * This is typically because the signatures are very short and they are likely
          * to occur randomly throughout the file, so this prevents having to validate many
-         * false positve matches.
+         * false positive matches.
          */
         for signature in &self.short_signatures {
-            for magic in signature.magic.clone() {
+            for magic in &signature.magic {
                 let magic_start = FILE_START_OFFSET + signature.magic_offset;
                 let magic_end = magic_start + magic.len();
 
-                if file_data.len() > magic_end && file_data[magic_start..magic_end] == magic {
+                if file_data.len() > magic_end && file_data[magic_start..magic_end] == *magic {
                     debug!(
                         "Found {} short magic match at offset {:#X}",
                         signature.description, magic_start
@@ -296,7 +492,11 @@ impl Binwalk {
                         signature_result_auto_populate(&mut signature_result, signature);
 
                         // Add this signature to the file map
-                        file_map.push(signature_result.clone());
+                        file_map.push(signature_result);
+
+                        // Reference to the entry just added, for logging and updating next_valid_offset
+                        let signature_result = file_map.last().unwrap();
+
                         info!(
                             "Found valid {} short signature at offset {:#X}",
                             signature_result.name, FILE_START_OFFSET
@@ -319,12 +519,7 @@ impl Binwalk {
             }
         }
 
-        /*
-         * Same pattern matching algorithm used by fgrep.
-         * This will search for all magic byte patterns in the file data, all at once.
-         * https://en.wikipedia.org/wiki/Aho–Corasick_algorithm
-         */
-        let grep = AhoCorasick::new(self.patterns.clone()).unwrap();
+        let zero_run_pattern_index = self.zero_run_pattern_index();
 
         debug!("Running Aho-Corasick scan");
 
@@ -350,17 +545,32 @@ impl Binwalk {
              *     be updated to point the end of the valid signature data, causing a new AhoCorasick
              *     scan to start at the new next_valid_offset file location.
              */
-            for magic_match in grep.find_overlapping_iter(&file_data[next_valid_offset..]) {
+            for magic_match in self
+                .grep
+                .find_overlapping_iter(&file_data[next_valid_offset..])
+            {
                 // Get the location of the magic bytes inside the file data
                 let magic_offset: usize = next_valid_offset + magic_match.start();
 
-                // Get the signature associated with this magic signature
                 let magic_pattern_index = magic_match.pattern().as_usize();
-                let signature: signatures::Signature = self
-                    .pattern_signature_table
-                    .get(&magic_pattern_index)
-                    .unwrap()
-                    .clone();
+
+                // The synthetic all-zero pattern has no signature to validate; it means the scan
+                // has reached a run of zero bytes long enough to skip past. Every real match that
+                // overlaps it has either been reported already or starts at or after the offset
+                // the scan resumes from, so abandoning this search loses nothing; see
+                // Binwalk::zero_run_pattern_len.
+                if Some(magic_pattern_index) == zero_run_pattern_index {
+                    let zeros_end = next_valid_offset + magic_match.end();
+                    next_valid_offset =
+                        self.resume_offset_after_zero_run(file_data, magic_offset, zeros_end);
+                    debug!(
+                        "Skipping run of zero bytes, jumping from {zeros_end:#X} to {next_valid_offset:#X}"
+                    );
+                    break;
+                }
+
+                // Get the signature associated with this magic signature
+                let signature = &self.signatures[magic_pattern_index];
 
                 debug!(
                     "Found {} magic match at offset {:#X}",
@@ -383,10 +593,13 @@ impl Binwalk {
                     }
 
                     // Auto populate some signature result fields
-                    signature_result_auto_populate(&mut signature_result, &signature);
+                    signature_result_auto_populate(&mut signature_result, signature);
 
                     // Add this signature to the file map
-                    file_map.push(signature_result.clone());
+                    file_map.push(signature_result);
+
+                    // Reference to the entry just added, for logging and updating next_valid_offset
+                    let signature_result = file_map.last().unwrap();
 
                     info!(
                         "Found valid {} signature at offset {:#X}",
@@ -438,13 +651,12 @@ impl Binwalk {
                 break;
             }
 
-            let this_signature = file_map[i].clone();
-            let remaining_available_size = file_data.len() - this_signature.offset;
+            let this_signature = &file_map[i];
 
             // Check if the previous file map entry had the same reported starting offset as this one
             if i > 0 && this_signature.offset == file_map[i - 1].offset {
                 // Get the previous signature in the file map
-                let previous_signature = file_map[i - 1].clone();
+                let previous_signature = &file_map[i - 1];
 
                 // If this file map entry and the conflicting entry do not have the same confidence level, default to the one with highest confidence
                 if this_signature.confidence != previous_signature.confidence {
@@ -457,6 +669,8 @@ impl Binwalk {
                     if this_signature.confidence > previous_signature.confidence {
                         file_map.remove(i - 1);
                         index_adjustment += 1;
+                        // This signature was not removed, but it shifted down to index i - 1
+                        i -= 1;
 
                     // Else, this signature has a lower confidence; invalidate this signature and continue to the next signature in the list
                     } else {
@@ -486,6 +700,10 @@ impl Binwalk {
                 index_adjustment += 1;
                 continue;
             }
+
+            // The signature being examined may have shifted down in the file map; get a fresh reference to it at its current index
+            let this_signature = &file_map[i];
+            let remaining_available_size = file_data.len() - this_signature.offset;
 
             // If we've made it this far, make sure this signature's data doesn't extend beyond EOF and that the file data doesn't wrap around
             if this_signature.size > remaining_available_size
@@ -561,10 +779,20 @@ impl Binwalk {
 
     /// Extract all extractable signatures found in a file.
     ///
+    /// Each signature's extraction results are placed in a subdirectory of
+    /// `extraction_directory`, named after the signature's offset in the file.
+    /// See [`extractors::extraction_directory`] for the conventional directory to
+    /// extract a file into.
+    ///
+    /// ## Warning
+    ///
+    /// Those subdirectories are **deleted and recreated**, so any existing contents are
+    /// lost. Extracting two different files into the same `extraction_directory` makes
+    /// their results collide, and the second extraction destroys the first.
+    ///
     /// ## Example
     ///
     /// ```
-    /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_binwalk_rs_529_0() -> Result<binwalk_ng::Binwalk, binwalk_ng::BinwalkError> {
     /// use binwalk_ng::Binwalk;
     ///
     /// let target_path = std::path::Path::new("tests")
@@ -575,35 +803,29 @@ impl Binwalk {
     /// # let temp_dir = tempfile::tempdir().unwrap();
     /// # let extraction_directory = temp_dir.path();
     ///
-    /// let binwalker = Binwalk::configure(Some(&target_path),
-    ///                                    Some(&extraction_directory),
-    ///                                    vec![],
-    ///                                    vec![],
-    ///                                    None,
-    ///                                    false)?;
+    /// let binwalker = Binwalk::new();
     ///
-    /// let file_data = std::fs::read(&binwalker.base_target_file).expect("Unable to read file");
+    /// let file_data = std::fs::read(&target_path).expect("Unable to read file");
     ///
     /// let scan_results = binwalker.scan(&file_data);
-    /// let extraction_results = binwalker.extract(&file_data, &binwalker.base_target_file, &scan_results);
+    /// let extraction_results = binwalker.extract(&file_data, &target_path, &extraction_directory, &scan_results);
     ///
     /// assert_eq!(scan_results.len(), 1);
     /// assert_eq!(extraction_results.len(),  1);
     /// assert_eq!(std::path::Path::new(&extraction_directory)
-    ///     .join("gzip.bin.extracted")
     ///     .join("0")
     ///     .join("decompressed.bin")
     ///     .exists(), true);
-    /// # Ok(binwalker)
-    /// # } _doctest_main_src_binwalk_rs_529_0(); }
     /// ```
     pub fn extract(
         &self,
         file_data: &[u8],
         file_name: impl AsRef<Path>,
+        extraction_directory: impl AsRef<Path>,
         file_map: &Vec<signatures::SignatureResult>,
     ) -> HashMap<String, extractors::ExtractionResult> {
         let file_path = file_name.as_ref();
+        let extraction_directory = extraction_directory.as_ref();
         let mut extraction_results: HashMap<String, extractors::ExtractionResult> = HashMap::new();
 
         // Spawn extractors for each extractable signature
@@ -614,14 +836,19 @@ impl Binwalk {
             }
 
             // Get the extractor for this signature
-            let extractor = self.extractor_lookup_table[&signature.name].clone();
+            let extractor = &self.extractor_lookup_table[&signature.name];
 
             match &extractor {
                 None => continue,
                 Some(_) => {
                     // Run an extraction for this signature
-                    let mut extraction_result =
-                        extractors::execute(file_data, file_path, signature, &extractor);
+                    let mut extraction_result = extractors::execute(
+                        file_data,
+                        file_path,
+                        extraction_directory,
+                        signature,
+                        extractor,
+                    );
 
                     if !extraction_result.success {
                         debug!(
@@ -653,8 +880,9 @@ impl Binwalk {
                             extraction_result = extractors::execute(
                                 file_data,
                                 file_path,
+                                extraction_directory,
                                 &new_signature,
-                                &extractor,
+                                extractor,
                             );
                         }
                     }
@@ -668,12 +896,17 @@ impl Binwalk {
         extraction_results
     }
 
-    /// Analyze a data buffer and optionally extract the file contents.
+    /// Analyze a data buffer and, if an extraction directory is provided, extract the file contents.
+    ///
+    /// ## Warning
+    ///
+    /// Extraction **deletes and recreates** a subdirectory of the extraction directory per
+    /// signature offset, so analyzing two different files into the same directory makes
+    /// their results collide. See [`Binwalk::extract`].
     ///
     /// ## Example
     ///
     /// ```
-    /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_binwalk_rs_672_0() -> Result<binwalk_ng::Binwalk, binwalk_ng::BinwalkError> {
     /// use binwalk_ng::{Binwalk, common};
     ///
     /// let target_path = std::path::Path::new("tests")
@@ -686,30 +919,22 @@ impl Binwalk {
     ///
     /// let file_data = common::read_file(&target_path).expect("Failed to read file data");
     ///
-    /// let binwalker = Binwalk::configure(Some(&target_path),
-    ///                                    Some(&extraction_directory),
-    ///                                    vec![],
-    ///                                    vec![],
-    ///                                    None,
-    ///                                    false)?;
+    /// let binwalker = Binwalk::new();
     ///
-    /// let analysis_results = binwalker.analyze_buf(&file_data, &binwalker.base_target_file, true);
+    /// let analysis_results = binwalker.analyze_buf(&file_data, &target_path, Some(extraction_directory.as_ref()));
     ///
     /// assert_eq!(analysis_results.file_map.len(), 1);
     /// assert_eq!(analysis_results.extractions.len(),  1);
     /// assert_eq!(std::path::Path::new(&extraction_directory)
-    ///     .join("gzip.bin.extracted")
     ///     .join("0")
     ///     .join("decompressed.bin")
     ///     .exists(), true);
-    /// # Ok(binwalker)
-    /// # } _doctest_main_src_binwalk_rs_672_0(); }
     /// ```
     pub fn analyze_buf(
         &self,
         file_data: &[u8],
         target_file: impl AsRef<Path>,
-        do_extraction: bool,
+        extract_to: Option<&Path>,
     ) -> AnalysisResults {
         let file_path = target_file.as_ref();
 
@@ -724,13 +949,20 @@ impl Binwalk {
         results.file_map = self.scan(file_data);
 
         // Only extract if told to, and if there were some signatures found in this file
-        if do_extraction && !results.file_map.is_empty() {
+        if let Some(extraction_directory) = extract_to
+            && !results.file_map.is_empty()
+        {
             // Extract everything we can
             debug!(
                 "Submitting {} signature results to extractor",
                 results.file_map.len()
             );
-            results.extractions = self.extract(file_data, file_path, &results.file_map);
+            results.extractions = self.extract(
+                file_data,
+                file_path,
+                extraction_directory,
+                &results.file_map,
+            );
         }
 
         debug!("Analysis end: {}", file_path.display());
@@ -738,12 +970,17 @@ impl Binwalk {
         results
     }
 
-    /// Analyze a file on disk and optionally extract its contents.
+    /// Analyze a file on disk and, if an extraction directory is provided, extract its contents.
+    ///
+    /// ## Warning
+    ///
+    /// Extraction **deletes and recreates** a subdirectory of the extraction directory per
+    /// signature offset, so analyzing two different files into the same directory makes
+    /// their results collide. See [`Binwalk::extract`].
     ///
     /// ## Example
     ///
     /// ```
-    /// # fn main() { #[allow(non_snake_case)] fn _doctest_main_src_binwalk_rs_745_0() -> Result<binwalk_ng::Binwalk, binwalk_ng::BinwalkError> {
     /// use binwalk_ng::Binwalk;
     ///
     /// let target_path = std::path::Path::new("tests")
@@ -754,107 +991,34 @@ impl Binwalk {
     /// # let temp_dir = tempfile::tempdir().unwrap();
     /// # let extraction_directory = temp_dir.path();
     ///
-    /// let binwalker = Binwalk::configure(Some(&target_path),
-    ///                                    Some(&extraction_directory),
-    ///                                    vec![],
-    ///                                    vec![],
-    ///                                    None,
-    ///                                    false)?;
+    /// let binwalker = Binwalk::new();
     ///
-    /// let analysis_results = binwalker.analyze(&binwalker.base_target_file, true);
+    /// let analysis_results = binwalker.analyze(&target_path, Some(extraction_directory.as_ref()));
     ///
     /// assert_eq!(analysis_results.file_map.len(), 1);
     /// assert_eq!(analysis_results.extractions.len(),  1);
     /// assert_eq!(std::path::Path::new(&extraction_directory)
-    ///     .join("gzip.bin.extracted")
     ///     .join("0")
     ///     .join("decompressed.bin")
     ///     .exists(), true);
-    /// # Ok(binwalker)
-    /// # } _doctest_main_src_binwalk_rs_745_0(); }
     /// ```
-    pub fn analyze(&self, target_file: impl AsRef<Path>, do_extraction: bool) -> AnalysisResults {
+    pub fn analyze(
+        &self,
+        target_file: impl AsRef<Path>,
+        extract_to: Option<&Path>,
+    ) -> AnalysisResults {
         let file_path = target_file.as_ref();
 
-        let file_data = read_file(file_path).unwrap_or_else(|_| {
-            error!("Failed to read data from {}", file_path.display());
-            b"".to_vec()
-        });
+        let file_data = read_or_map_file(file_path, self.mmap_usage);
+        let file_data: &[u8] = file_data
+            .as_ref()
+            .map(|data| data.as_ref())
+            .unwrap_or_else(|_| {
+                error!("Failed to read data from {}", file_path.display());
+                b""
+            });
 
-        self.analyze_buf(&file_data, file_path, do_extraction)
-    }
-}
-
-/// Initializes the extraction output directory
-fn init_extraction_directory(
-    target_path: impl AsRef<Path>,
-    extraction_directory: impl AsRef<Path>,
-) -> Result<PathBuf, std::io::Error> {
-    let extraction_directory = extraction_directory.as_ref();
-    // Create the output directory, equivalent of mkdir -p
-    match fs::create_dir_all(extraction_directory) {
-        Ok(_) => {
-            debug!(
-                "Created base output directory: '{}'",
-                extraction_directory.display()
-            );
-        }
-        Err(e) => {
-            error!(
-                "Failed to create base output directory '{}': {e}",
-                extraction_directory.display()
-            );
-            return Err(e);
-        }
-    }
-
-    let target_path = target_path.as_ref();
-
-    // Build a symlink path to the target file in the extraction directory
-    let link_path = extraction_directory.join(target_path.file_name().unwrap());
-
-    if link_path.exists() {
-        return Ok(link_path);
-    }
-
-    debug!(
-        "Creating symlink from {} -> {}",
-        link_path.display(),
-        target_path.display()
-    );
-
-    // Create a symlink from inside the extraction directory to the specified target file
-    #[cfg(unix)]
-    {
-        match unix::fs::symlink(target_path, &link_path) {
-            Ok(_) => Ok(link_path),
-            Err(e) => {
-                error!(
-                    "Failed to create symlink {} -> {}: {}",
-                    link_path.display(),
-                    target_path.display(),
-                    e
-                );
-                Err(e)
-            }
-        }
-    }
-    #[cfg(windows)]
-    {
-        match std::fs::hard_link(target_path, &link_path) {
-            Ok(_) => {
-                return Ok(link_path.to_path_buf());
-            }
-            Err(e) => {
-                error!(
-                    "Failed to create hardlink {} -> {}: {}",
-                    link_path.display(),
-                    target_path.display(),
-                    e
-                );
-                return Err(e);
-            }
-        }
+        self.analyze_buf(file_data, file_path, extract_to)
     }
 }
 
@@ -895,4 +1059,151 @@ fn signature_result_auto_populate(
     signature_result.id = Uuid::new_v4().to_string();
     signature_result.name = signature.name.clone();
     signature_result.always_display = signature.always_display;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn longest_zero_run_finds_runs_anywhere() {
+        assert_eq!(longest_zero_run(b""), 0);
+        assert_eq!(longest_zero_run(b"\x01\x02\x03"), 0);
+        assert_eq!(longest_zero_run(b"\x00\x00\x00\x01\x00"), 3);
+        assert_eq!(longest_zero_run(b"\x01\x00\x00\x00\x02\x00"), 3);
+        assert_eq!(longest_zero_run(b"\x01\x00\x00\x00"), 3);
+        assert_eq!(longest_zero_run(&[0; 9]), 9);
+    }
+
+    #[test]
+    fn zero_run_pattern_is_longer_than_any_run_of_zeros_in_a_pattern() {
+        let binwalker = Binwalk::new();
+        let zero_run_pattern_len = binwalker
+            .zero_run_pattern_len
+            .expect("the default signatures should allow skipping runs of zeros")
+            .get();
+
+        // The patterns are not kept around after the automaton is built, so re-derive the ones a
+        // default Binwalk searches for: every magic of every non-short signature.
+        for signature in magic::patterns() {
+            if signature.short {
+                continue;
+            }
+            for pattern in &signature.magic {
+                assert!(
+                    zero_run_pattern_len > longest_zero_run(pattern),
+                    "{pattern:02X?} could hide a match across a run of zeros"
+                );
+            }
+        }
+        // Which also means it is longer than any pattern's leading zeros, so a skip always moves
+        // the scan forwards.
+        assert!(zero_run_pattern_len > binwalker.max_leading_zeros);
+    }
+
+    #[test]
+    fn resume_offset_after_zero_run_stops_short_of_the_next_non_zero_byte() {
+        let binwalker = Binwalk {
+            max_leading_zeros: 3,
+            ..Binwalk::default()
+        };
+
+        // A pattern with 3 leading zeros could begin 3 bytes before the 9, so the scan may resume
+        // no later than that, even though the zeros are known to continue until then.
+        let mut file_data = [0; 16];
+        // With nothing but zeros ahead there is nothing left to match, so the scan is finished.
+        assert_eq!(
+            binwalker.resume_offset_after_zero_run(&file_data, 0, 11),
+            file_data.len()
+        );
+
+        *file_data.last_mut().unwrap() = 9;
+        //  |--zeros known to the caller--|     |-----|<-max_leading_zeros
+        //  v                             v     v     v
+        // [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9]
+        //                                      ^
+        //                                      possible match: 3 leading zeros before a non-zero
+        assert_eq!(
+            binwalker.resume_offset_after_zero_run(&file_data, 0, 11),
+            12
+        );
+        file_data[13] = 2;
+        //  |--zeros known to the caller--|
+        //  |                          |--+--|<-max_leading_zeros
+        //  v                          v  v  v
+        // [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 9]
+        //                             ^
+        //                             possible match: 3 leading zeros before a non-zero
+        assert_eq!(
+            binwalker.resume_offset_after_zero_run(&file_data, 0, 11),
+            10
+        );
+    }
+
+    #[test]
+    fn scan_with_no_signatures_at_all_terminates() {
+        // No signature is named "", so nothing is included and there is no pattern to search for,
+        // let alone a run of zeros worth skipping.
+        let binwalker = Binwalk::builder()
+            .include(String::new())
+            .full_search(true)
+            .build()
+            .unwrap();
+        assert_eq!(binwalker.grep.patterns_len(), 0);
+
+        assert!(binwalker.scan(&[0, 1, 0, 1, 0, 1, 0, 1]).is_empty());
+    }
+
+    #[test]
+    fn scan_finds_a_magic_whose_own_zeros_outlast_an_all_zero_magic_match() {
+        // A magic that ends in more zero bytes than the all-zero program_store magic is long, but
+        // fewer than the synthetic zero-run pattern. Aho-Corasick reports matches in order of
+        // where they end, so program_store matches inside this magic's own zeros are reported
+        // before it; none of them may derail the scan, and the run is too short to trigger a skip.
+        // The leading pad below does trigger one, so this also pins that the scan resumes early
+        // enough to still reach the magic.
+        let mut magic = vec![0u8; 21];
+        magic[0] = 0xAA;
+
+        fn parser(
+            _file_data: &[u8],
+            offset: usize,
+        ) -> Result<signatures::SignatureResult, signatures::SignatureError> {
+            Ok(signatures::SignatureResult {
+                offset,
+                size: 21,
+                confidence: signatures::CONFIDENCE_HIGH,
+                description: "trailing zeros test signature".to_string(),
+                ..Default::default()
+            })
+        }
+
+        let signature = signatures::Signature {
+            name: "trailing_zeros".to_string(),
+            short: false,
+            magic: vec![magic.clone()],
+            magic_offset: 0,
+            description: "trailing zeros test signature".to_string(),
+            always_display: false,
+            parser,
+            extractor: None,
+        };
+
+        // Place it after a run of zeros long enough to be skipped, with a non-zero byte behind it
+        // so that the run it ends with is not the last thing in the file either.
+        let offset = 4096;
+        let mut file_data = vec![0u8; offset];
+        file_data.extend_from_slice(&magic);
+        file_data.extend_from_slice(&[0xFF; 16]);
+
+        let binwalker = Binwalk::builder().signature(signature).build().unwrap();
+        let file_map = binwalker.scan(&file_data);
+
+        assert!(
+            file_map
+                .iter()
+                .any(|result| result.name == "trailing_zeros" && result.offset == offset),
+            "{file_map:?}"
+        );
+    }
 }

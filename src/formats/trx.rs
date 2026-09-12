@@ -122,7 +122,7 @@ pub fn parse_trx_header(header_data: &[u8]) -> Result<TRXHeader, StructureError>
                     checksum: trx_header.crc32.get(),
                     total_size: trx_header.total_size.get() as usize,
                     header_size: struct_size,
-                    partitions: partitions.clone(),
+                    partitions,
                 });
             }
         }

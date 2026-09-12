@@ -83,10 +83,11 @@ pub fn parse_dxbc_header(data: &[u8]) -> Result<DXBCHeader, StructureError> {
     let chunk_ids: Result<Vec<[u8; 4]>, StructureError> = data
         .get(header_end..header_end + count * 4)
         .ok_or(StructureError)?
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|offset_bytes| {
-            let offset_bytes: [u8; 4] = offset_bytes.try_into().map_err(|_| StructureError)?;
-            let offset = u32::from_le_bytes(offset_bytes) as usize;
+            let offset = u32::from_le_bytes(*offset_bytes) as usize;
 
             let chunk = data.get(offset..offset + 4).ok_or(StructureError)?;
 

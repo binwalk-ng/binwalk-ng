@@ -132,7 +132,10 @@ fn arcadyan_deobfuscator(obfuscated_data: &[u8]) -> Vec<u8> {
     deobfuscated_data.extend_from_slice(p3);
 
     // Swap nibbles and pairs of bytes in what is now block 1
-    for chunk in deobfuscated_data[BLOCK1_START..BLOCK1_END].chunks_exact_mut(2) {
+    for chunk in deobfuscated_data[BLOCK1_START..BLOCK1_END]
+        .as_chunks_mut::<2>()
+        .0
+    {
         let orig_0 = chunk[0];
         chunk[0] = chunk[1].rotate_left(4);
         chunk[1] = orig_0.rotate_left(4);

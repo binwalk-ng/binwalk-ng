@@ -323,19 +323,19 @@ mod tests {
 
     #[test]
     fn rar_parser_detects_v5_at_offset_0() {
-        let entries = [rars::rar50::StoredEntry {
-            name: b"a.txt",
-            data: b"test",
-            mtime: None,
-            attributes: 0x20,
-            host_os: 3,
-        }];
+        let entries = [rars::rar50::ArchiveEntry::new(
+            b"a.txt".to_vec(),
+            rars::EntrySource::from_bytes(b"test".to_vec()),
+        )
+        .with_mtime(None)
+        .with_attributes(0x20)
+        .with_host_os(3)];
         let opts = rars::rar50::WriterOptions::new(
             rars::ArchiveVersion::Rar50,
             rars::FeatureSet::store_only(),
         );
         let mut bytes = rars::rar50::Rar50Writer::new(opts)
-            .stored_entries(&entries)
+            .entries(entries)
             .finish()
             .unwrap();
         bytes.extend_from_slice(RAR5_EOF);
@@ -393,19 +393,19 @@ mod tests {
 
     #[test]
     fn extract_rar_dry_run_v5() {
-        let entries = [rars::rar50::StoredEntry {
-            name: b"dry.txt",
-            data: b"dry run data",
-            mtime: None,
-            attributes: 0x20,
-            host_os: 3,
-        }];
+        let entries = [rars::rar50::ArchiveEntry::new(
+            b"dry.txt".to_vec(),
+            rars::EntrySource::from_bytes(b"dry run data".to_vec()),
+        )
+        .with_mtime(None)
+        .with_attributes(0x20)
+        .with_host_os(3)];
         let opts = rars::rar50::WriterOptions::new(
             rars::ArchiveVersion::Rar50,
             rars::FeatureSet::store_only(),
         );
         let mut bytes = rars::rar50::Rar50Writer::new(opts)
-            .stored_entries(&entries)
+            .entries(entries)
             .finish()
             .unwrap();
         bytes.extend_from_slice(RAR5_EOF);
@@ -508,19 +508,19 @@ mod tests {
 
     #[test]
     fn extract_rar_with_write_v5() {
-        let entries = [rars::rar50::StoredEntry {
-            name: b"out.txt",
-            data: b"hello from rar5",
-            mtime: None,
-            attributes: 0x20,
-            host_os: 3,
-        }];
+        let entries = [rars::rar50::ArchiveEntry::new(
+            b"out.txt".to_vec(),
+            rars::EntrySource::from_bytes(b"hello from rar5".to_vec()),
+        )
+        .with_mtime(None)
+        .with_attributes(0x20)
+        .with_host_os(3)];
         let opts = rars::rar50::WriterOptions::new(
             rars::ArchiveVersion::Rar50,
             rars::FeatureSet::store_only(),
         );
         let mut bytes = rars::rar50::Rar50Writer::new(opts)
-            .stored_entries(&entries)
+            .entries(entries)
             .finish()
             .unwrap();
         bytes.extend_from_slice(RAR5_EOF);

@@ -1,0 +1,82 @@
+name: Benchmark
+
+on:
+  pull_request:
+    branches: ['*']
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    permissions:
+      contents: read
+      actions: write
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build dev image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: dev
+          load: true
+          tags: binwalk-ng:dev
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run benchmarks
+        run: |
+          # seccomp=unconfined lets gungraun disable ASLR (setarch) in the container.
+          docker run --rm --security-opt seccomp=unconfined \
+            -v "${{ github.workspace }}:/tmp/binwalk" \
+            -w /tmp/binwalk \
+            binwalk-ng:dev \
+            python3 scripts/bench-run.py
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-results
+          path: |
+            target/bench/results.json
+            target/bench/bench.log
+          if-no-files-found: error
+
+  update-baseline:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: benchmark
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      actions: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download benchmark artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: benchmark-results
+          path: target/bench
+
+      - name: Update baseline
+        run: bash .github/scripts/update-baseline.sh

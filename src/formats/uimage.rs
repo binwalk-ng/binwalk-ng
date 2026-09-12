@@ -264,11 +264,14 @@ fn calculate_uimage_header_checksum(hdr: &[u8]) -> u32 {
     const HEADER_CRC_START: usize = 4;
     const HEADER_CRC_END: usize = 8;
 
-    // Header checksum has to be nulled out to calculate the CRC
-    let mut uimage_header = hdr.to_vec();
-    uimage_header[HEADER_CRC_START..HEADER_CRC_END].fill(0);
+    // Header checksum has to be nulled out to calculate the CRC; feed the bytes either side of
+    // it, with the field's four zero bytes, through the CRC without copying the header
+    let mut hasher = crc32fast::Hasher::new();
+    hasher.update(&hdr[..HEADER_CRC_START]);
+    hasher.update(&[0, 0, 0, 0]);
+    hasher.update(&hdr[HEADER_CRC_END..]);
 
-    crc32(&uimage_header)
+    hasher.finalize()
 }
 
 /// Describes the internal extractor for carving uImage files to disk

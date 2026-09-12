@@ -147,3 +147,43 @@ pub fn parse_pe_header(pe_data: &[u8]) -> Result<PEHeader, StructureError> {
 
     Err(StructureError)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Binwalk;
+    use std::mem::offset_of;
+
+    /// A PE whose DOS header is the all-zero variant of the magic: `MZ`, then nothing but zeros
+    /// until `e_lfanew`.
+    fn minimal_pe() -> Vec<u8> {
+        const PE_HEADER_START: usize = size_of::<DOSHeaderBytes>();
+
+        let mut image = vec![0u8; PE_HEADER_START + size_of::<PEHeaderBytes>()];
+        image[..2].copy_from_slice(b"MZ");
+        image[offset_of!(DOSHeaderBytes, e_lfanew)..][..4]
+            .copy_from_slice(&(PE_HEADER_START as u32).to_le_bytes());
+        image[PE_HEADER_START..][..4].copy_from_slice(b"PE\0\0");
+        image[PE_HEADER_START + offset_of!(PEHeaderBytes, machine)..][..2]
+            .copy_from_slice(&0x14Cu16.to_le_bytes()); // Intel x86
+
+        assert!(parse_pe_header(&image).is_ok());
+        image
+    }
+
+    #[test]
+    fn scan_finds_image_after_zero_region() {
+        let image = minimal_pe();
+        let offset = 4096;
+        let mut file_data = vec![0u8; offset];
+        file_data.extend_from_slice(&image);
+
+        let file_map = Binwalk::new().scan(&file_data);
+        assert!(
+            file_map
+                .iter()
+                .any(|result| result.name == "pe" && result.offset == offset),
+            "{file_map:?}"
+        );
+    }
+}

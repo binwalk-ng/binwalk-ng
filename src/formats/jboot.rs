@@ -343,12 +343,14 @@ fn sch2_header_crc(sch2_header_bytes: &[u8]) -> Result<u32, StructureError> {
     const HEADER_CRC_END: usize = 36;
 
     if sch2_header_bytes.len() > HEADER_CRC_END {
-        let mut crc_data = sch2_header_bytes.to_vec();
+        // Header CRC field has to be NULL'd out; feed the bytes either side of it, with the
+        // field's four zero bytes, through the CRC without copying the whole header
+        let mut hasher = crc32fast::Hasher::new();
+        hasher.update(&sch2_header_bytes[..HEADER_CRC_START]);
+        hasher.update(&[0, 0, 0, 0]);
+        hasher.update(&sch2_header_bytes[HEADER_CRC_END..]);
 
-        // Header CRC field has to be NULL'd out
-        crc_data[HEADER_CRC_START..HEADER_CRC_END].fill(0);
-
-        return Ok(crc32(&crc_data));
+        return Ok(hasher.finalize());
     }
 
     Err(StructureError)

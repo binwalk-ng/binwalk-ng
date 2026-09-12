@@ -89,11 +89,12 @@ pub fn parse_romfs_header(romfs_data: &[u8]) -> Result<RomFSHeader, StructureErr
             if let Some(crc_data) = romfs_data.get(0..crc_data_len)
                 && romfs_crc_valid(crc_data)
             {
+                // Volume name has a NULL terminator and is padded to a 16 byte boundary alignment
+                let header_size = header_size + romfs_align(volume_name.len() + 1);
                 return Ok(RomFSHeader {
                     image_size,
-                    volume_name: volume_name.clone(),
-                    // Volume name has a NULL terminator and is padded to a 16 byte boundary alignment
-                    header_size: header_size + romfs_align(volume_name.len() + 1),
+                    volume_name,
+                    header_size,
                 });
             }
         }
@@ -169,10 +170,10 @@ pub fn parse_romfs_file_entry(romfs_data: &[u8]) -> Result<RomFSFileHeader, Stru
             file_header.size = file_entry_header.size.get() as usize;
             file_header.info = file_entry_header.info.get() as usize;
             file_header.checksum = file_entry_header.checksum.get();
-            file_header.name = file_name.clone();
+            file_header.name = file_name;
 
             // File data begins immediately after the file header, including the NULL-terminated, 16-byte alignment padded file name
-            file_header.data_offset = file_header_size + romfs_align(file_name.len() + 1);
+            file_header.data_offset = file_header_size + romfs_align(file_header.name.len() + 1);
 
             // These values are encoded into the next header offset field
             file_header.file_type = file_entry_header.next_header_offset.get() & FILE_TYPE_MASK;
@@ -215,8 +216,10 @@ fn romfs_crc_valid(crc_data: &[u8]) -> bool {
     // Checksum size must be 4-byte aligned
     if crc_data.len().is_multiple_of(WORD_SIZE) {
         let sum: u32 = crc_data
-            .chunks_exact(WORD_SIZE)
-            .map(|chunk| u32::from_be_bytes(chunk.try_into().unwrap()))
+            .as_chunks::<WORD_SIZE>()
+            .0
+            .iter()
+            .map(|chunk| u32::from_be_bytes(*chunk))
             .fold(0u32, u32::wrapping_add);
 
         /*
@@ -395,13 +398,13 @@ fn process_romfs_entries(
                     if let Some(symlink_bytes) =
                         romfs_data.get(file_entry.offset..file_entry.offset + file_entry.size)
                     {
-                        match String::from_utf8(symlink_bytes.to_vec()) {
+                        match std::str::from_utf8(symlink_bytes) {
                             Err(e) => {
                                 warn!("Failed to convert symlink target path to string: {e}");
                                 return Err(ExtractionError);
                             }
                             Ok(path) => {
-                                file_entry.symlink_target = path.clone();
+                                file_entry.symlink_target = path.to_owned();
                             }
                         }
                     } else {
@@ -452,35 +455,29 @@ fn extract_romfs_entries(
     let chroot = Chroot::new(chroot_directory);
 
     for file_entry in romfs_files {
-        let extraction_success: bool;
         let file_path = chroot.safe_path_join(parent_directory.as_ref(), &file_entry.name);
 
-        if file_entry.directory {
-            extraction_success = chroot.create_directory(&file_path);
+        let extraction_success = if file_entry.directory {
+            chroot.create_directory(&file_path)
         } else if file_entry.regular {
-            extraction_success =
-                chroot.carve_file(&file_path, romfs_data, file_entry.offset, file_entry.size);
+            chroot.carve_file(&file_path, romfs_data, file_entry.offset, file_entry.size)
         } else if file_entry.symlink {
-            extraction_success = chroot.create_symlink(&file_path, &file_entry.symlink_target);
+            chroot.create_symlink(&file_path, &file_entry.symlink_target)
         } else if file_entry.fifo {
-            extraction_success = chroot.create_fifo(&file_path);
+            chroot.create_fifo(&file_path)
         } else if file_entry.socket {
-            extraction_success = chroot.create_socket(&file_path);
+            chroot.create_socket(&file_path)
         } else if file_entry.block_device {
-            extraction_success = chroot.create_block_device(
-                &file_path,
-                file_entry.device_major,
-                file_entry.device_minor,
-            );
+            chroot.create_block_device(&file_path, file_entry.device_major, file_entry.device_minor)
         } else if file_entry.character_device {
-            extraction_success = chroot.create_character_device(
+            chroot.create_character_device(
                 &file_path,
                 file_entry.device_major,
                 file_entry.device_minor,
-            );
+            )
         } else {
             continue;
-        }
+        };
 
         if extraction_success {
             file_count += 1;

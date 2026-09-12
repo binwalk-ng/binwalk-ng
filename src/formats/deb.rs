@@ -52,7 +52,7 @@ pub fn parse_deb_header(deb_data: &[u8]) -> Result<DebHeader, StructureError> {
         deb_data.get(CONTROL_FILE_SIZE_START..CONTROL_FILE_SIZE_END)
     {
         // Convert the raw bytes into an ASCII string
-        if let Ok(control_file_size_str) = String::from_utf8(control_file_size_data.to_vec()) {
+        if let Ok(control_file_size_str) = std::str::from_utf8(control_file_size_data) {
             // Trim white space from the string and convert to an integer value
             if let Ok(control_file_size) = control_file_size_str.trim().parse::<usize>() {
                 // Calculate the offsets to the decimal ASCII string that contains the data file size
@@ -67,8 +67,7 @@ pub fn parse_deb_header(deb_data: &[u8]) -> Result<DebHeader, StructureError> {
                     deb_data.get(data_file_size_start..data_file_size_end)
                 {
                     // Convert the raw bytes to an ASCII string
-                    if let Ok(data_file_size_str) = String::from_utf8(data_file_size_data.to_vec())
-                    {
+                    if let Ok(data_file_size_str) = std::str::from_utf8(data_file_size_data) {
                         // Trim whitespace from the string and convert to an integer value
                         if let Ok(data_file_size) = data_file_size_str.trim().parse::<usize>() {
                             // Total file size is the end of the file data size ASCII field, plus the 2-byte end marker, plus the length of the following data file

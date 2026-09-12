@@ -1,13 +1,11 @@
 use log::error;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::fs;
 use std::io;
-use std::io::Seek;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
-use crate::display;
 #[cfg(feature = "entropy-plot")]
 use crate::entropy::FileEntropy;
 use binwalk_ng::AnalysisResults;
@@ -17,17 +15,19 @@ const JSON_LIST_START: &str = "[\n";
 const JSON_LIST_END: &str = "\n]\n";
 const JSON_LIST_SEP: &str = ",\n";
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum JSONType {
+#[derive(Debug, Serialize)]
+pub enum JSONType<'a> {
     #[cfg(feature = "entropy-plot")]
-    Entropy(FileEntropy),
-    Analysis(AnalysisResults),
+    Entropy(&'a FileEntropy),
+    Analysis(&'a AnalysisResults),
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Default)]
 pub struct JsonLogger {
     pub json_file: Option<PathBuf>,
     pub json_file_initialized: bool,
+    /// A single writer to the JSON log output, opened once instead of reopened for every entry
+    writer: Option<Box<dyn Write>>,
 }
 
 impl JsonLogger {
@@ -36,37 +36,11 @@ impl JsonLogger {
 
         if let Some(log_file) = log_file {
             new_instance.json_file = Some(log_file.to_path_buf());
-        }
 
-        new_instance
-    }
-
-    pub fn close(&self) {
-        self.write_json(JSON_LIST_END);
-    }
-
-    pub fn log(&mut self, results: JSONType) {
-        // Convert analysis results to JSON
-        match serde_json::to_string_pretty(&results) {
-            Err(e) => error!("Failed to convert analysis results to JSON: {e}"),
-            Ok(json) => {
-                if !self.json_file_initialized {
-                    self.write_json(JSON_LIST_START);
-                    self.json_file_initialized = true;
-                } else {
-                    self.write_json(JSON_LIST_SEP);
-                }
-                self.write_json(&json);
-            }
-        }
-    }
-
-    fn write_json(&self, data: &str) {
-        if let Some(log_file) = &self.json_file {
-            if log_file == STDOUT {
-                display::print_plain(false, data);
+            // Establish the writer up front, to avoid reopening the log file for every entry
+            new_instance.writer = Some(if log_file == STDOUT {
+                Box::new(io::stdout())
             } else {
-                // Open file for reading and writing, create if does not already exist
                 match fs::OpenOptions::new()
                     .create(true)
                     .append(true)
@@ -75,22 +49,62 @@ impl JsonLogger {
                 {
                     Err(e) => {
                         error!("Failed to open JSON log file '{}': {e}", log_file.display());
+                        return new_instance;
                     }
-                    Ok(mut fp) => {
-                        // Seek to the end of the file and get the cursor position
-                        match fp.seek(io::SeekFrom::End(0)) {
-                            Err(e) => {
-                                error!("Failed to seek to end of JSON file: {e}");
-                            }
-                            Ok(_) => {
-                                if let Err(e) = fp.write_all(data.as_bytes()) {
-                                    error!("Failed to write to JSON log file: {e}");
-                                }
-                            }
-                        }
-                    }
+                    Ok(fp) => Box::new(io::BufWriter::new(fp)),
                 }
+            });
+        }
+
+        new_instance
+    }
+
+    pub fn close(&mut self) {
+        self.write_json(JSON_LIST_END);
+
+        // Ensure all buffered JSON data and the closing list marker are flushed to the log
+        if let Some(writer) = &mut self.writer
+            && let Err(e) = writer.flush()
+        {
+            error!("Failed to flush JSON log file: {e}");
+        }
+    }
+
+    pub fn log(&mut self, results: JSONType) {
+        // Write the list header/separator between log entries
+        if !self.json_file_initialized {
+            self.write_json(JSON_LIST_START);
+            self.json_file_initialized = true;
+        } else {
+            self.write_json(JSON_LIST_SEP);
+        }
+
+        // Serialize the analysis results directly to the log writer, avoiding building a String
+        if let Some(writer) = &mut self.writer {
+            if let Err(e) = serde_json::to_writer_pretty(&mut *writer, &results) {
+                error!("Failed to convert analysis results to JSON: {e}");
             }
+
+            // Flush each entry to the log output, so it is promptly visible if the
+            // process is interrupted
+            if let Err(e) = writer.flush() {
+                error!("Failed to flush JSON log file: {e}");
+            }
+        }
+    }
+
+    fn write_json(&mut self, data: &str) {
+        let Some(writer) = &mut self.writer else {
+            return;
+        };
+
+        if let Err(e) = writer.write_all(data.as_bytes()) {
+            error!("Failed to write to JSON log file: {e}");
+        }
+
+        // Flush each write immediately, as the previous per-write file open/close did
+        if let Err(e) = writer.flush() {
+            error!("Failed to flush JSON log file: {e}");
         }
     }
 }

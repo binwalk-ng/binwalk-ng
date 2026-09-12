@@ -24,7 +24,7 @@ pub struct CliArgs {
     pub file_name: Option<PathBuf>,
 
     /// Suppress normal stdout output
-    #[arg(short, long)]
+    #[arg(short, long, conflicts_with = "verbose")]
     pub quiet: bool,
 
     /// During recursive extraction display *all* results
@@ -47,12 +47,18 @@ pub struct CliArgs {
     #[arg(short = 'a', long)]
     pub search_all: bool,
 
-    /// Generate an entropy graph with Plotly
+    /// Generate an entropy graph
     #[arg(short = 'E', long, conflicts_with = "extract")]
     pub entropy: bool,
 
-    /// Save entropy graph as a PNG file
-    #[arg(short, long, value_name = "PATH", value_hint = clap::ValueHint::FilePath)]
+    /// Save the entropy graph as a PNG file (requires --entropy)
+    #[arg(
+        short,
+        long,
+        requires = "entropy",
+        value_name = "PATH",
+        value_hint = clap::ValueHint::FilePath
+    )]
     pub png: Option<PathBuf>,
 
     /// Log JSON results to a file ('-' for stdout)
@@ -61,16 +67,10 @@ pub struct CliArgs {
 
     /// Manually specify the number of threads to use
     #[arg(short, long, value_name = "INT", value_parser = clap::value_parser!(u64).range(1..))]
-    pub threads: Option<usize>,
+    pub threads: Option<u64>,
 
     /// Do not scan for these signatures
-    #[arg(
-        short = 'x',
-        long,
-        value_delimiter = ',',
-        num_args = 1..,
-        value_name = "SIG"
-    )]
+    #[arg(short = 'x', long, value_delimiter = ',', value_name = "SIG")]
     pub exclude: Vec<String>, // Removed Option; Vec is empty by default
 
     /// Only scan for these signatures
@@ -78,7 +78,6 @@ pub struct CliArgs {
         short = 'y',
         long,
         value_delimiter = ',',
-        num_args = 1..,
         conflicts_with = "exclude",
         value_name = "SIG"
     )]
@@ -87,4 +86,11 @@ pub struct CliArgs {
     /// Extract files/folders to a custom directory
     #[arg(short, long, default_value = "extractions", value_hint = clap::ValueHint::DirPath)]
     pub directory: PathBuf,
+
+    /// Disable the use of memory maps
+    ///
+    /// binwalk may abort unexpectedly when memory maps are used if it searches a file that is
+    /// simultaneously truncated. Users can opt out of this possibility by disabling memory maps.
+    #[arg(long)]
+    pub no_mmap: bool,
 }

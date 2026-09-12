@@ -67,23 +67,23 @@ pub fn yaffs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
     Err(SignatureError)
 }
 
+/// Spare area is expected to start with these bytes, depending on endianness and ECC settings (YAFFS2 only)
+const SPARE_MAGICS: &[&[u8]] = &[
+    b"\x00\x00\x10\x00",
+    b"\x00\x10\x00\x00",
+    b"\xFF\xFF\x00\x00\x10\x00",
+    b"\xFF\xFF\x00\x10\x00\x00",
+];
+
 /// Returns the detected page size used by the YAFFS image
 fn get_page_size(file_data: &[u8]) -> Result<usize, SignatureError> {
-    // Spare area is expected to start with these bytes, depending on endianness and ECC settings (YAFFS2 only)
-    let spare_magics = [
-        b"\x00\x00\x10\x00".to_vec(),
-        b"\x00\x10\x00\x00".to_vec(),
-        b"\xFF\xFF\x00\x00\x10\x00".to_vec(),
-        b"\xFF\xFF\x00\x10\x00\x00".to_vec(),
-    ];
-
     // Valid YAFFS page sizes
     let page_sizes = [512, 1024, 2048, 4096, 8192, 16384];
 
     // Loop through each page size looking for one that is immediately followed by a valid spare data entry.
     // This is only for YAFFS2! It will fail for YAFFS1 images.
     for page_size in &page_sizes {
-        for spare_magic in &spare_magics {
+        for spare_magic in SPARE_MAGICS {
             let start_spare_offset: usize = *page_size;
             let end_spare_offset: usize = start_spare_offset + spare_magic.len();
 

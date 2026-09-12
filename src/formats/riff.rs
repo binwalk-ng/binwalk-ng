@@ -66,12 +66,12 @@ pub fn parse_riff_header(riff_data: &[u8]) -> Result<RIFFHeader, StructureError>
     let (riff_header, _) =
         RIFFHeaderBytes::ref_from_prefix(riff_data).map_err(|_| StructureError)?;
     if riff_header.magic == MAGIC
-        && let Ok(type_string) = // Get the RIFF type string (e.g., "WAVE")
-            String::from_utf8(riff_data[CHUNK_TYPE_START..CHUNK_TYPE_END].to_vec())
+        && let Ok(type_str) = // Get the RIFF type string (e.g., "WAVE")
+            std::str::from_utf8(&riff_data[CHUNK_TYPE_START..CHUNK_TYPE_END])
     {
         return Ok(RIFFHeader {
             size: riff_header.file_size.get() as usize + FILE_SIZE_OFFSET,
-            chunk_type: type_string.trim().to_string(),
+            chunk_type: type_str.trim().to_string(),
         });
     }
 

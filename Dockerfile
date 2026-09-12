@@ -125,11 +125,18 @@ COPY --link --from=base_build \
     ${BUILD_DIR}/dmg2img/dmg2img \
     ${BUILD_DIR}/dmg2img/vfdecrypt \
     /usr/local/bin/
-RUN apt-get update \
-    && apt-get install -y curl build-essential \
+# Cache cargo's registry across dev-stage rebuilds (arch-independent, shared).
+RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
+    apt-get update \
+    && apt-get install -y curl build-essential valgrind \
     && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
     && . /root/.cargo/env \
-    && cargo install cargo-insta
+    && curl -LsSf \
+       https://raw.githubusercontent.com/cargo-bins/cargo-binstall/v1.21.1/install-from-binstall-release.sh \
+       -o /tmp/install-binstall.sh \
+    && BINSTALL_VERSION=v1.21.1 bash /tmp/install-binstall.sh \
+    && rm /tmp/install-binstall.sh \
+    && cargo binstall -y cargo-insta
 ENV PATH=/root/.cargo/bin:${PATH}
 
 WORKDIR ${BINWALK_BUILD_DIR}

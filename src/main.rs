@@ -1,19 +1,22 @@
 use binwalk_ng::extractors::Chroot;
-use binwalk_ng::{AnalysisResults, common, extractors};
+use binwalk_ng::{AnalysisResults, MmapUsage, common, extractors};
 use clap::Parser;
 use log::{debug, error, info};
 use rayon::ThreadPool;
-use std::collections::VecDeque;
-use std::panic;
+use std::ffi::OsStr;
+use std::path;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process;
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time;
+use std::{fs, panic};
+
+#[cfg(unix)]
+use std::os::unix;
 
 mod cli_parser;
 mod display;
@@ -26,25 +29,15 @@ fn main() -> ExitCode {
     const DEFAULT_WORKER_COUNT: usize = 1;
 
     // Number of seconds to wait before printing debug progress info
-    const PROGRESS_INTERVAL: u64 = 30;
+    const PROGRESS_INTERVAL: time::Duration = time::Duration::from_secs(30);
 
-    // If this env var is set during extraction, the Binwalk.base_target_file symlink will
+    // If this env var is set during extraction, the symlink to the target file will
     // be deleted at the end of extraction.
     const BINWALK_RM_SYMLINK: &str = "BINWALK_RM_EXTRACTION_SYMLINK";
-
-    // Output directory for extracted files
-    let mut output_directory: Option<PathBuf> = None;
-
-    /*
-     * Queue of files waiting to be analyzed.
-     * Grows when matryoshka mode discovers nested files in extraction results.
-     */
-    let mut target_files = VecDeque::new();
 
     // Statistics variables; keeps track of analyzed file count and total analysis run time
     let mut file_count: usize = 0;
     let run_time = time::Instant::now();
-    let mut last_progress_interval = time::Instant::now();
 
     // Initialize logging with local timezone timestamps
     env_logger::Builder::from_env(env_logger::Env::default())
@@ -67,7 +60,7 @@ fn main() -> ExitCode {
 
     // If --list was specified, just display a list of signatures and return
     if cli_args.list {
-        display::print_signature_list(cli_args.quiet, &binwalk_ng::magic::patterns());
+        display::print_signature_list(&binwalk_ng::magic::patterns());
         return ExitCode::SUCCESS;
     }
 
@@ -81,51 +74,85 @@ fn main() -> ExitCode {
             );
             return ExitCode::FAILURE;
         }
+
         #[cfg(feature = "entropy-plot")]
         {
-            // generate the entropy graph and return
-            display::print_plain(cli_args.quiet, "Calculating file entropy...");
+            let (entropy_results, png_path) =
+                match entropy::plot(cli_args.file_name.unwrap(), cli_args.png.as_deref()) {
+                    Ok(results) => results,
+                    Err(e) => {
+                        error!("Entropy analysis failed: {e}");
+                        return ExitCode::FAILURE;
+                    }
+                };
 
-            if let Ok(entropy_results) =
-                entropy::plot(cli_args.file_name.unwrap(), cli_args.png.as_deref())
-            {
-                // Log entropy results to JSON file, if requested
-                json_logger.log(json::JSONType::Entropy(entropy_results));
-                json_logger.close();
+            json_logger.log(json::JSONType::Entropy(&entropy_results));
+            json_logger.close();
 
-                display::println_plain(cli_args.quiet, "done.");
+            let graph_path_message = format!("Entropy graph saved to '{}'", png_path.display());
+            if cli_args.log.as_deref() == Some(Path::new("-")) {
+                if !cli_args.quiet {
+                    eprintln!("{graph_path_message}");
+                }
             } else {
-                error!("Entropy analysis failed!");
-                return ExitCode::FAILURE;
+                display::println_plain(cli_args.quiet, &graph_path_message);
             }
 
             return ExitCode::SUCCESS;
         }
     }
 
-    // If extraction or data carving was requested, we need to initialize the output directory
-    if cli_args.extract || cli_args.carve {
-        output_directory = Some(cli_args.directory);
-    }
-
-    // Initialize binwalk
-    let binwalker = match binwalk_ng::Binwalk::configure(
-        cli_args.file_name.as_deref(),
-        output_directory.as_deref(),
-        cli_args.include,
-        cli_args.exclude,
-        None,
-        cli_args.search_all,
-    ) {
+    /*
+     * Analysis and extraction results are written relative to the target file path, so it
+     * must be absolute: the symlink created below lives in the output directory, which may
+     * be anywhere on the file system.
+     */
+    let target_file = match path::absolute(cli_args.file_name.unwrap()) {
+        Ok(path) => path,
         Err(e) => {
-            error!("Binwalk initialization failed: {}", e.message);
+            error!("Failed to get an absolute path for the target file: {e}");
             return ExitCode::FAILURE;
         }
-        Ok(bw) => bw,
+    };
+
+    /*
+     * If extraction or data carving was requested, everything is written to the output
+     * directory. Analyze a symlink to the target file inside that directory, so that all
+     * output lands there rather than beside the target file itself.
+     */
+    let target_file = if cli_args.extract || cli_args.carve {
+        match init_extraction_directory(&target_file, &cli_args.directory) {
+            Ok(symlink_path) => symlink_path,
+            Err(e) => {
+                error!("Failed to initialize extraction directory: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        target_file
+    };
+
+    // Initialize binwalk
+    let binwalker = match binwalk_ng::Binwalk::builder()
+        .includes(cli_args.include)
+        .excludes(cli_args.exclude)
+        .full_search(cli_args.search_all)
+        .mmap_usage(if cli_args.no_mmap {
+            MmapUsage::Never
+        } else {
+            MmapUsage::WhenPossible
+        })
+        .build()
+    {
+        Ok(binwalker) => Arc::new(binwalker),
+        Err(e) => {
+            error!("Binwalk initialization failed: {e}");
+            return ExitCode::FAILURE;
+        }
     };
 
     // If the user specified --threads, honor that request; else, auto-detect available parallelism
-    let available_workers = cli_args.threads.unwrap_or_else(|| {
+    let available_workers = cli_args.threads.map(|t| t as usize).unwrap_or_else(|| {
         // Get CPU core info
         match thread::available_parallelism() {
             // In case of error use the default
@@ -149,7 +176,6 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let pending = Arc::new(AtomicUsize::new(0));
     let (worker_tx, worker_rx) = mpsc::channel();
 
     /*
@@ -163,28 +189,33 @@ fn main() -> ExitCode {
         process::exit(-1);
     }));
 
-    debug!(
-        "Queuing initial target file: {}",
-        binwalker.base_target_file.display()
-    );
-
-    // Queue the initial file path
-    target_files.push_back(binwalker.base_target_file.clone());
+    let verbosity = match (cli_args.quiet, cli_args.verbose) {
+        (true, _) => Verbosity::Quiet,
+        (_, true) => Verbosity::Verbose,
+        _ => Verbosity::Normal,
+    };
 
     let flags = AnalysisFlags {
-        verbose: cli_args.verbose,
-        quiet: cli_args.quiet,
+        verbosity,
         do_extract: cli_args.extract,
         matryoshka: cli_args.matryoshka,
     };
 
+    debug!("Queuing initial target file: {}", target_file.display(),);
+    // Files waiting to be analyzed, start with the base file only.
+    // In matryoshka mode, grows as new nested files are discovered in extraction results
+    let mut target_files = vec![target_file.clone()];
+    let mut outstanding_files = 0u64;
+    let mut next_progress = time::Instant::now() + PROGRESS_INTERVAL;
     /*
      * Main loop.
      * Loop until all pending thread jobs are complete and there are no more files in the queue.
      */
-    loop {
+    while !target_files.is_empty() || outstanding_files > 0 {
         // Drain any queued files into the thread pool
-        while let Some(target_file) = target_files.pop_front() {
+        #[allow(clippy::iter_with_drain)] // https://github.com/rust-lang/rust-clippy/issues/8539
+        for target_file in target_files.drain(..) {
+            outstanding_files += 1;
             spawn_worker(
                 &workers,
                 binwalker.clone(),
@@ -192,29 +223,13 @@ fn main() -> ExitCode {
                 cli_args.extract,
                 cli_args.carve,
                 worker_tx.clone(),
-                pending.clone(),
             );
         }
 
-        // Don't spin CPU cycles if there is no backlog of files to analyze
-        if target_files.is_empty() {
-            let sleep_time = time::Duration::from_millis(1);
-            thread::sleep(sleep_time);
-        }
-
-        // Some debug info on analysis progress
-        if last_progress_interval.elapsed().as_secs() >= PROGRESS_INTERVAL {
-            info!(
-                "Status: pending tasks: {}/{}, files waiting in queue: {}",
-                pending.load(Ordering::Acquire),
-                available_workers,
-                target_files.len()
-            );
-            last_progress_interval = time::Instant::now();
-        }
-
-        // Drain all available results from the channel
-        while let Ok(results) = worker_rx.try_recv() {
+        debug_assert!(target_files.is_empty() && outstanding_files > 0);
+        if let Ok(results) =
+            worker_rx.recv_timeout(next_progress.saturating_duration_since(time::Instant::now()))
+        {
             process_analysis_results(
                 results,
                 &mut file_count,
@@ -222,77 +237,192 @@ fn main() -> ExitCode {
                 flags,
                 &mut target_files,
             );
+            outstanding_files -= 1;
         }
-
-        // Exit only when no work remains and the channel is truly empty
-        if pending.load(Ordering::Acquire) == 0 && target_files.is_empty() {
-            match worker_rx.try_recv() {
-                Ok(results) => {
-                    process_analysis_results(
-                        results,
-                        &mut file_count,
-                        &mut json_logger,
-                        flags,
-                        &mut target_files,
-                    );
-                }
-                Err(_) => break,
-            }
+        if time::Instant::now() >= next_progress {
+            // Some debug info on analysis progress
+            info!(
+                "Status: pending tasks: {}/{}",
+                outstanding_files, available_workers,
+            );
+            next_progress = time::Instant::now() + PROGRESS_INTERVAL;
         }
     }
 
     json_logger.close();
 
-    // If BINWALK_RM_SYMLINK env var was set, delete the base_target_file symlink
+    // If BINWALK_RM_SYMLINK env var was set, delete the target file symlink
     if (cli_args.carve || cli_args.extract)
         && std::env::var(BINWALK_RM_SYMLINK).is_ok()
-        && let Err(e) = std::fs::remove_file(&binwalker.base_target_file)
+        && let Err(e) = fs::remove_file(&target_file)
     {
         error!(
             "Request to remove extraction symlink file {} failed: {}",
-            binwalker.base_target_file.display(),
+            target_file.display(),
             e
         );
     }
 
     // All done, show some basic statistics
-    display::print_stats(
-        cli_args.quiet,
-        run_time,
-        file_count,
-        binwalker.signature_count,
-        binwalker.pattern_count,
-    );
+    if !cli_args.quiet {
+        display::print_stats(
+            run_time,
+            file_count,
+            binwalker.signature_count(),
+            binwalker.pattern_count(),
+        );
+    }
 
     ExitCode::SUCCESS
 }
 
-/// Returns true if the specified results should be displayed to screen
-fn should_display(results: &AnalysisResults, file_count: usize, verbose: bool) -> bool {
-    /*
-     * For brevity, when analyzing more than one file only display subsequent files whose results
-     * contain signatures that we always want displayed, or which contain extractable signatures.
-     * This can be overridden with the --verbose command line flag.
-     */
-    if file_count == 1 || verbose || !results.extractions.is_empty() {
-        return true;
-    } else {
-        for signature in &results.file_map {
-            if signature.always_display {
-                return true;
-            }
+/// Initializes the extraction output directory, creating it if it does not already exist,
+/// and placing a symlink to the target file inside it.
+///
+/// Returns the path to that symlink, which is the path to analyze: extraction and carving
+/// write their output relative to the analyzed file's path, so analyzing the symlink is
+/// what keeps all output inside the extraction directory.
+///
+/// A symlink left by a previous run is always replaced, so it cannot still point at some
+/// earlier target of the same name. Any other pre-existing entry is an error, rather than
+/// something to analyze in the target's place or to delete.
+fn init_extraction_directory(
+    target_path: &Path,
+    extraction_directory: &Path,
+) -> Result<PathBuf, std::io::Error> {
+    let extraction_directory = path::absolute(extraction_directory)?;
+
+    // Create the output directory, equivalent of mkdir -p
+    match fs::create_dir_all(&extraction_directory) {
+        Ok(_) => {
+            debug!(
+                "Created base output directory: '{}'",
+                extraction_directory.display()
+            );
+        }
+        Err(e) => {
+            error!(
+                "Failed to create base output directory '{}': {e}",
+                extraction_directory.display()
+            );
+            return Err(e);
         }
     }
 
-    false
+    // Build a symlink path to the target file in the extraction directory
+    let Some(file_name) = target_path.file_name() else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "'{}' does not name a file to analyze",
+                target_path.display()
+            ),
+        ));
+    };
+    let link_path = extraction_directory.join(file_name);
+
+    // The target already lives in the extraction directory, so there is nothing to link
+    if link_path == target_path {
+        return Ok(link_path);
+    }
+
+    /*
+     * Always recreate the link, so it cannot be left over from an earlier run pointing at
+     * a different file that happened to have the same name. Only a symlink is ours to
+     * remove; anything else here belongs to the user, and neither analyzing it in the
+     * target's place nor deleting it would be right.
+     */
+    match fs::symlink_metadata(&link_path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+        Ok(metadata) => {
+            if !metadata.is_symlink() {
+                error!(
+                    "'{}' already exists and was not created by binwalk, refusing to replace it",
+                    link_path.display()
+                );
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    format!(
+                        "'{}' already exists; use a different --directory",
+                        link_path.display()
+                    ),
+                ));
+            }
+            fs::remove_file(&link_path)?;
+        }
+    }
+
+    debug!(
+        "Creating symlink from {} -> {}",
+        link_path.display(),
+        target_path.display()
+    );
+
+    // Create a symlink from inside the extraction directory to the specified target file
+    #[cfg(unix)]
+    {
+        match unix::fs::symlink(target_path, &link_path) {
+            Ok(_) => Ok(link_path),
+            Err(e) => {
+                error!(
+                    "Failed to create symlink {} -> {}: {}",
+                    link_path.display(),
+                    target_path.display(),
+                    e
+                );
+                Err(e)
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        match fs::hard_link(target_path, &link_path) {
+            Ok(_) => Ok(link_path),
+            Err(e) => {
+                error!(
+                    "Failed to create hardlink {} -> {}: {}",
+                    link_path.display(),
+                    target_path.display(),
+                    e
+                );
+                Err(e)
+            }
+        }
+    }
+}
+
+/// Returns true if the specified results should be displayed to screen
+fn should_display(verbosity: Verbosity, results: &AnalysisResults, file_count: usize) -> bool {
+    /*
+     * For brevity, when analyzing more than one file only display subsequent files whose results
+     * contain signatures that we always want displayed, or which contain extractable signatures.
+     */
+    if verbosity == Verbosity::Quiet {
+        return false;
+    }
+    if verbosity == Verbosity::Verbose || file_count == 1 || !results.extractions.is_empty() {
+        true
+    } else {
+        results
+            .file_map
+            .iter()
+            .any(|signature| signature.always_display)
+    }
 }
 
 #[derive(Clone, Copy)]
 struct AnalysisFlags {
-    verbose: bool,
-    quiet: bool,
+    verbosity: Verbosity,
     do_extract: bool,
     matryoshka: bool,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum Verbosity {
+    Quiet,
+    Normal,
+    Verbose,
 }
 
 /// Process analysis results from a worker: log, display, and queue nested files.
@@ -301,18 +431,18 @@ fn process_analysis_results(
     file_count: &mut usize,
     json_logger: &mut json::JsonLogger,
     flags: AnalysisFlags,
-    target_files: &mut VecDeque<PathBuf>,
+    target_files: &mut Vec<PathBuf>,
 ) {
     *file_count += 1;
-    json_logger.log(json::JSONType::Analysis(results.clone()));
+    json_logger.log(json::JSONType::Analysis(&results));
 
     if results.file_map.is_empty() {
         debug!("Found no results for file {}", results.file_path.display());
         return;
     }
 
-    if should_display(&results, *file_count, flags.verbose) {
-        display::print_analysis_results(flags.quiet, flags.do_extract, &results);
+    if should_display(flags.verbosity, &results, *file_count) {
+        display::print_analysis_results(flags.do_extract, &results);
     }
 
     if flags.matryoshka {
@@ -331,28 +461,44 @@ fn process_analysis_results(
 /// Spawn a worker thread to analyze a file
 fn spawn_worker(
     pool: &ThreadPool,
-    bw: binwalk_ng::Binwalk,
-    target_file: impl AsRef<Path>,
+    bw: Arc<binwalk_ng::Binwalk>,
+    target_file: PathBuf,
     do_extraction: bool,
     do_carve: bool,
     worker_tx: mpsc::Sender<AnalysisResults>,
-    pending: Arc<AtomicUsize>,
 ) {
-    let target_file = target_file.as_ref().to_path_buf();
-    pending.fetch_add(1, Ordering::Release);
     pool.spawn(move || {
         // Read in file data
-        let file_data = common::read_file(&target_file).unwrap_or_else(|_| {
-            error!("Failed to read {} data", target_file.display());
-            b"".to_vec()
-        });
+        let file_data = common::read_or_map_file(&target_file, bw.mmap_usage());
+        let file_data: &[u8] = file_data
+            .as_ref()
+            .map(|data| data.as_ref())
+            .unwrap_or_else(|_| {
+                error!("Failed to read {} data", target_file.display());
+                b""
+            });
 
         // Analyze target file, with extraction, if specified
-        let results = bw.analyze_buf(&file_data, &target_file, do_extraction);
+        let mut extract_to = None;
+        if do_extraction {
+            extract_to = extractors::extraction_directory(&target_file);
+            if extract_to.is_none() {
+                error!(
+                    "Skipping extraction of {}: it has no file name to derive an extraction directory from",
+                    target_file.display()
+                );
+            }
+        }
+        let results = bw.analyze_buf(file_data, &target_file, extract_to.as_deref());
 
         // If data carving was requested as part of extraction, carve analysis results to disk
         if do_carve {
-            let carve_count = carve_file_map(&file_data, &results);
+            let carve_count = carve_file_map(
+                file_data,
+                &results,
+                target_file.parent().unwrap_or_else(|| Path::new("")),
+                target_file.file_name().unwrap_or_default(),
+            );
             info!(
                 "Carved {carve_count} data blocks to disk from {}",
                 target_file.display()
@@ -366,8 +512,6 @@ fn spawn_worker(
                 target_file.display()
             );
         }
-
-        pending.fetch_sub(1, Ordering::Release);
     });
 }
 
@@ -375,7 +519,16 @@ fn spawn_worker(
 /// Returns the number of carved files created.
 /// Note that unknown blocks of file data are also carved to disk, so the number of files
 /// created may be larger than the number of results defined in results.file_map.
-fn carve_file_map(file_data: &[u8], results: &binwalk_ng::AnalysisResults) -> usize {
+///
+/// Carved files are written to `output_directory`, named after `file_name`. The analyzed
+/// file's name is included so that carved data from several files extracted into the same
+/// directory remains distinguishable.
+fn carve_file_map(
+    file_data: &[u8],
+    results: &binwalk_ng::AnalysisResults,
+    output_directory: &Path,
+    file_name: &OsStr,
+) -> usize {
     let mut carve_count: usize = 0;
     let mut last_known_offset: usize = 0;
     let mut unknown_bytes: Vec<(usize, usize)> = Vec::new();
@@ -394,7 +547,8 @@ fn carve_file_map(file_data: &[u8], results: &binwalk_ng::AnalysisResults) -> us
 
             // Carve this signature's data to disk
             if carve_file_data_to_disk(
-                &results.file_path,
+                output_directory,
+                file_name,
                 file_data,
                 &signature_result.name,
                 signature_result.offset,
@@ -417,7 +571,14 @@ fn carve_file_map(file_data: &[u8], results: &binwalk_ng::AnalysisResults) -> us
 
         // All known signature data has been carved to disk, now carve any unknown blocks of data to disk
         for (offset, size) in unknown_bytes {
-            if carve_file_data_to_disk(&results.file_path, file_data, "unknown", offset, size) {
+            if carve_file_data_to_disk(
+                output_directory,
+                file_name,
+                file_data,
+                "unknown",
+                offset,
+                size,
+            ) {
                 carve_count += 1;
             }
         }
@@ -428,7 +589,8 @@ fn carve_file_map(file_data: &[u8], results: &binwalk_ng::AnalysisResults) -> us
 
 /// Carves a block of file data to a new file on disk
 fn carve_file_data_to_disk(
-    source_file_path: impl AsRef<Path>,
+    output_directory: &Path,
+    file_name: &OsStr,
     file_data: &[u8],
     name: &str,
     offset: usize,
@@ -436,19 +598,18 @@ fn carve_file_data_to_disk(
 ) -> bool {
     let chroot = Chroot::default();
 
-    // Carved file path will be: <source file path>_<offset>_<name>.raw
-    let carved_file_path = format!(
-        "{}_{offset}_{name}.raw",
-        source_file_path.as_ref().display()
-    );
+    // Carved file path will be: <output directory>/<file name>_<offset>_<name>.raw
+    let mut carved_file_name = file_name.to_os_string();
+    carved_file_name.push(format!("_{offset}_{name}.raw"));
+    let carved_file_path = output_directory.join(carved_file_name);
 
-    debug!("Carving {carved_file_path}");
+    debug!("Carving {}", carved_file_path.display());
 
     // Carve the data to disk
     if !chroot.carve_file(&carved_file_path, file_data, offset, size) {
         error!(
             "Failed to carve {} [{:#X}..{:#X}] to disk",
-            carved_file_path,
+            carved_file_path.display(),
             offset,
             offset + size,
         );

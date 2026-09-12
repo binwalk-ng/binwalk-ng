@@ -1,5 +1,6 @@
 use crate::signatures::{CONFIDENCE_MEDIUM, SignatureError, SignatureResult};
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 /// Human readable description
 pub const DESCRIPTION: &str = "RSA encrypted session key";
@@ -21,8 +22,8 @@ struct RSAKeyDefinition {
     pub terminator_offset: usize,
 }
 
-/// Returns a list of RSA key definitions
-fn rsa_key_definitions() -> Vec<RSAKeyDefinition> {
+/// The list of known RSA key definitions, built once
+static RSA_KEY_DEFINITIONS: LazyLock<Vec<RSAKeyDefinition>> = LazyLock::new(|| {
     vec![
         // 1024b RSA key
         RSAKeyDefinition {
@@ -130,17 +131,19 @@ fn rsa_key_definitions() -> Vec<RSAKeyDefinition> {
             )]),
         },
     ]
+});
+
+/// Returns a list of RSA key definitions
+fn rsa_key_definitions() -> &'static [RSAKeyDefinition] {
+    &RSA_KEY_DEFINITIONS
 }
 
 /// RSA crypto magic bytes
 pub fn rsa_magic() -> Vec<Vec<u8>> {
-    let mut magics: Vec<Vec<u8>> = vec![];
-
-    for key_definition in rsa_key_definitions() {
-        magics.push(key_definition.magic.clone());
-    }
-
-    magics
+    rsa_key_definitions()
+        .iter()
+        .map(|key_definition| key_definition.magic.clone())
+        .collect()
 }
 
 /// Validates an RSA encrypted file header
@@ -163,7 +166,7 @@ pub fn rsa_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
             && rsa_magic == key_definition.magic
         {
             // Parse and validate the key data
-            match rsa_key_parser(&file_data[magic_start..], &key_definition) {
+            match rsa_key_parser(&file_data[magic_start..], key_definition) {
                 Err(_) => {
                     break;
                 }

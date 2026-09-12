@@ -2,6 +2,7 @@ use crate::common::is_offset_safe;
 use crate::extractors::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
 use crate::structures::StructureError;
+use std::io::{self, Seek as _};
 use std::path::Path;
 use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
@@ -177,6 +178,7 @@ pub fn parse_android_sparse_chunk_header(
     let data_size = (chunk_header.total_size.get() as usize)
         .checked_sub(header_size)
         .ok_or(StructureError)?;
+    let block_count = chunk_header.output_block_count.get() as usize;
 
     // The chunk type must be one of the known chunk types, and the payload size must
     // match their declared type. In particular, a FILL chunk with data_size == 0 would
@@ -184,7 +186,7 @@ pub fn parse_android_sparse_chunk_header(
     let chunk_type = match chunk_header.chunk_type.get() {
         CHUNK_TYPE_FILL if data_size == FILL_DATA_SIZE => ChunkType::Fill,
         CHUNK_TYPE_DONT_CARE if data_size == DONT_CARE_DATA_SIZE => ChunkType::DontCare,
-        CHUNK_TYPE_CRC if data_size == CRC_DATA_SIZE => ChunkType::Crc,
+        CHUNK_TYPE_CRC if data_size == CRC_DATA_SIZE && block_count == 0 => ChunkType::Crc,
         // validated by the extractor, which has access to the sparse header
         CHUNK_TYPE_RAW => ChunkType::Raw,
         _ => return Err(StructureError),
@@ -194,7 +196,7 @@ pub fn parse_android_sparse_chunk_header(
         header_size,
         data_size,
         chunk_type,
-        block_count: chunk_header.output_block_count.get() as usize,
+        block_count,
     })
 }
 
@@ -258,6 +260,16 @@ pub fn extract_android_sparse(
         let mut blocks_written: usize = 0;
         let mut next_chunk_offset: usize = offset + sparse_header.header_size;
 
+        let mut out_file = if let Some(output_directory) = output_directory {
+            let chroot = Chroot::new(output_directory);
+            let Some(f) = chroot.create_file_writer(OUTFILE_NAME) else {
+                return result;
+            };
+            Some(f)
+        } else {
+            None
+        };
+
         while is_offset_safe(available_data, next_chunk_offset, last_chunk_offset) {
             // Parse the next chunk's header
             match parse_android_sparse_chunk_header(&file_data[next_chunk_offset..]) {
@@ -287,25 +299,16 @@ pub fn extract_android_sparse(
                         }
                     }
 
+                    let chunk_data_start: usize = next_chunk_offset + chunk_header.header_size;
+                    let chunk_data_end: usize = chunk_data_start + chunk_header.data_size;
+                    let Some(chunk_data) = file_data.get(chunk_data_start..chunk_data_end) else {
+                        break;
+                    };
                     // If not a dry run, extract the data from the next chunk
-                    if let Some(output_directory) = output_directory {
-                        let chroot = Chroot::new(output_directory);
-                        let chunk_data_start: usize = next_chunk_offset + chunk_header.header_size;
-                        let chunk_data_end: usize = chunk_data_start + chunk_header.data_size;
-
-                        if let Some(chunk_data) = file_data.get(chunk_data_start..chunk_data_end) {
-                            if !extract_chunk(
-                                &sparse_header,
-                                &chunk_header,
-                                chunk_data,
-                                OUTFILE_NAME,
-                                &chroot,
-                            ) {
-                                break;
-                            }
-                        } else {
-                            break;
-                        }
+                    if let Some(out_file) = &mut out_file
+                        && !extract_chunk(&sparse_header, &chunk_header, chunk_data, out_file)
+                    {
+                        break;
                     }
 
                     processed_chunk_count += 1;
@@ -315,6 +318,15 @@ pub fn extract_android_sparse(
             }
         }
 
+        if let Some(mut out_file) = out_file {
+            let Ok(end_position) = out_file.stream_position() else {
+                return result;
+            };
+            // Allow the file to end in a sparse chunk, expand the file to where we seeked to
+            let Ok(()) = out_file.set_len(end_position) else {
+                return result;
+            };
+        }
         // Make sure the number of processed chunks equals the number of chunks reported in the sparse flie header
         if processed_chunk_count == sparse_header.chunk_count {
             result.success = true;
@@ -326,51 +338,52 @@ pub fn extract_android_sparse(
 }
 
 // Extract a sparse file chunk to disk
-fn extract_chunk(
+fn extract_chunk<W: io::Write + io::Seek>(
     sparse_header: &AndroidSparseHeader,
     chunk_header: &AndroidSparseChunkHeader,
     chunk_data: &[u8],
-    outfile: &str,
-    chroot: &Chroot,
+    mut out_file: W,
 ) -> bool {
     match chunk_header.chunk_type {
         ChunkType::Raw => {
             // Raw chunks are just data chunks stored verbatim
-            if !chroot.append_to_file(outfile, chunk_data) {
-                return false;
-            }
+            out_file.write_all(chunk_data).is_ok()
+        }
+        ChunkType::DontCare => {
+            write_hole(out_file, sparse_header.block_size, chunk_header.block_count)
+        }
+        ChunkType::Fill if chunk_data.iter().all(|&b| b == 0) => {
+            write_hole(out_file, sparse_header.block_size, chunk_header.block_count)
         }
         ChunkType::Fill => {
-            // The parser rejects FILL chunks whose payload isn't the spec-required
-            // 4 bytes, but guard here too: an empty fill value would make the inner
-            // loop below spin forever.
-            if chunk_data.is_empty() {
-                return false;
-            }
             // Fill chunks are block_count blocks that contain a repeated sequence of data (typically 4-bytes repeated over and over again)
             let repeat_count = sparse_header.block_size.div_ceil(chunk_data.len());
             let fill_block = chunk_data.repeat(repeat_count);
             for _ in 0..chunk_header.block_count {
                 // Append fill block to file
-                if !chroot.append_to_file(outfile, &fill_block) {
+                if out_file.write_all(&fill_block).is_err() {
                     return false;
                 }
             }
-        }
-        ChunkType::DontCare => {
-            let null_block = vec![0u8; sparse_header.block_size];
-
-            // Write block_count NULL blocks to disk
-            for _ in 0..chunk_header.block_count {
-                if !chroot.append_to_file(outfile, &null_block) {
-                    return false;
-                }
-            }
+            true
         }
         ChunkType::Crc => {
             // No data for a crc block
+            true
         }
     }
+}
 
-    true
+fn write_hole<W: io::Write + io::Seek>(
+    mut out_file: W,
+    block_size: usize,
+    block_count: usize,
+) -> bool {
+    let Some(hole_size) = block_count.checked_mul(block_size) else {
+        return false;
+    };
+    let Ok(hole_size) = i64::try_from(hole_size) else {
+        return false;
+    };
+    out_file.seek_relative(hole_size).is_ok()
 }
