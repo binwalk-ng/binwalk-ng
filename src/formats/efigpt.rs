@@ -23,8 +23,6 @@ pub fn efigpt_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult,
         ..Default::default()
     };
 
-    let available_data = file_data.len() - offset;
-
     if offset >= MAGIC_OFFSET {
         // MBR actually starts this may bytes before the magic bytes
         result.offset = offset - MAGIC_OFFSET;
@@ -33,10 +31,13 @@ pub fn efigpt_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult,
         if let Some(efi_data) = file_data.get(result.offset..) {
             // Parse the EFI data; this also validates CRC so if this succeeds, confidence is high
             if let Ok(efi_header) = parse_efigpt_header(efi_data) {
+                // total_size is relative to the rewound image start, so
+                // compare against the bytes available from there.
+                let available_from_start = efi_data.len();
                 // Some EFI images have been observed to define partitions that extend beyond EOF.
                 // If that is the case, assume the EFI image extends to EOF.
-                if efi_header.total_size > available_data {
-                    result.size = available_data;
+                if efi_header.total_size > available_from_start {
+                    result.size = available_from_start;
                 } else {
                     result.size = efi_header.total_size;
                 }
@@ -94,12 +95,43 @@ pub fn parse_efigpt_header(efi_data: &[u8]) -> Result<EFIGPTHeader, StructureErr
         if gpt_header.reserved == 0 {
             // Make sure the revision field is the expected valid
             if gpt_header.revision == EXPECTED_REVISION {
-                // Calculate the start and end offsets of the partition entries
-                let partition_entries_start =
-                    lba_to_offset(gpt_header.partition_entry_lba.get() as usize);
-                let partition_entries_end = partition_entries_start
-                    + (gpt_header.partition_entry_count.get()
-                        * gpt_header.partition_entry_size.get()) as usize;
+                // Validate the GPT header CRC (computed over header_size
+                // bytes with the CRC field zeroed). Validate the declared
+                // length before allocating; it must cover the fixed header
+                // but cannot exceed one LBA.
+                let header_len = gpt_header.header_size.get() as usize;
+                if header_len < std::mem::size_of::<EFIGPTHeaderBytes>() || header_len > BLOCK_SIZE
+                {
+                    return Err(StructureError);
+                }
+                let mut header_for_crc =
+                    gpt_data.get(0..header_len).ok_or(StructureError)?.to_vec();
+                const CRC_OFFSET: usize = 16;
+                const CRC_LEN: usize = 4;
+                let crc_end = CRC_OFFSET.checked_add(CRC_LEN).ok_or(StructureError)?;
+                if header_for_crc.len() < crc_end {
+                    return Err(StructureError);
+                }
+                header_for_crc[CRC_OFFSET..crc_end].fill(0);
+                if crc32(&header_for_crc) != gpt_header.header_crc.get() {
+                    return Err(StructureError);
+                }
+                // Calculate the start and end offsets of the partition entries.
+                // LBAs and table sizes that overflow usize cannot address data in
+                // the scanned file.
+                let Some(partition_entries_start) =
+                    lba_to_offset(gpt_header.partition_entry_lba.get() as usize)
+                else {
+                    return Err(StructureError);
+                };
+                let partition_entries_len = (gpt_header.partition_entry_count.get() as usize)
+                    .checked_mul(gpt_header.partition_entry_size.get() as usize)
+                    .ok_or(StructureError)?;
+                let Some(partition_entries_end) =
+                    partition_entries_start.checked_add(partition_entries_len)
+                else {
+                    return Err(StructureError);
+                };
 
                 // Get the partition entires
                 if let Some(partition_entries_data) =
@@ -172,12 +204,12 @@ fn parse_gpt_partition_entry(entry_data: &[u8]) -> Option<GPTPartitionEntry> {
     }
 
     Some(GPTPartitionEntry {
-        start_offset: lba_to_offset(entry_header.starting_lba.get() as usize),
-        end_offset: lba_to_offset(entry_header.ending_lba.get() as usize),
+        start_offset: lba_to_offset(entry_header.starting_lba.get() as usize)?,
+        end_offset: lba_to_offset(entry_header.ending_lba.get() as usize)?,
     })
 }
 
-// Convert LBA to offset
-const fn lba_to_offset(lba: usize) -> usize {
-    lba * BLOCK_SIZE
+// Convert LBA to offset; None if the product overflows.
+const fn lba_to_offset(lba: usize) -> Option<usize> {
+    lba.checked_mul(BLOCK_SIZE)
 }

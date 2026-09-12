@@ -24,6 +24,9 @@ pub fn logfs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
 
         if let Some(logfs_sb_data) = file_data.get(result.offset..)
             && let Ok(logfs_super_block) = parse_logfs_super_block(logfs_sb_data)
+            && logfs_super_block.total_size > 0
+            && let Some(image_end) = result.offset.checked_add(logfs_super_block.total_size)
+            && image_end <= file_data.len()
         {
             result.size = logfs_super_block.total_size;
             result.description =
@@ -69,11 +72,13 @@ struct LogFSSBBytes {
 
 /// Parses a LogFS superblock
 pub fn parse_logfs_super_block(logfs_data: &[u8]) -> Result<LogFSSuperBlock, StructureError> {
+    const EXPECTED_MAGIC: u64 = 0x7A3A8E5CB9D5BF67;
+
     if let Some(sb_struct_data) = logfs_data.get(LOGFS_MAGIC_OFFSET..) {
         let (super_block, _) =
             LogFSSBBytes::ref_from_prefix(sb_struct_data).map_err(|_| StructureError)?;
 
-        if super_block.pad.iter().all(|&b| b == 0) {
+        if super_block.magic.get() == EXPECTED_MAGIC && super_block.pad.iter().all(|&b| b == 0) {
             return Ok(LogFSSuperBlock {
                 total_size: super_block.filesystem_size.get() as usize,
             });

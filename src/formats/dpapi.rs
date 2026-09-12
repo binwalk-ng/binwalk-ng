@@ -18,8 +18,13 @@ pub fn dpapi_magic() -> Vec<Vec<u8>> {
 /// Returns success with additional details
 pub fn dpapi_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, SignatureError> {
     if let Ok(header) = parse_dpapi_blob_header(file_data.get(offset..).ok_or(SignatureError)?) {
+        let blob_end = offset.checked_add(header.blob_size).ok_or(SignatureError)?;
+        if blob_end > file_data.len() {
+            return Err(SignatureError);
+        }
         return Ok(SignatureResult {
             offset,
+            size: header.blob_size,
             description: format!(
                 "{}, header_size: {}, blob_size: {}, version: {}, provider_id: {}, master_key_version: {},
              master_key_id: {}, flags: {}, description_len: {}, crypto_algorithm: {}, crypto_alg_len: {},
@@ -151,46 +156,61 @@ pub fn parse_dpapi_blob_header(dpapi_blob_data: &[u8]) -> Result<DPAPIBlobHeader
     }
 
     let desc_bytes = dpapi_blob_data
-        .get(offset..offset + description_len)
+        .get(offset..offset.checked_add(description_len).ok_or(StructureError)?)
         .ok_or(StructureError)?;
     if description_len != 0 && !is_null_terminated_utf16(desc_bytes) {
         return Err(StructureError);
     }
 
-    offset += description_len;
+    offset = offset.checked_add(description_len).ok_or(StructureError)?;
 
     let (dpapi_header_p2, _) =
         DPAPIHeaderP2::ref_from_prefix(dpapi_blob_data.get(offset..).ok_or(StructureError)?)
             .map_err(|_| StructureError)?;
     let salt_len = dpapi_header_p2.salt_len.get() as usize;
-    offset += size_of::<DPAPIHeaderP2>() + salt_len;
+    offset = offset
+        .checked_add(size_of::<DPAPIHeaderP2>())
+        .and_then(|v| v.checked_add(salt_len))
+        .ok_or(StructureError)?;
 
     let (dpapi_header_p3, _) =
         DPAPIHeaderP3::ref_from_prefix(dpapi_blob_data.get(offset..).ok_or(StructureError)?)
             .map_err(|_| StructureError)?;
 
     let hmac_key_len = dpapi_header_p3.hmac_key_len.get() as usize;
-    offset += size_of::<DPAPIHeaderP3>() + hmac_key_len;
+    offset = offset
+        .checked_add(size_of::<DPAPIHeaderP3>())
+        .and_then(|v| v.checked_add(hmac_key_len))
+        .ok_or(StructureError)?;
 
     let (dpapi_header_p4, _) =
         DPAPIHeaderP4::ref_from_prefix(dpapi_blob_data.get(offset..).ok_or(StructureError)?)
             .map_err(|_| StructureError)?;
     let hmac2_key_len = dpapi_header_p4.hmac2_key_len.get() as usize;
-    offset += size_of::<DPAPIHeaderP4>() + hmac2_key_len;
+    offset = offset
+        .checked_add(size_of::<DPAPIHeaderP4>())
+        .and_then(|v| v.checked_add(hmac2_key_len))
+        .ok_or(StructureError)?;
 
     let (dpapi_header_p5, _) =
         DPAPIHeaderP5::ref_from_prefix(dpapi_blob_data.get(offset..).ok_or(StructureError)?)
             .map_err(|_| StructureError)?;
 
     let data_len = dpapi_header_p5.data_len.get() as usize;
-    offset += size_of::<DPAPIHeaderP5>() + data_len;
+    offset = offset
+        .checked_add(size_of::<DPAPIHeaderP5>())
+        .and_then(|v| v.checked_add(data_len))
+        .ok_or(StructureError)?;
 
     let (dpapi_header_p6, _) =
         DPAPIHeaderP6::ref_from_prefix(dpapi_blob_data.get(offset..).ok_or(StructureError)?)
             .map_err(|_| StructureError)?;
 
     let sign_len = dpapi_header_p6.sign_len.get() as usize;
-    let blob_size = offset + size_of::<DPAPIHeaderP6>() + sign_len;
+    let blob_size = offset
+        .checked_add(size_of::<DPAPIHeaderP6>())
+        .and_then(|v| v.checked_add(sign_len))
+        .ok_or(StructureError)?;
 
     let header_size = size_of::<DPAPIHeaderP1>()
         + size_of::<DPAPIHeaderP2>()

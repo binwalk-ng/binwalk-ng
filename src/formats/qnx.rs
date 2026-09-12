@@ -30,7 +30,7 @@ pub fn qnx_ifs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult
         result.size = ifs_header.total_size;
 
         // Sanity check that the total size doesn't exceed the available data size
-        if result.size <= available_data {
+        if result.size > 0 && result.size <= available_data {
             result.description =
                 format!("{}, total size: {} bytes", result.description, result.size);
             return Ok(result);

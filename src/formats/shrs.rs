@@ -20,8 +20,19 @@ pub fn shrs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
         ..Default::default()
     };
 
-    if let Ok(shrs_header) = parse_shrs_header(&file_data[offset..]) {
-        result.size = shrs_header.header_size + shrs_header.data_size as usize;
+    let shrs_data = file_data.get(offset..).ok_or(SignatureError)?;
+    if let Ok(shrs_header) = parse_shrs_header(shrs_data) {
+        let total_size = shrs_header
+            .header_size
+            .checked_add(shrs_header.data_size as usize)
+            .ok_or(SignatureError)?;
+        if offset
+            .checked_add(total_size)
+            .is_none_or(|e| e > file_data.len())
+        {
+            return Err(SignatureError);
+        }
+        result.size = total_size;
         result.description = format!(
             "{}, header size: {} bytes, encrypted data size: {} bytes, IV: {}",
             result.description,
@@ -60,10 +71,15 @@ struct SHRSHeaderBytes {
 /// Parses an SHRS header
 pub fn parse_shrs_header(shrs_data: &[u8]) -> Result<SHRSHeader, StructureError> {
     const HEADER_SIZE: usize = 0x6DC;
+    const EXPECTED_MAGIC: u32 = 0x53485253; // "SHRS"
 
     // Parse the header
     let (shrs_header, _) =
         SHRSHeaderBytes::ref_from_prefix(shrs_data).map_err(|_| StructureError)?;
+
+    if shrs_header.magic.get() != EXPECTED_MAGIC {
+        return Err(StructureError);
+    }
 
     Ok(SHRSHeader {
         iv: shrs_header.iv,

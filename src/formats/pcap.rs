@@ -79,8 +79,11 @@ pub fn parse_pcapng_block(
 
     // Make sure the reserved bit of the block type is not set
     if (result.block_type & BLOCK_TYPE_RESERVED_MASK) == 0 {
-        // Calculate the block footer offsets
-        let block_footer_start = result.block_size - footer_size;
+        // Calculate the block footer offsets; a block_size smaller than the footer
+        // cannot contain a valid footer.
+        let Some(block_footer_start) = result.block_size.checked_sub(footer_size) else {
+            return Err(StructureError);
+        };
 
         // Validate that the block size in the block footer matches the block size in the block header
         if let Some(block_footer_data) = block_data.get(block_footer_start..)
@@ -191,7 +194,7 @@ pub fn pcapng_carver(
     // All pcap-ng files start with a section header; parse it
     if let Ok(section_header) = parse_pcapng_section_block(&file_data[offset..]) {
         let mut block_count: usize = 1;
-        let available_data = file_data.len() - offset;
+        let available_data = file_data.len();
         let mut next_offset = offset + section_header.block_size;
         let mut previous_offset = None;
 

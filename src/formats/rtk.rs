@@ -21,11 +21,17 @@ pub fn rtk_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
     };
 
     // Note: magic.rs enforces short=true for this signature, so offset will always be 0
-    let available_data = file_data.len() - offset;
+    let available_data = file_data.len().checked_sub(offset).ok_or(SignatureError)?;
 
-    if let Ok(rtk_header) = parse_rtk_header(&file_data[offset..]) {
-        // This firmware header is expected to encompass the entirety of the remaining file data
-        if rtk_header.image_size == available_data {
+    if let Some(rtk_data) = file_data.get(offset..)
+        && let Ok(rtk_header) = parse_rtk_header(rtk_data)
+    {
+        // This firmware header is expected to encompass the remaining file data;
+        // trailing data (appended filesystem, flash padding) is allowed.
+        if rtk_header.image_size > 0
+            && rtk_header.header_size <= rtk_header.image_size
+            && rtk_header.image_size <= available_data
+        {
             result.size = rtk_header.header_size;
             result.description = format!(
                 "{}, header size: {} bytes, image size: {}",

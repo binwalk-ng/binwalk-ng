@@ -124,7 +124,7 @@ pub fn parse_luks_header(luks_data: &[u8]) -> Result<LUKSHeader, StructureError>
 
                 // Sanity check the header size
                 if luks_hdr_info.header_size > LUKS2_MIN_HEADER_SIZE
-                    && luks_hdr_info.header_size < luks_data.len()
+                    && luks_hdr_info.header_size <= luks_data.len()
                 {
                     return Ok(luks_hdr_info);
                 }

@@ -61,7 +61,11 @@ pub fn cpio_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
                         header_count += 1;
 
                         // Update the total size of the CPIO file to include this header and its data
-                        result.size += cpio_header.header_size + cpio_header.data_size;
+                        let entry_size = cpio_header
+                            .header_size
+                            .checked_add(cpio_header.data_size)
+                            .ok_or(SignatureError)?;
+                        result.size = result.size.checked_add(entry_size).ok_or(SignatureError)?;
 
                         // If EOF marker has been found, we're done
                         if cpio_header.file_name == EOF_MARKER {
@@ -82,7 +86,8 @@ pub fn cpio_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, S
 
                         // Update the previous and next header offset values for the next loop iteration
                         previous_header_offset = Some(next_header_offset);
-                        next_header_offset = offset + result.size;
+                        next_header_offset =
+                            offset.checked_add(result.size).ok_or(SignatureError)?;
                     }
                 }
             }
@@ -131,20 +136,31 @@ pub fn parse_cpio_entry_header(cpio_data: &[u8]) -> Result<CPIOEntryHeader, Stru
                     if let Ok(file_name_size) = usize::from_str_radix(file_name_size_str, 16) {
                         // The file name immediately follows the fixed-length header data.
                         let file_name_start: usize = CPIO_HEADER_SIZE;
-                        let file_name_end: usize =
-                            file_name_start + file_name_size - NULL_BYTE_SIZE;
+                        let file_name_end: usize = file_name_start
+                            .checked_add(file_name_size)
+                            .and_then(|v| v.checked_sub(NULL_BYTE_SIZE))
+                            .ok_or(StructureError)?;
 
                         // Get the file name
                         if let Some(file_name_raw_bytes) =
                             cpio_data.get(file_name_start..file_name_end)
                             && let Ok(file_name_str) = std::str::from_utf8(file_name_raw_bytes)
                         {
-                            let header_total_size = CPIO_HEADER_SIZE + file_name_size;
+                            let header_total_size = CPIO_HEADER_SIZE
+                                .checked_add(file_name_size)
+                                .ok_or(StructureError)?;
+
+                            let data_size = file_data_size
+                                .checked_add(byte_padding(file_data_size))
+                                .ok_or(StructureError)?;
+                            let header_size = header_total_size
+                                .checked_add(byte_padding(header_total_size))
+                                .ok_or(StructureError)?;
 
                             return Ok(CPIOEntryHeader {
                                 file_name: file_name_str.to_string(),
-                                data_size: file_data_size + byte_padding(file_data_size),
-                                header_size: header_total_size + byte_padding(header_total_size),
+                                data_size,
+                                header_size,
                             });
                         }
                     }

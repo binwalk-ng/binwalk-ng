@@ -147,26 +147,38 @@ pub fn wince_dump(
             if let Some(data_blocks) = process_wince_blocks(wince_block_data) {
                 // The first block entry's address should equal the WinCE header's base address
                 if data_blocks.entries[0].address == wince_header.base_address {
-                    // Block processing was successful
-                    result.success = true;
-                    result.size = Some(wince_header.header_size + data_blocks.total_size);
+                    // The block chain must fit within the scanned data; blocks
+                    // claiming data beyond EOF are malformed, not merely truncated.
+                    if let Some(total_size) = wince_header
+                        .header_size
+                        .checked_add(data_blocks.total_size)
+                        .filter(|&total| {
+                            offset
+                                .checked_add(total)
+                                .is_some_and(|end| end <= file_data.len())
+                        })
+                    {
+                        // Block processing was successful
+                        result.success = true;
+                        result.size = Some(total_size);
 
-                    // If extraction was requested, extract each block to a file on disk
-                    if let Some(output_directory) = output_directory {
-                        let chroot = Chroot::new(output_directory);
+                        // If extraction was requested, extract each block to a file on disk
+                        if let Some(output_directory) = output_directory {
+                            let chroot = Chroot::new(output_directory);
 
-                        for block in data_blocks.entries {
-                            let block_file_name = format!("{:X}.bin", block.address);
+                            for block in data_blocks.entries {
+                                let block_file_name = format!("{:X}.bin", block.address);
 
-                            // If file carving fails, report a failure to extract
-                            if !chroot.carve_file(
-                                block_file_name,
-                                wince_block_data,
-                                block.offset,
-                                block.size,
-                            ) {
-                                result.success = false;
-                                break;
+                                // If file carving fails, report a failure to extract
+                                if !chroot.carve_file(
+                                    block_file_name,
+                                    wince_block_data,
+                                    block.offset,
+                                    block.size,
+                                ) {
+                                    result.success = false;
+                                    break;
+                                }
                             }
                         }
                     }
@@ -213,7 +225,7 @@ fn process_wince_blocks(blocks_data: &[u8]) -> Option<BlockData> {
             }
             Ok(block_header) => {
                 // Include the block header size in the total size of the block data
-                blocks.total_size += block_header.header_size;
+                blocks.total_size = blocks.total_size.checked_add(block_header.header_size)?;
 
                 // A block header address of NULL indicates EOF
                 if block_header.address == 0 {
@@ -225,18 +237,20 @@ fn process_wince_blocks(blocks_data: &[u8]) -> Option<BlockData> {
                     }
                 } else {
                     // Include this block's size in the total size of the block data
-                    blocks.total_size += block_header.data_size;
+                    blocks.total_size = blocks.total_size.checked_add(block_header.data_size)?;
 
                     // Add this block to the list of block entries
                     blocks.entries.push(BlockInfo {
                         address: block_header.address,
-                        offset: next_offset + block_header.header_size,
+                        offset: next_offset.checked_add(block_header.header_size)?,
                         size: block_header.data_size,
                     });
 
                     // Update the offsets for the next loop iteration
                     previous_offset = Some(next_offset);
-                    next_offset += block_header.header_size + block_header.data_size;
+                    next_offset = next_offset
+                        .checked_add(block_header.header_size)?
+                        .checked_add(block_header.data_size)?;
                 }
             }
         }

@@ -85,9 +85,13 @@ pub fn parse_trx_header(header_data: &[u8]) -> Result<TRXHeader, StructureError>
     let (trx_header, _) =
         TRXHeaderBytes::ref_from_prefix(header_data).map_err(|_| StructureError)?;
     // Sanity check partition offsets. Partition offsets may be 0.
+    // The fourth entry only exists in TRXv2; for v1 those bytes are past the real
+    // header and must not be validated.
     if trx_header.partition1_offset <= trx_header.total_size
         && trx_header.partition2_offset <= trx_header.total_size
         && trx_header.partition3_offset <= trx_header.total_size
+        && (trx_header.version != TRX_VERSION_2
+            || trx_header.partition4_offset <= trx_header.total_size)
     {
         // Sanity check the reported total size
         if trx_header.total_size.get() as usize > struct_size {
@@ -190,12 +194,26 @@ pub fn extract_trx_partitions(
                 for i in 0..trx_header.partitions.len() {
                     let next_partition: usize = i + 1;
                     let this_partition_relative_offset: usize = trx_header.partitions[i];
-                    let this_partition_absolute_offset: usize =
-                        offset + this_partition_relative_offset;
+                    // Partition entries are not required to be sorted, so the size
+                    // derived from the next offset can underflow; such a partition
+                    // cannot be carved, so stop.
                     let this_partition_size = if next_partition < trx_header.partitions.len() {
-                        trx_header.partitions[next_partition] - this_partition_relative_offset
+                        trx_header.partitions[next_partition]
+                            .checked_sub(this_partition_relative_offset)
                     } else {
-                        trx_header.total_size - this_partition_relative_offset
+                        trx_header
+                            .total_size
+                            .checked_sub(this_partition_relative_offset)
+                    };
+                    let Some(this_partition_size) = this_partition_size else {
+                        result.success = false;
+                        break;
+                    };
+                    let Some(this_partition_absolute_offset) =
+                        offset.checked_add(this_partition_relative_offset)
+                    else {
+                        result.success = false;
+                        break;
                     };
 
                     let this_partition_file_name = format!("partition_{i}.bin");

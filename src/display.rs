@@ -5,10 +5,6 @@ use colored::ColoredString;
 use colored::Colorize;
 use log::error;
 use std::collections::HashMap;
-#[cfg(feature = "entropy-plot")]
-use std::io;
-#[cfg(feature = "entropy-plot")]
-use std::io::Write;
 use std::time;
 use terminal_size::Width;
 
@@ -328,14 +324,6 @@ pub fn print_stats(
     println!(
         "Analyzed {file_count} file{file_plural} for {signature_count} file signatures ({pattern_count} magic patterns) in {display_time:.1} {units}"
     );
-}
-
-#[cfg(feature = "entropy-plot")]
-pub fn print_plain(quiet: bool, msg: &str) {
-    if !quiet {
-        print!("{msg}");
-        let _ = io::stdout().flush();
-    }
 }
 
 #[cfg(feature = "entropy-plot")]

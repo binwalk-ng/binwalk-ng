@@ -123,6 +123,14 @@ pub fn parse_lzma_header(lzma_data: &[u8]) -> Result<LZMAHeader, StructureError>
 
     // Make sure the expected NULL byte is NULL
     if lzma_header.null_byte == 0 {
+        let prop = lzma_header.properties;
+        let lc = prop % 9;
+        let lp = (prop / 9) % 5;
+        let pb = prop / 45;
+        if lc + lp > 4 || pb > 4 {
+            return Err(StructureError);
+        }
+
         // Sanity check the reported decompressed size
         let decompressed_size = lzma_header.decompressed_size.get();
         if decompressed_size >= MIN_SUPPORTED_DECOMPRESSED_SIZE

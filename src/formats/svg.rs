@@ -46,7 +46,7 @@ pub fn svg_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
     Err(SignatureError)
 }
 
-const SVG_OPEN_TAG: &str = "<svg ";
+const SVG_OPEN_TAG: &str = "<svg";
 const SVG_CLOSE_TAG: &str = "</svg>";
 
 /// Stores info about an SVG image
@@ -77,6 +77,19 @@ pub fn parse_svg_image(svg_data: &[u8]) -> Result<SVGImage, StructureError> {
         };
         offset = match tag_match.pattern().as_usize() {
             OPEN_PATTERN => {
+                // The open tag pattern has no trailing delimiter; require one
+                // of whitespace, '>' or '/' so "<svgfoo" is not accepted.
+                let terminator = svg_data.get(tag_match.end()..tag_match.end() + 1);
+                if !terminator.is_some_and(|b| {
+                    b[0] == b' '
+                        || b[0] == b'>'
+                        || b[0] == b'/'
+                        || b[0] == b'\t'
+                        || b[0] == b'\r'
+                        || b[0] == b'\n'
+                }) {
+                    break;
+                }
                 // Make sure the tag closes
                 let Some(tag_len) = memchr::memchr(b'>', &svg_data[tag_match.end()..]) else {
                     break;

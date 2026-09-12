@@ -10,7 +10,10 @@ pub fn jpeg_magic() -> Vec<Vec<u8>> {
     vec![
         b"\xFF\xD8\xFF\xE0\x00\x10JFIF\x00".to_vec(),
         b"\xFF\xD8\xFF\xE1".to_vec(),
+        b"\xFF\xD8\xFF\xE2".to_vec(),
         b"\xFF\xD8\xFF\xDB".to_vec(),
+        b"\xFF\xD8\xFF\xC0".to_vec(),
+        b"\xFF\xD8\xFF\xFE".to_vec(),
     ]
 }
 

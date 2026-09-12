@@ -262,12 +262,18 @@ pub fn pem_carver(
 
 const PEM_EOF_MARKERS: &[&[u8]] = &[
     b"-----END PUBLIC KEY-----",
+    b"-----END RSA PUBLIC KEY-----",
+    b"-----END DSA PUBLIC KEY-----",
+    b"-----END ECDSA PUBLIC KEY-----",
     b"-----END CERTIFICATE-----",
     b"-----END PRIVATE KEY-----",
     b"-----END EC PRIVATE KEY-----",
     b"-----END RSA PRIVATE KEY-----",
     b"-----END DSA PRIVATE KEY-----",
     b"-----END OPENSSH PRIVATE KEY-----",
+    b"-----END ANY PRIVATE KEY-----",
+    b"-----END ENCRYPTED PRIVATE KEY-----",
+    b"-----END TSS2 PRIVATE KEY-----",
 ];
 
 static PEM_EOF_GREP: LazyLock<AhoCorasick> =

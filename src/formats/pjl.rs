@@ -26,9 +26,9 @@ pub fn pjl_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
     if let Some(pjl_command_data) = file_data.get(offset + PJL_COMMANDS_OFFSET..) {
         // Pull out a NULL terminated string
         let mut pjl_text = get_cstring(pjl_command_data);
-        result.size = pjl_text.len();
 
-        if result.size > 0 {
+        if !pjl_text.is_empty() {
+            result.size = PJL_COMMANDS_OFFSET + pjl_text.len();
             // For display, replace new line and carriage return characters with spaces
             pjl_text = pjl_text.replace("\r", " ").replace("\n", "");
             result.description = format!("{}: \"{}\"", result.description, pjl_text);

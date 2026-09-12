@@ -88,10 +88,10 @@ pub fn parse_iso_header(iso_data: &[u8]) -> Result<ISOHeader, StructureError> {
                 && iso_header.sequence_number_1 == iso_header.sequence_number_2.get()
                 && iso_header.path_table_size_1 == iso_header.path_table_size_2.get()
             {
-                return Ok(ISOHeader {
-                    image_size: iso_header.volume_size_1.get() as usize
-                        * iso_header.block_size_1.get() as usize,
-                });
+                let image_size = (iso_header.volume_size_1.get() as usize)
+                    .checked_mul(iso_header.block_size_1.get() as usize)
+                    .ok_or(StructureError)?;
+                return Ok(ISOHeader { image_size });
             }
         }
     }

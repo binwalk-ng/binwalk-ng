@@ -25,10 +25,15 @@ pub fn seama_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
 
     // Parse the header
     if let Ok(seama_header) = parse_seama_header(&file_data[offset..]) {
-        let total_size: usize = seama_header.header_size + seama_header.data_size;
+        let total_size = seama_header
+            .header_size
+            .checked_add(seama_header.data_size)
+            .ok_or(SignatureError)?;
 
         // Sanity check the reported size
-        if file_data.len() >= (offset + total_size) {
+        if let Some(total_end) = offset.checked_add(total_size)
+            && file_data.len() >= total_end
+        {
             result.size = seama_header.header_size;
             result.description = format!(
                 "{}, header size: {} bytes, data size: {} bytes",
@@ -76,7 +81,9 @@ pub fn parse_seama_header(seama_data: &[u8]) -> Result<SeamaHeader, StructureErr
     };
 
     // Sanity check on magic bytes
-    let total_header_size = header_size + seama_header.description_size.get(endianness) as usize;
+    let total_header_size = header_size
+        .checked_add(seama_header.description_size.get(endianness) as usize)
+        .ok_or(StructureError)?;
 
     // Sanity check on total header size
     if total_header_size >= header_size && available_data >= total_header_size {

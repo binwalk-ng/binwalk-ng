@@ -27,8 +27,14 @@ pub fn dtb_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
     // Parse the DTB header
     if let Ok(dtb_header) = parse_dtb_header(&file_data[offset..]) {
         // Calculate the offsets of where the dt_struct and dt_strings end
-        let dt_struct_end: usize = offset + dtb_header.struct_offset + dtb_header.struct_size;
-        let dt_strings_end: usize = offset + dtb_header.strings_offset + dtb_header.strings_size;
+        let dt_struct_end: usize = offset
+            .checked_add(dtb_header.struct_offset)
+            .and_then(|v| v.checked_add(dtb_header.struct_size))
+            .ok_or(SignatureError)?;
+        let dt_strings_end: usize = offset
+            .checked_add(dtb_header.strings_offset)
+            .and_then(|v| v.checked_add(dtb_header.strings_size))
+            .ok_or(SignatureError)?;
 
         // Sanity check the dt_struct and dt_strings offsets
         if file_data.len() >= dt_struct_end && file_data.len() >= dt_strings_end {
@@ -56,9 +62,12 @@ pub struct DTBHeader {
     pub strings_size: usize,
 }
 
+/// On-disk header prefix shared by v16 and v17.
+/// `size_dt_struct` was added in v17, so it is read separately below
+/// (see `scripts/dtc/libfdt/fdt.h`: `FDT_V16_SIZE == FDT_V3_SIZE`).
 #[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
-struct DTBHeaderBytes {
+struct DtbHeaderCommon {
     magic: zerocopy::U32<BE>,
     total_size: zerocopy::U32<BE>,
     dt_struct_offset: zerocopy::U32<BE>,
@@ -68,7 +77,6 @@ struct DTBHeaderBytes {
     min_compatible_version: zerocopy::U32<BE>,
     cpu_id: zerocopy::U32<BE>,
     dt_strings_size: zerocopy::U32<BE>,
-    dt_struct_size: zerocopy::U32<BE>,
 }
 
 /// Parse  DTB header
@@ -80,43 +88,80 @@ pub fn parse_dtb_header(dtb_data: &[u8]) -> Result<DTBHeader, StructureError> {
     const STRUCT_ALIGNMENT: u32 = 4;
     const MEM_RESERVATION_ALIGNMENT: u32 = 8;
 
-    let dtb_structure_size = std::mem::size_of::<DTBHeaderBytes>();
+    let header_size_v16 = std::mem::size_of::<DtbHeaderCommon>();
+    let header_size_v17 = header_size_v16 + std::mem::size_of::<u32>();
 
-    // Parse the header
-    let (dtb_header, _) = DTBHeaderBytes::ref_from_prefix(dtb_data).map_err(|_| StructureError)?;
-    // Check the reported versioning
-    if dtb_header.version.get() == EXPECTED_VERSION
-        && dtb_header.min_compatible_version.get() == EXPECTED_COMPAT_VERSION
-    {
-        // Check required byte alignments for the specified offsets
-        if dtb_header
-            .dt_struct_offset
-            .get()
-            .is_multiple_of(STRUCT_ALIGNMENT)
-            && dtb_header
-                .mem_reservation_block_offset
-                .get()
-                .is_multiple_of(MEM_RESERVATION_ALIGNMENT)
-        {
-            // All offsets must start after the header structure
-            if dtb_header.dt_struct_offset.get() as usize >= dtb_structure_size
-                && dtb_header.dt_strings_offset.get() as usize >= dtb_structure_size
-                && dtb_header.mem_reservation_block_offset.get() as usize >= dtb_structure_size
-            {
-                return Ok(DTBHeader {
-                    total_size: dtb_header.total_size.get() as usize,
-                    version: dtb_header.version.get(),
-                    cpu_id: dtb_header.cpu_id.get(),
-                    struct_offset: dtb_header.dt_struct_offset.get() as usize,
-                    strings_offset: dtb_header.dt_strings_offset.get() as usize,
-                    struct_size: dtb_header.dt_struct_size.get() as usize,
-                    strings_size: dtb_header.dt_strings_size.get() as usize,
-                });
-            }
-        }
+    // Parse the shared prefix; the v17-only `size_dt_struct` suffix is read
+    // separately so a v16 blob never has trailing bytes misread as a size.
+    let (header, rest) = DtbHeaderCommon::ref_from_prefix(dtb_data).map_err(|_| StructureError)?;
+    let version = header.version.get();
+    if version != EXPECTED_VERSION && version != EXPECTED_COMPAT_VERSION {
+        return Err(StructureError);
+    }
+    if header.min_compatible_version.get() != EXPECTED_COMPAT_VERSION {
+        return Err(StructureError);
     }
 
-    Err(StructureError)
+    // Check required byte alignments for the specified offsets
+    if !header
+        .dt_struct_offset
+        .get()
+        .is_multiple_of(STRUCT_ALIGNMENT)
+        || !header
+            .mem_reservation_block_offset
+            .get()
+            .is_multiple_of(MEM_RESERVATION_ALIGNMENT)
+    {
+        return Err(StructureError);
+    }
+
+    let total_size = header.total_size.get() as usize;
+    let struct_offset = header.dt_struct_offset.get() as usize;
+    let strings_offset = header.dt_strings_offset.get() as usize;
+    let mem_rsv_offset = header.mem_reservation_block_offset.get() as usize;
+    let strings_size = header.dt_strings_size.get() as usize;
+
+    // All offsets must start after the header actually present on disk.
+    // v16 has no `size_dt_struct`; derive the structure extent as the
+    // remainder of `total_size` so boundary checks cover the whole blob.
+    let (header_size, struct_size) = if version == EXPECTED_VERSION {
+        let suffix: [u8; 4] = rest
+            .get(..4)
+            .ok_or(StructureError)?
+            .try_into()
+            .map_err(|_| StructureError)?;
+        (header_size_v17, u32::from_be_bytes(suffix) as usize)
+    } else {
+        let struct_size = total_size
+            .checked_sub(struct_offset)
+            .ok_or(StructureError)?;
+        (header_size_v16, struct_size)
+    };
+
+    if total_size < header_size
+        || struct_offset < header_size
+        || strings_offset < header_size
+        || mem_rsv_offset < header_size
+    {
+        return Err(StructureError);
+    }
+    if strings_offset
+        .checked_add(strings_size)
+        .ok_or(StructureError)?
+        > total_size
+    {
+        return Err(StructureError);
+    }
+
+    Ok(DTBHeader {
+        total_size,
+        version,
+        cpu_id: header.cpu_id.get(),
+        struct_offset,
+        strings_offset,
+        struct_size,
+        strings_size,
+    })
 }
 
 /// Describes a DTB node entry
@@ -264,7 +309,9 @@ pub fn extract_dtb(
     // Parse the DTB file header
     if let Ok(dtb_header) = parse_dtb_header(&file_data[offset..]) {
         // Get all the DTB data
-        if let Some(dtb_data) = file_data.get(offset..offset + dtb_header.total_size) {
+        if let Some(dtb_end) = offset.checked_add(dtb_header.total_size)
+            && let Some(dtb_data) = file_data.get(offset..dtb_end)
+        {
             // DTB node entries start at the structure offset specified in the DTB header
             let mut entry_offset = dtb_header.struct_offset;
             let mut previous_entry_offset = None;

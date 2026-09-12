@@ -103,7 +103,14 @@ pub fn extract_srec(
         }
     }
     let mut remaining = srec_data;
+    let mut saw_data = false;
     while let Ok((record, rest)) = take_srec_record(remaining) {
+        if !record.checksum_valid() {
+            break;
+        }
+        if record.ty.is_data() {
+            saw_data = true;
+        }
         if !record.hex_data.is_empty()
             && record.ty.is_data()
             && let Some(f) = &mut file
@@ -121,7 +128,7 @@ pub fn extract_srec(
     }
     let consumed = srec_data.len() - remaining.len();
     result.size = Some(consumed);
-    result.success = consumed > 0;
+    result.success = consumed > 0 && saw_data;
 
     result
 }

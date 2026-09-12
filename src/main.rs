@@ -74,22 +74,28 @@ fn main() -> ExitCode {
             );
             return ExitCode::FAILURE;
         }
+
         #[cfg(feature = "entropy-plot")]
         {
-            // generate the entropy graph and return
-            display::print_plain(cli_args.quiet, "Calculating file entropy...");
+            let (entropy_results, png_path) =
+                match entropy::plot(cli_args.file_name.unwrap(), cli_args.png.as_deref()) {
+                    Ok(results) => results,
+                    Err(e) => {
+                        error!("Entropy analysis failed: {e}");
+                        return ExitCode::FAILURE;
+                    }
+                };
 
-            if let Ok(entropy_results) =
-                entropy::plot(cli_args.file_name.unwrap(), cli_args.png.as_deref())
-            {
-                // Log entropy results to JSON file, if requested
-                json_logger.log(json::JSONType::Entropy(&entropy_results));
-                json_logger.close();
+            json_logger.log(json::JSONType::Entropy(&entropy_results));
+            json_logger.close();
 
-                display::println_plain(cli_args.quiet, "done.");
+            let graph_path_message = format!("Entropy graph saved to '{}'", png_path.display());
+            if cli_args.log.as_deref() == Some(Path::new("-")) {
+                if !cli_args.quiet {
+                    eprintln!("{graph_path_message}");
+                }
             } else {
-                error!("Entropy analysis failed!");
-                return ExitCode::FAILURE;
+                display::println_plain(cli_args.quiet, &graph_path_message);
             }
 
             return ExitCode::SUCCESS;

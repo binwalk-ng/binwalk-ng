@@ -365,6 +365,12 @@ const fn parse_elf_type(elf_type: u16) -> Option<&'static str> {
         2 => "executable",
         3 => "shared object",
         4 => "core file",
+        0xFE00 => "OS-specific",
+        0xFEFF => "OS-specific",
+        0xFF00 => "processor-specific",
+        0xFFFF => "processor-specific",
+        0xFE01..=0xFEFE => "OS-specific",
+        0xFF01..=0xFFFE => "processor-specific",
         _ => return None,
     })
 }

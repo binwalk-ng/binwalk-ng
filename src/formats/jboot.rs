@@ -47,6 +47,12 @@ pub fn jboot_arm_parser(
         ..Default::default()
     };
 
+    // The magic bytes start MAGIC_OFFSET bytes into the header; anything earlier is
+    // not a JBOOT header (and would underflow the subtraction below).
+    if offset < MAGIC_OFFSET {
+        return Err(SignatureError);
+    }
+
     // Actual header starts MAGIC_OFFSET bytes before the magic bytes
     let header_start = offset - MAGIC_OFFSET;
 
@@ -87,7 +93,11 @@ pub fn jboot_stag_parser(
     if let Ok(stag_header) = parse_jboot_stag_header(&file_data[offset..]) {
         // Sanity check on the stag header reported size; it is expected that this
         // type of header describes a kernel, and should not take up the entire firmware image
-        if (offset + stag_header.header_size + stag_header.image_size) < file_data.len() {
+        if let Some(image_end) = offset
+            .checked_add(stag_header.header_size)
+            .and_then(|v| v.checked_add(stag_header.image_size))
+            && image_end <= file_data.len()
+        {
             // Only report the header size, confidence in this signature is low, don't
             // want to skip a bunch of data on a false positive
             result.size = stag_header.header_size;
@@ -400,15 +410,23 @@ pub fn extract_jboot_sch2_kernel(
     if let Some(sch2_header_data) = file_data.get(offset..) {
         // Parse the SCH2 header
         if let Ok(sch2_header) = parse_jboot_sch2_header(sch2_header_data) {
-            let kernel_start: usize = offset + sch2_header.header_size;
-            let kernel_end: usize = kernel_start + sch2_header.kernel_size;
+            let Some(kernel_start) = offset.checked_add(sch2_header.header_size) else {
+                return result;
+            };
+            let Some(kernel_end) = kernel_start.checked_add(sch2_header.kernel_size) else {
+                return result;
+            };
 
             // Validate the kernel data checksum
             if let Some(kernel_data) = file_data.get(kernel_start..kernel_end)
                 && crc32(kernel_data) == sch2_header.kernel_checksum
             {
                 // Everything checks out ok
-                result.size = Some(sch2_header.header_size + sch2_header.kernel_size);
+                let Some(total_size) = sch2_header.header_size.checked_add(sch2_header.kernel_size)
+                else {
+                    return result;
+                };
+                result.size = Some(total_size);
                 result.success = true;
 
                 if let Some(output_directory) = output_directory {

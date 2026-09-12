@@ -33,9 +33,21 @@ pub fn ubifs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
     // Parse the UBIFS superblock header
     if let Ok(sb_header) = parse_ubi_superblock_header(&file_data[offset..]) {
         // Image size is the number of logical erase blocks times the size of each logical erase block
-        result.size = (sb_header.leb_count as usize) * (sb_header.leb_size as usize);
-        result.description = format!("{}, total size: {} bytes", result.description, result.size);
-        return Ok(result);
+        let image_size = (sb_header.leb_count as usize)
+            .checked_mul(sb_header.leb_size as usize)
+            .ok_or(SignatureError)?;
+        // The image must at least contain the superblock that was just validated
+        if image_size < UBI_SUPERBLOCK_SIZE {
+            return Err(SignatureError);
+        }
+        if let Some(image_end) = offset.checked_add(image_size)
+            && image_end <= file_data.len()
+        {
+            result.size = image_size;
+            result.description =
+                format!("{}, total size: {} bytes", result.description, result.size);
+            return Ok(result);
+        }
     }
 
     Err(SignatureError)
@@ -53,8 +65,12 @@ pub fn ubi_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
 
     // Parse the UBI header
     if let Ok(ubi_header) = parse_ubi_ec_header(&file_data[offset..]) {
-        let data_offset: usize = offset + ubi_header.data_offset;
-        let volume_offset: usize = offset + ubi_header.volume_id_offset;
+        let data_offset: usize = offset
+            .checked_add(ubi_header.data_offset)
+            .ok_or(SignatureError)?;
+        let volume_offset: usize = offset
+            .checked_add(ubi_header.volume_id_offset)
+            .ok_or(SignatureError)?;
 
         // Sanity check the reported volume and data offsets
         if file_data.len() > data_offset && file_data.len() > volume_offset {
@@ -116,7 +132,7 @@ fn get_ubi_image_size(ubi_data: &[u8]) -> Result<usize, SignatureError> {
 
     // Image size is leb size times the number of blocks
     if leb_size != 0 && block_count != 0 {
-        return Ok(block_count * leb_size);
+        return block_count.checked_mul(leb_size).ok_or(SignatureError);
     }
 
     Err(SignatureError)
@@ -128,6 +144,13 @@ pub struct UbiSuperBlockHeader {
     pub leb_size: u32,
     pub leb_count: u32,
 }
+
+// Trailing superblock area covered by CRC but not modeled above.
+const SUPERBLOCK_STRUCTURE_EXTRA_SIZE: usize = 3968;
+
+/// Full UBIFS superblock size validated by `parse_ubi_superblock_header`.
+const UBI_SUPERBLOCK_SIZE: usize =
+    std::mem::size_of::<UbiSuperBlockHeaderBytes>() + SUPERBLOCK_STRUCTURE_EXTRA_SIZE;
 
 #[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
@@ -172,11 +195,7 @@ pub fn parse_ubi_superblock_header(ubi_data: &[u8]) -> Result<UbiSuperBlockHeade
     const CRC_START_OFFSET: usize = 8;
     const SUPERBLOCK_NODE_TYPE: u8 = 6;
 
-    // There are some other fields in the superblock header that we don't parse because we don't really care about them...
-    const SUPERBLOCK_STRUCTURE_EXTRA_SIZE: usize = 3968;
-
-    let sb_struct_size: usize =
-        std::mem::size_of::<UbiSuperBlockHeaderBytes>() + SUPERBLOCK_STRUCTURE_EXTRA_SIZE;
+    let sb_struct_size: usize = UBI_SUPERBLOCK_SIZE;
 
     // Parse the UBI superblock header
     let (sb_header, _) =

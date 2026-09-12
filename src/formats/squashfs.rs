@@ -55,7 +55,9 @@ pub fn squashfs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResul
          */
 
         // Get the offset of the UID table, an array of pointers to metadata blocks containing lists of user IDs
-        let uid_table_start: usize = offset + squashfs_header.uid_table_start;
+        let uid_table_start: usize = offset
+            .checked_add(squashfs_header.uid_table_start)
+            .ok_or(SignatureError)?;
 
         // Validate that the UID table pointer points to a location after the end of the SquashFS header (it's usually at the end of the image)
         if uid_table_start > squashfs_header.header_size
@@ -214,6 +216,7 @@ pub fn parse_squashfs_header(sqsh_data: &[u8]) -> Result<SquashFSHeader, Structu
                     SquashFSV4Header::ref_from_prefix(sqsh_data).map_err(|_| StructureError)?;
 
                 let image_size = squashfs_header.image_size.get(endianness) as usize;
+                let uid_table_start = squashfs_header.uid_start.get(endianness) as usize;
 
                 if image_size > MIN_SQUASHFS_HEADER_SIZE {
                     // Make sure the block size and block log fields agree
@@ -231,7 +234,7 @@ pub fn parse_squashfs_header(sqsh_data: &[u8]) -> Result<SquashFSHeader, Structu
                             compression: squashfs_header.compression_id.get(endianness),
                             major_version: squashfs_header.major_version.get(endianness),
                             minor_version: squashfs_header.minor_version.get(endianness),
-                            uid_table_start: squashfs_header.uid_start.get(endianness) as usize,
+                            uid_table_start,
                         });
                     }
                 }

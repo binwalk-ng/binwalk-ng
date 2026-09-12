@@ -14,8 +14,15 @@ pub fn cab_magic() -> Vec<Vec<u8>> {
 /// Parses and cabinet file signature
 pub fn cab_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, SignatureError> {
     // Parse the CAB header
-    if let Ok(cab_header) = parse_cab_header(&file_data[offset..]) {
-        let available_data = file_data.len() - offset;
+    let cab_data = file_data.get(offset..).ok_or(SignatureError)?;
+    if let Ok(cab_header) = parse_cab_header(cab_data) {
+        let available_data = file_data.len().checked_sub(offset).ok_or(SignatureError)?;
+        if offset
+            .checked_add(cab_header.total_size)
+            .is_none_or(|e| e > file_data.len())
+        {
+            return Err(SignatureError);
+        }
 
         // Sanity check the reported CAB file size
         if cab_header.total_size <= available_data {

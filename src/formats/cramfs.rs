@@ -18,6 +18,12 @@ pub fn cramfs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult,
     const CRC_START_OFFSET: usize = offset_of!(CramFSHeaderBytes, checksum);
     const CRC_END_OFFSET: usize = offset_of!(CramFSHeaderBytes, edition);
 
+    // The signature string lives SIGNATURE_OFFSET bytes into the superblock; a match
+    // any earlier cannot be a CramFS header (and would underflow the subtraction below).
+    if offset < SIGNATURE_OFFSET {
+        return Err(SignatureError);
+    }
+
     let mut result = SignatureResult {
         offset: offset - SIGNATURE_OFFSET,
         description: DESCRIPTION.to_string(),

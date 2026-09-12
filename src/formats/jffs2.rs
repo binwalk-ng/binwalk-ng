@@ -85,7 +85,11 @@ pub fn jffs2_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, 
                         // Parse this node's header
                         if let Ok(this_node_header) = parse_jffs2_node_header(node_header_data) {
                             node_count += 1;
-                            jffs2_eof = header_start + roundup(this_node_header.size);
+                            // Clamp to the file so an inflated node size cannot push
+                            // the reported end past EOF and mask following nodes.
+                            jffs2_eof = header_start
+                                .saturating_add(roundup(this_node_header.size))
+                                .min(file_data.len());
                         }
                     }
                 }
