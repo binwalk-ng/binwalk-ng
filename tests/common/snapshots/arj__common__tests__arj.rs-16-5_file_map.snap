@@ -1,5 +1,6 @@
 ---
 source: tests/common/mod.rs
+assertion_line: 68
 expression: results.file_map
 ---
 - offset: 13

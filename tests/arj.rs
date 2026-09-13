@@ -1,5 +1,3 @@
-use crate::common::assert_results_ok;
-
 mod common;
 
 #[test]
@@ -15,7 +13,7 @@ fn integration_test_valid_arj() {
 
     let results = common::run_binwalk(SIGNATURE_TYPE, INPUT_FILE_NAME);
 
-    assert_results_ok(
+    common::assert_results_ok(
         results,
         expected_signature_offsets,
         expected_extraction_offsets,

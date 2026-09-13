@@ -1,16 +1,10 @@
 ---
 source: tests/common/mod.rs
+assertion_line: 77
 expression: ordered_extractions
 ---
-- size: ~
+- size: 98
   success: true
-  extractor: 7z
+  extractor: rar_built_in
   do_not_recurse: false
   output_directory: "[output_directory]"
-- ~
-- size: ~
-  success: true
-  extractor: 7z
-  do_not_recurse: false
-  output_directory: "[output_directory]"
-- ~

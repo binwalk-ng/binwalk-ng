@@ -47,7 +47,7 @@ fn reports_pinned_size_and_file_count() {
 }
 
 fn fixture() -> Vec<u8> {
-    std::fs::read(std::path::Path::new(common::SAMPLES_DIR).join(INPUT_FILE_NAME)).unwrap()
+    std::fs::read(common::sample_path(INPUT_FILE_NAME)).unwrap()
 }
 
 /// Offset of the TRAILER!!! entry, found independently of the parser: the entry

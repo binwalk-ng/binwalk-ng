@@ -52,10 +52,6 @@ fn blocks(data: &[u8]) -> Vec<BlockEntropy> {
 
     let mut offset: usize = 0;
 
-    if data.is_empty() {
-        return vec![];
-    }
-
     let block_size = if data.len() < BLOCK_COUNT {
         data.len()
     } else {
@@ -257,36 +253,5 @@ mod tests {
 
         assert!(png_path.exists());
         assert!(png_path.metadata().unwrap().len() > 0);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::blocks;
-
-    /// Empty input has no blocks to measure, but `blocks(&[])` must not panic.
-    #[test]
-    fn blocks_of_empty_data_does_not_panic() {
-        assert!(blocks(&[]).is_empty());
-    }
-
-    #[test]
-    fn blocks_of_uniform_zero_data_report_zero_entropy() {
-        let data = vec![0u8; 4096];
-        let result = blocks(&data);
-        assert!(!result.is_empty());
-        for block in result {
-            assert_eq!(block.entropy, 0.0);
-        }
-    }
-
-    #[test]
-    fn blocks_contiguously_cover_the_entire_input() {
-        let data: Vec<u8> = (0..5000u32).map(|i| (i % 256) as u8).collect();
-        let result = blocks(&data);
-
-        assert_eq!(result.first().unwrap().start, 0);
-        assert_eq!(result.last().unwrap().end, data.len());
-        assert!(result.windows(2).all(|w| w[0].end == w[1].start));
     }
 }

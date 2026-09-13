@@ -16,7 +16,7 @@ use std::process::Command;
 /// gzip's extractor is internal, so these tests need no external extraction utilities.
 fn stage_input(source_directory: &Path) {
     fs::copy(
-        Path::new(common::SAMPLES_DIR).join("gzip.data.gz"),
+        common::sample_path("gzip.data.gz"),
         source_directory.join("gzip.data.gz"),
     )
     .expect("failed to stage gzip.data.gz");
@@ -32,7 +32,8 @@ fn sorted_file_names(directory: &Path) -> Vec<String> {
 }
 
 /// Run binwalk with extraction, carving and matryoshka recursion all enabled.
-fn run_binwalk(working_directory: &Path, input: &Path, output_directory: &Path) {
+/// Drives the real CLI binary (unlike `common::run_binwalk`, which uses the library).
+fn run_cli_binwalk(working_directory: &Path, input: &Path, output_directory: &Path) {
     let status = Command::new(env!("CARGO_BIN_EXE_binwalk"))
         .args(["-q", "-M", "-e", "-c", "-d"])
         .arg(output_directory)
@@ -79,7 +80,7 @@ fn absolute_input_writes_only_to_the_output_directory() {
     let output_directory = tempfile::tempdir().unwrap();
     stage_input(source_directory.path());
 
-    run_binwalk(
+    run_cli_binwalk(
         source_directory.path(),
         &source_directory.path().join("gzip.data.gz"),
         output_directory.path(),
@@ -97,7 +98,7 @@ fn relative_input_writes_only_to_the_output_directory() {
     let output_directory = tempfile::tempdir().unwrap();
     stage_input(source_directory.path());
 
-    run_binwalk(
+    run_cli_binwalk(
         source_directory.path(),
         Path::new("gzip.data.gz"),
         output_directory.path(),
