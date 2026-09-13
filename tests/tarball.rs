@@ -120,6 +120,13 @@ fn extraction_produces_expected_files() {
     });
 }
 
+/// Truncated archive (last 300 bytes cut): the parser must still detect the
+/// archive at offset 0 instead of rejecting it outright.
+#[test]
+fn truncated_archive_is_still_detected() {
+    common::integration_test("tarball", "tarball.truncated.tar");
+}
+
 /// Recursively collects every path under `dir` (files, directories, symlinks;
 /// symlinked directories are not followed).
 fn walk_paths(dir: &Path, collected: &mut Vec<PathBuf>) {

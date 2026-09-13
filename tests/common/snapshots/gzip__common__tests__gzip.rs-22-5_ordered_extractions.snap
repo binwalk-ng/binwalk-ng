@@ -1,0 +1,10 @@
+---
+source: tests/common/mod.rs
+assertion_line: 77
+expression: ordered_extractions
+---
+- size: 88037
+  success: true
+  extractor: gzip_built_in
+  do_not_recurse: false
+  output_directory: "[output_directory]"

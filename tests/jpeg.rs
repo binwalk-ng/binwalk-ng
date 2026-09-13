@@ -17,3 +17,12 @@ fn integration_test() {
         expected_extraction_offsets,
     );
 }
+
+/// Two identical images concatenated: one signature and one successful carve
+/// per copy. (Unlike the standalone case, neither image spans the whole file,
+// so extraction is not declined.)
+#[test]
+fn integration_test_duo() {
+    let results = common::run_binwalk("jpeg", "jpeg.duo.jpg");
+    common::assert_results_ok(results, vec![0, 313], vec![0, 313]);
+}

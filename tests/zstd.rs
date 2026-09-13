@@ -11,3 +11,9 @@ fn integration_test() {
 fn trailing_data() {
     common::trailing_data_test("zstd", "zstd.data.zst");
 }
+
+/// Prebuilt trailing-garbage fixture from the samples repo.
+#[test]
+fn trailing_fixture() {
+    common::integration_test("zstd", "zstd.trailing.zst");
+}

@@ -1,0 +1,13 @@
+---
+source: tests/common/mod.rs
+assertion_line: 68
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 19
+  name: pkcs_der_hash
+  confidence: 128
+  description: "PKCS DER hash, SHA256"
+  always_display: false
+  extraction_declined: false

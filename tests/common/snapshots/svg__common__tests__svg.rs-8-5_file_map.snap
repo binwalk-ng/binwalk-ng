@@ -1,0 +1,13 @@
+---
+source: tests/common/mod.rs
+assertion_line: 68
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 106
+  name: svg
+  confidence: 128
+  description: "SVG image, total size: 106 bytes"
+  always_display: false
+  extraction_declined: true

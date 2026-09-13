@@ -19,3 +19,11 @@ fn integration_test_valid_arj() {
         expected_extraction_offsets,
     )
 }
+
+/// A single archive at offset 0 (the first half of arj.embedded.bin):
+/// comment header plus readme.txt entry header, extraction only at the start.
+#[test]
+fn integration_test_single_arj() {
+    let results = common::run_binwalk("arj", "arj.archive.arj");
+    common::assert_results_ok(results, vec![0, 0x3D], vec![0]);
+}

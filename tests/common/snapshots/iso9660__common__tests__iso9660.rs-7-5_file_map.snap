@@ -1,0 +1,13 @@
+---
+source: tests/common/mod.rs
+assertion_line: 68
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 788480
+  name: iso9660
+  confidence: 250
+  description: "ISO9660 primary volume, total size: 788480 bytes"
+  always_display: false
+  extraction_declined: false

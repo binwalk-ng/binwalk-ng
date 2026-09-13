@@ -1,0 +1,13 @@
+---
+source: tests/common/mod.rs
+assertion_line: 68
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 15600
+  name: elf
+  confidence: 128
+  description: "ELF binary, 64-bit executable, AMD X86-64 for System-V (Unix), Little Endian"
+  always_display: false
+  extraction_declined: false

@@ -1,0 +1,13 @@
+---
+source: tests/common/mod.rs
+assertion_line: 68
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 4176896
+  name: efigpt
+  confidence: 250
+  description: "EFI Global Partition Table, total size: 4176896"
+  always_display: false
+  extraction_declined: false

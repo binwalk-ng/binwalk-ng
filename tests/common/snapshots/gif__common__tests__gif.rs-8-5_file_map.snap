@@ -1,0 +1,13 @@
+---
+source: tests/common/mod.rs
+assertion_line: 68
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 54
+  name: gif
+  confidence: 250
+  description: "GIF image, 4x4 pixels, total size: 54 bytes"
+  always_display: false
+  extraction_declined: true

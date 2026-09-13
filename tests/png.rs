@@ -15,3 +15,11 @@ fn integration_test() {
         expected_extraction_offsets,
     );
 }
+
+#[test]
+fn integration_test_valid_png() {
+    // PNG has no extractor (extraction_declined): one signature at offset 0,
+    // no extraction results.
+    let results = common::run_binwalk("png", "png.gradient.png");
+    common::assert_results_ok(results, vec![0], vec![]);
+}

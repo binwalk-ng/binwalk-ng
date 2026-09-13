@@ -1,0 +1,13 @@
+---
+source: tests/common/mod.rs
+assertion_line: 68
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 1034
+  name: pem_certificate
+  confidence: 250
+  description: PEM certificate
+  always_display: false
+  extraction_declined: true

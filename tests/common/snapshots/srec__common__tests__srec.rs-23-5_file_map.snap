@@ -1,0 +1,13 @@
+---
+source: tests/common/mod.rs
+assertion_line: 68
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 3822
+  name: srecord_generic
+  confidence: 250
+  description: "Motorola S-record, origin OS: Windows, total size: 3822 bytes"
+  always_display: false
+  extraction_declined: false
