@@ -70,6 +70,14 @@ pub fn tarball_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult
                         break;
                     }
                     Ok(entry_size) => {
+                        // Don't count entries whose declared data runs past the
+                        // end of the available input (truncated/hostile
+                        // archives); the loop guard guarantees
+                        // next_header_start < available_data, so this cannot
+                        // underflow.
+                        if entry_size > available_data - next_header_start {
+                            break;
+                        }
                         valid_header_count += 1;
 
                         // Update total size count, and next/previous header offsets

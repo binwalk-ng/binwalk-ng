@@ -157,8 +157,15 @@ fn image_output_path(target_file: &Path) -> PathBuf {
         .unwrap_or("file");
 
     let max_stem = 64;
+    // Byte-slicing a &str must land on a UTF-8 character boundary; flooring
+    // preserves the truncation behavior for ASCII while avoiding a panic on
+    // multibyte file names (file_stem is user-controlled via the CLI path).
     let truncated_stem = if file_stem.len() > max_stem {
-        &file_stem[..max_stem]
+        let mut end = max_stem;
+        while !file_stem.is_char_boundary(end) {
+            end -= 1;
+        }
+        &file_stem[..end]
     } else {
         file_stem
     };
@@ -253,5 +260,19 @@ mod tests {
 
         assert!(png_path.exists());
         assert!(png_path.metadata().unwrap().len() > 0);
+    }
+
+    #[test]
+    fn long_multibyte_stem_is_truncated_at_a_char_boundary() {
+        // 40 'é' (80 bytes): byte 64 is a boundary; stem pins to 32 chars.
+        let path = image_output_path(Path::new(&"é".repeat(40)));
+        let name = path.file_name().unwrap().to_str().unwrap();
+        assert!(name.starts_with(&format!("binwalk-{}-", "é".repeat(32))));
+
+        // 63 ASCII + 'é' (65 bytes): byte 64 splits the 'é'; flooring must
+        // drop it (this slicing panicked before the boundary fix).
+        let path = image_output_path(Path::new(&format!("{}é", "a".repeat(63))));
+        let name = path.file_name().unwrap().to_str().unwrap();
+        assert!(name.starts_with(&format!("binwalk-{}-", "a".repeat(63))));
     }
 }
