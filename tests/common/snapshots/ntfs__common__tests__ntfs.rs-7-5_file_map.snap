@@ -1,0 +1,13 @@
+---
+source: tests/common/mod.rs
+assertion_line: 68
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 2097152
+  name: ntfs
+  confidence: 128
+  description: "NTFS partition, number of sectors: 4095, bytes per sector: 512, total size: 2097152 bytes"
+  always_display: false
+  extraction_declined: false

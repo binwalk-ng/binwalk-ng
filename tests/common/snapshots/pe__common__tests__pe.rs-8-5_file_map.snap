@@ -1,0 +1,13 @@
+---
+source: tests/common/mod.rs
+assertion_line: 68
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 124825
+  name: pe
+  confidence: 128
+  description: "Windows PE binary, machine type: Intel x86-64"
+  always_display: false
+  extraction_declined: false

@@ -1,0 +1,13 @@
+---
+source: tests/common/mod.rs
+assertion_line: 68
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 232448
+  name: jffs2
+  confidence: 250
+  description: "JFFS2 filesystem, Little Endian, nodes: 118, total size: 232448 bytes"
+  always_display: false
+  extraction_declined: false

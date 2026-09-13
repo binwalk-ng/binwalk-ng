@@ -4,9 +4,9 @@ expression: results.file_map
 ---
 - offset: 0
   id: "[uuid]"
-  size: 5120
+  size: 8388608
   name: mbr
   confidence: 128
-  description: "DOS Master Boot Record, partition: Linux, image size: 5120 bytes"
+  description: "DOS Master Boot Record, partition: Linux, image size: 8388608 bytes"
   always_display: true
   extraction_declined: false

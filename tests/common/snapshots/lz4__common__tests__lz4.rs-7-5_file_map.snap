@@ -1,13 +1,12 @@
 ---
 source: tests/common/mod.rs
-assertion_line: 40
 expression: results.file_map
 ---
 - offset: 0
   id: "[uuid]"
-  size: 47
+  size: 137918
   name: lz4
   confidence: 128
-  description: "LZ4 compressed data, total size: 47 bytes"
+  description: "LZ4 compressed data, total size: 137918 bytes"
   always_display: false
   extraction_declined: false

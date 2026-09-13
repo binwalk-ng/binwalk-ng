@@ -4,6 +4,8 @@
 //! These drive the real CLI binary rather than the library: the extraction output
 //! directory, matryoshka recursion, and data carving are all wired up in main.rs.
 
+mod common;
+
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -14,10 +16,10 @@ use std::process::Command;
 /// gzip's extractor is internal, so these tests need no external extraction utilities.
 fn stage_input(source_directory: &Path) {
     fs::copy(
-        Path::new("tests").join("inputs").join("gzip.bin"),
-        source_directory.join("gzip.bin"),
+        common::sample_path("gzip.data.gz"),
+        source_directory.join("gzip.data.gz"),
     )
-    .expect("failed to stage gzip.bin");
+    .expect("failed to stage gzip.data.gz");
 }
 
 fn sorted_file_names(directory: &Path) -> Vec<String> {
@@ -30,7 +32,8 @@ fn sorted_file_names(directory: &Path) -> Vec<String> {
 }
 
 /// Run binwalk with extraction, carving and matryoshka recursion all enabled.
-fn run_binwalk(working_directory: &Path, input: &Path, output_directory: &Path) {
+/// Drives the real CLI binary (unlike `common::run_binwalk`, which uses the library).
+fn run_cli_binwalk(working_directory: &Path, input: &Path, output_directory: &Path) {
     let status = Command::new(env!("CARGO_BIN_EXE_binwalk"))
         .args(["-q", "-M", "-e", "-c", "-d"])
         .arg(output_directory)
@@ -48,13 +51,13 @@ fn run_binwalk(working_directory: &Path, input: &Path, output_directory: &Path) 
 fn assert_output_in_directory(source_directory: &Path, output_directory: &Path) {
     assert_eq!(
         sorted_file_names(source_directory),
-        ["gzip.bin"],
+        ["gzip.data.gz"],
         "binwalk wrote output beside the input file, in {}",
         source_directory.display()
     );
 
     let extracted = output_directory
-        .join("gzip.bin.extracted")
+        .join("gzip.data.gz.extracted")
         .join("0")
         .join("decompressed.bin");
     assert!(
@@ -63,7 +66,7 @@ fn assert_output_in_directory(source_directory: &Path, output_directory: &Path) 
         extracted.display()
     );
 
-    let carved = output_directory.join("gzip.bin_0_gzip.raw");
+    let carved = output_directory.join("gzip.data.gz_0_gzip.raw");
     assert!(
         carved.exists(),
         "expected carved file was not created: {}",
@@ -77,9 +80,9 @@ fn absolute_input_writes_only_to_the_output_directory() {
     let output_directory = tempfile::tempdir().unwrap();
     stage_input(source_directory.path());
 
-    run_binwalk(
+    run_cli_binwalk(
         source_directory.path(),
-        &source_directory.path().join("gzip.bin"),
+        &source_directory.path().join("gzip.data.gz"),
         output_directory.path(),
     );
 
@@ -95,9 +98,9 @@ fn relative_input_writes_only_to_the_output_directory() {
     let output_directory = tempfile::tempdir().unwrap();
     stage_input(source_directory.path());
 
-    run_binwalk(
+    run_cli_binwalk(
         source_directory.path(),
-        Path::new("gzip.bin"),
+        Path::new("gzip.data.gz"),
         output_directory.path(),
     );
 

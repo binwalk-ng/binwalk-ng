@@ -1,0 +1,13 @@
+---
+source: tests/common/mod.rs
+assertion_line: 68
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 330
+  name: png
+  confidence: 250
+  description: "PNG image, total size: 330 bytes"
+  always_display: false
+  extraction_declined: true

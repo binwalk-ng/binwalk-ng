@@ -1,0 +1,13 @@
+---
+source: tests/common/mod.rs
+assertion_line: 68
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 270
+  name: dtb
+  confidence: 128
+  description: "Device tree blob (DTB), version: 17, CPU ID: 0, total size: 270 bytes"
+  always_display: false
+  extraction_declined: false

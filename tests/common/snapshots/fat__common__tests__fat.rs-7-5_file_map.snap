@@ -1,0 +1,13 @@
+---
+source: tests/common/mod.rs
+assertion_line: 68
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 1048576
+  name: fat
+  confidence: 128
+  description: "FAT file system, type: FAT12/16, total size: 1048576 bytes"
+  always_display: false
+  extraction_declined: false

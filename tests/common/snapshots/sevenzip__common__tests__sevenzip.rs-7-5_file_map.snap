@@ -4,9 +4,9 @@ expression: results.file_map
 ---
 - offset: 0
   id: "[uuid]"
-  size: 218
+  size: 73492
   name: 7zip
   confidence: 250
-  description: "7-zip archive data, version 0.4, total size: 218 bytes"
+  description: "7-zip archive data, version 0.4, total size: 73492 bytes"
   always_display: false
   extraction_declined: false
