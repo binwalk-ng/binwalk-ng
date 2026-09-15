@@ -33,25 +33,23 @@ fn pad_to_length(text: &str, len: usize) -> String {
 }
 
 fn line_wrap(text: &str, prefix_size: usize) -> String {
-    let mut this_line = "".to_string();
-    let mut formatted_string = "".to_string();
-    let max_line_size: usize = terminal_width() - prefix_size;
-
+    let max_line_size: usize = terminal_width().saturating_sub(prefix_size).max(1);
+    let mut this_line = String::with_capacity(max_line_size);
+    let mut out = String::with_capacity(text.len() + 64);
     for word in text.split_whitespace() {
-        if (this_line.len() + word.len()) < max_line_size {
-            this_line = this_line + word + " ";
-        } else {
-            formatted_string = formatted_string + &this_line + "\n";
-            for _i in 0..prefix_size {
-                formatted_string += " ";
-            }
-            this_line = word.to_string() + " ";
+        if !this_line.is_empty() && this_line.len() + 1 + word.len() >= max_line_size {
+            out.push_str(&this_line);
+            out.push('\n');
+            out.extend(std::iter::repeat_n(' ', prefix_size));
+            this_line.clear();
         }
+        if !this_line.is_empty() {
+            this_line.push(' ');
+        }
+        this_line.push_str(word);
     }
-
-    formatted_string = formatted_string + &this_line;
-
-    formatted_string.trim().to_string()
+    out.push_str(&this_line);
+    out.trim().to_string()
 }
 
 fn print_column_headers(col1: &str, col2: &str, col3: &str) {
