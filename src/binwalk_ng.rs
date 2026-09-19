@@ -655,23 +655,39 @@ impl Binwalk {
             let mut horizons: Vec<usize> = Vec::with_capacity(file_map.len());
             let mut horizon: usize = 0;
             for candidate in std::mem::take(&mut file_map) {
-                if let Some(previous) = kept.last() {
-                    if candidate.offset == previous.offset {
-                        if candidate.confidence <= previous.confidence {
-                            continue;
-                        }
-                        kept.pop();
-                        horizon = horizons.pop().unwrap_or(0);
-                    } else if candidate.offset < horizon {
-                        continue;
-                    }
-                }
-                // Guard against parsers reporting an offset past EOF; the subtraction
-                // below would otherwise underflow.
+                // Validate the candidate's range first, so an out-of-range
+                // result can never evict a valid same-offset entry.
                 if candidate.offset > file_data.len()
                     || candidate.size > file_data.len() - candidate.offset
                 {
+                    debug!(
+                        "Signature {} at offset {:#X} claims its size extends beyond EOF; ignoring",
+                        candidate.name, candidate.offset
+                    );
                     continue;
+                }
+                if let Some(previous) = kept.last() {
+                    if candidate.offset == previous.offset {
+                        if candidate.confidence <= previous.confidence {
+                            debug!(
+                                "Conflicting signatures at offset {:#X} with the same or lower confidence; first come, first served",
+                                candidate.offset
+                            );
+                            continue;
+                        }
+                        debug!(
+                            "Conflicting signatures at offset {:#X}; defaulting to the signature with highest confidence",
+                            candidate.offset
+                        );
+                        kept.pop();
+                        horizon = horizons.pop().unwrap_or(0);
+                    } else if candidate.offset < horizon {
+                        debug!(
+                            "Signature {} at offset {:#X} contains conflicting data; ignoring",
+                            candidate.name, candidate.offset
+                        );
+                        continue;
+                    }
                 }
                 horizons.push(horizon);
                 if candidate.confidence >= signatures::CONFIDENCE_MEDIUM {
