@@ -146,6 +146,7 @@ dependencies = [
  "lzfse",
  "md-5",
  "memchr",
+ "memchr-n",
  "memmap2",
  "miniz_oxide 0.9.1",
  "plotters",
@@ -599,6 +600,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fearless_simd"
+version = "1.0.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50a2d1ad65a201b433ff546990c72c804305bb2162f8c09707dd7f9125210b55"
+
+[[package]]
 name = "filetime"
 version = "0.2.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -965,6 +972,15 @@ name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
+
+[[package]]
+name = "memchr-n"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2cc66a48ad0fcb95563954d1dba594f1ead0b35f061a6533a2fe083ae5af26bf"
+dependencies = [
+ "fearless_simd",
+]
 
 [[package]]
 name = "memmap2"

@@ -5,6 +5,7 @@ use log::{debug, error};
 use memmap2::Mmap;
 use std::io::Read;
 use std::path::Path;
+use std::sync::LazyLock;
 
 /// Read a file data into memory and return its contents.
 ///
@@ -121,20 +122,12 @@ pub fn get_cstring(raw_data: &[u8]) -> String {
 
 /// Position of the first non-zero byte in `data`, or `None` if there is none.
 ///
-/// Same result as `data.iter().position(|&b| b != 0)`, but checks one machine
-/// word at a time: 4 bytes on 32-bit targets, 8 on 64-bit (a `usize` is that
-/// wide).
+/// SIMD-accelerated via a pre-built `MemchrN` matching every byte except zero.
+/// The searcher is expensive to construct, so it is built once globally.
 pub fn find_first_nonzero(data: &[u8]) -> Option<usize> {
-    const WORD: usize = std::mem::size_of::<usize>();
-    let (chunks, tail) = data.as_chunks::<WORD>();
-    for (i, chunk) in chunks.iter().enumerate() {
-        if usize::from_ne_bytes(*chunk) != 0 {
-            let base = i * WORD;
-            return Some(base + chunk.iter().position(|&b| b != 0).expect("word != 0"));
-        }
-    }
-    let base = data.len() - tail.len();
-    tail.iter().position(|&b| b != 0).map(|pos| base + pos)
+    static NOT_ZERO: LazyLock<memchr_n::MemchrN> =
+        LazyLock::new(|| memchr_n::MemchrN::from_not_byte(0));
+    NOT_ZERO.find(data)
 }
 
 /// Returns true if the provided byte is a printable ASCII character
