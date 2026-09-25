@@ -5,6 +5,7 @@ use log::{debug, error};
 use memmap2::Mmap;
 use std::io::Read;
 use std::path::Path;
+use std::sync::LazyLock;
 
 /// Read a file data into memory and return its contents.
 ///
@@ -114,12 +115,19 @@ pub fn epoch_to_string(epoch_timestamp: impl Into<i64>) -> String {
 /// assert_eq!(string, "this_is_a_c_string");
 /// ```
 pub fn get_cstring(raw_data: &[u8]) -> String {
-    let first_zero = raw_data
-        .iter()
-        .position(|&r| r == 0)
-        .unwrap_or(raw_data.len());
+    let first_zero = memchr::memchr(0, raw_data).unwrap_or(raw_data.len());
     let raw_bytes = &raw_data[..first_zero];
     String::from_utf8_lossy(raw_bytes).into_owned()
+}
+
+/// Position of the first non-zero byte in `data`, or `None` if there is none.
+///
+/// SIMD-accelerated via a pre-built `MemchrN` matching every byte except zero.
+/// The searcher is expensive to construct, so it is built once globally.
+pub fn find_first_nonzero(data: &[u8]) -> Option<usize> {
+    static NOT_ZERO: LazyLock<memchr_n::MemchrN> =
+        LazyLock::new(|| memchr_n::MemchrN::from_not_byte(0));
+    NOT_ZERO.find(data)
 }
 
 /// Returns true if the provided byte is a printable ASCII character

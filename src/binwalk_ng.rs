@@ -3,14 +3,14 @@
 use aho_corasick::AhoCorasick;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::num::NonZeroUsize;
 use std::path::Path;
 use std::path::PathBuf;
 use uuid::Uuid;
 
-use crate::common::{is_offset_safe, read_or_map_file};
+use crate::common::{find_first_nonzero, is_offset_safe, read_or_map_file};
 use crate::extractors;
 use crate::formats::program_store;
 use crate::magic;
@@ -242,11 +242,6 @@ impl BinwalkBuilder {
     pub fn build(self) -> Result<Binwalk, BuildError> {
         let mut signature_count = 0;
         let mut pattern_count = 0;
-        let mut short_signatures = vec![];
-        let mut patterns: Vec<Vec<u8>> = vec![];
-
-        let mut signatures = vec![];
-        let mut extractor_lookup_table = HashMap::new();
 
         // The most leading zero bytes in any magic pattern that has a non-zero byte
         let mut max_leading_zeros = 0;
@@ -256,10 +251,31 @@ impl BinwalkBuilder {
         let mut signature_patterns = magic::patterns();
         signature_patterns.extend(self.signatures);
 
+        // Lower-case the include/exclude names once, so that filtering each
+        // signature is a set lookup rather than a linear scan of the lists.
+        let include: HashSet<String> = self
+            .include
+            .iter()
+            .map(|name| name.to_ascii_lowercase())
+            .collect();
+        let exclude: HashSet<String> = self
+            .exclude
+            .iter()
+            .map(|name| name.to_ascii_lowercase())
+            .collect();
+
+        // Pre-size every collection from the signature count; each signature
+        // contributes at least one magic pattern, so it bounds these too.
+        let total = signature_patterns.len();
+        let mut short_signatures = Vec::with_capacity(total);
+        let mut patterns: Vec<Vec<u8>> = Vec::with_capacity(total);
+        let mut signatures = Vec::with_capacity(total);
+        let mut extractor_lookup_table = HashMap::with_capacity(total);
+
         // Load magic signatures
         for signature in signature_patterns {
             // Check if this signature should be included
-            if !include_signature(&signature, &self.include, &self.exclude) {
+            if !include_signature(&signature, &include, &exclude) {
                 continue;
             }
 
@@ -424,10 +440,7 @@ impl Binwalk {
                 .all(|&b| b == 0)
         );
         debug_assert!(synth_zeros_end - synth_zeros_start > self.max_leading_zeros);
-        let Some(next_non_zero) = file_data[synth_zeros_end..]
-            .iter()
-            .position(|&byte| byte != 0)
-        else {
+        let Some(next_non_zero) = find_first_nonzero(&file_data[synth_zeros_end..]) else {
             // Every pattern needs a non-zero byte, either in the pattern itself or, for an
             // all-zero magic, in the data its signature requires to be non-zero nearby. With none
             // left in the file, nothing can match from here on.
@@ -460,7 +473,6 @@ impl Binwalk {
     pub fn scan(&self, file_data: &[u8]) -> Vec<signatures::SignatureResult> {
         const FILE_START_OFFSET: usize = 0;
 
-        let mut index_adjustment: usize = 0;
         let mut next_valid_offset: usize = 0;
         let mut previous_valid_offset = None;
 
@@ -635,93 +647,55 @@ impl Binwalk {
          * starting offset for the signature, so sort the file_map by the SignatureResult.offset value.
          */
         file_map.sort_by_key(|e| e.offset);
-        next_valid_offset = 0;
 
-        /*
-         * Now that signatures are in the correct order, identify and any overlapping signatures
-         * (such as gzip files identified within a tarball archive), signatures with the same reported offset,
-         * and any signatures with an invalid reported size (i.e., the size extends beyond the end of available file_data).
-         */
-        for mut i in 0..file_map.len() {
-            // Some entries may have been removed from the file_map list in previous loop iterations; adjust the index accordingly
-            i -= index_adjustment;
-
-            // Make sure the file map index is valid
-            if file_map.is_empty() || i >= file_map.len() {
-                break;
-            }
-
-            let this_signature = &file_map[i];
-
-            // Check if the previous file map entry had the same reported starting offset as this one
-            if i > 0 && this_signature.offset == file_map[i - 1].offset {
-                // Get the previous signature in the file map
-                let previous_signature = &file_map[i - 1];
-
-                // If this file map entry and the conflicting entry do not have the same confidence level, default to the one with highest confidence
-                if this_signature.confidence != previous_signature.confidence {
+        // Single pass into a new Vec; `horizons` restores the previous horizon
+        // when a same-offset entry wins.
+        {
+            let mut kept: Vec<signatures::SignatureResult> = Vec::with_capacity(file_map.len());
+            let mut horizons: Vec<usize> = Vec::with_capacity(file_map.len());
+            let mut horizon: usize = 0;
+            for candidate in std::mem::take(&mut file_map) {
+                // Validate the candidate's range first, so an out-of-range
+                // result can never evict a valid same-offset entry.
+                if candidate.offset > file_data.len()
+                    || candidate.size > file_data.len() - candidate.offset
+                {
                     debug!(
-                        "Conflicting signatures at offset {:#X}; defaulting to the signature with highest confidence",
-                        this_signature.offset
+                        "Signature {} at offset {:#X} claims its size extends beyond EOF; ignoring",
+                        candidate.name, candidate.offset
                     );
-
-                    // If this signature is higher confidence, invalidate the previous signature
-                    if this_signature.confidence > previous_signature.confidence {
-                        file_map.remove(i - 1);
-                        index_adjustment += 1;
-                        // This signature was not removed, but it shifted down to index i - 1
-                        i -= 1;
-
-                    // Else, this signature has a lower confidence; invalidate this signature and continue to the next signature in the list
-                    } else {
-                        file_map.remove(i);
-                        index_adjustment += 1;
-                        continue;
-                    }
-
-                // Conflicting signatures have identical confidence levels; defer to the previously vetted signature
-                } else {
-                    debug!(
-                        "Conflicting signatures at offset {:#X} with the same confidence; first come, first served",
-                        this_signature.offset
-                    );
-                    file_map.remove(i);
-                    index_adjustment += 1;
                     continue;
                 }
-
-            // Else, if the offsets don't conflict, make sure this signature doesn't fall inside a previously identified signature's data
-            } else if this_signature.offset < next_valid_offset {
-                debug!(
-                    "Signature {} at offset {:#X} contains conflicting data; ignoring",
-                    this_signature.name, this_signature.offset
-                );
-                file_map.remove(i);
-                index_adjustment += 1;
-                continue;
+                if let Some(previous) = kept.last() {
+                    if candidate.offset == previous.offset {
+                        if candidate.confidence <= previous.confidence {
+                            debug!(
+                                "Conflicting signatures at offset {:#X} with the same or lower confidence; first come, first served",
+                                candidate.offset
+                            );
+                            continue;
+                        }
+                        debug!(
+                            "Conflicting signatures at offset {:#X}; defaulting to the signature with highest confidence",
+                            candidate.offset
+                        );
+                        kept.pop();
+                        horizon = horizons.pop().unwrap_or(0);
+                    } else if candidate.offset < horizon {
+                        debug!(
+                            "Signature {} at offset {:#X} contains conflicting data; ignoring",
+                            candidate.name, candidate.offset
+                        );
+                        continue;
+                    }
+                }
+                horizons.push(horizon);
+                if candidate.confidence >= signatures::CONFIDENCE_MEDIUM {
+                    horizon = candidate.offset + candidate.size;
+                }
+                kept.push(candidate);
             }
-
-            // The signature being examined may have shifted down in the file map; get a fresh reference to it at its current index
-            let this_signature = &file_map[i];
-            let remaining_available_size = file_data.len() - this_signature.offset;
-
-            // If we've made it this far, make sure this signature's data doesn't extend beyond EOF and that the file data doesn't wrap around
-            if this_signature.size > remaining_available_size
-                || ((this_signature.offset + this_signature.size) as isize) < 0
-            {
-                debug!(
-                    "Signature {} at offset {:#X} claims its size extends beyond EOF; ignoring",
-                    this_signature.name, this_signature.offset
-                );
-                file_map.remove(i);
-                index_adjustment += 1;
-                continue;
-            }
-
-            // This signature looks OK, update the next_valid_offset to be the end of this signature's data, only if we're fairly confident in the signature
-            if this_signature.confidence >= signatures::CONFIDENCE_MEDIUM {
-                next_valid_offset = this_signature.offset + this_signature.size;
-            }
+            file_map = kept;
         }
 
         /*
@@ -1023,29 +997,21 @@ impl Binwalk {
 }
 
 /// Returns true if the signature should be included for file analysis, else returns false.
+///
+/// `include` and `exclude` hold the configured names, already lower-cased.
 fn include_signature(
     signature: &signatures::Signature,
-    include: &Vec<String>,
-    exclude: &Vec<String>,
+    include: &HashSet<String>,
+    exclude: &HashSet<String>,
 ) -> bool {
-    if !include.is_empty() {
-        for include_str in include {
-            if signature.name.eq_ignore_ascii_case(include_str) {
-                return true;
-            }
-        }
+    let name = signature.name.to_ascii_lowercase();
 
-        return false;
+    if !include.is_empty() {
+        return include.contains(&name);
     }
 
     if !exclude.is_empty() {
-        for exclude_str in exclude {
-            if signature.name.eq_ignore_ascii_case(exclude_str) {
-                return false;
-            }
-        }
-
-        return true;
+        return !exclude.contains(&name);
     }
 
     true
