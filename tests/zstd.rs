@@ -3,11 +3,17 @@ mod common;
 #[test]
 fn integration_test() {
     const SIGNATURE_TYPE: &str = "zstd";
-    const INPUT_FILE_NAME: &str = "zstd.bin";
+    const INPUT_FILE_NAME: &str = "zstd.data.zst";
     common::integration_test(SIGNATURE_TYPE, INPUT_FILE_NAME);
 }
 
 #[test]
 fn trailing_data() {
-    common::trailing_data_test("zstd", "zstd.bin");
+    common::trailing_data_test("zstd", "zstd.data.zst");
+}
+
+/// Prebuilt trailing-garbage fixture from the samples repo.
+#[test]
+fn trailing_fixture() {
+    common::integration_test("zstd", "zstd.trailing.zst");
 }

@@ -1,0 +1,13 @@
+---
+source: tests/common/mod.rs
+assertion_line: 68
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 15664
+  name: uimage
+  confidence: 250
+  description: "uImage firmware image, header size: 64 bytes, data size: 15600 bytes, compression: gzip, CPU: ARM, OS: Linux, image type: OS Kernel Image, load address: 0x80008000, entry point: 0x80008000, creation time: 2025-04-30 15:32:03, image name: \"binwalk sample\""
+  always_display: false
+  extraction_declined: false

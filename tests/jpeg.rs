@@ -3,10 +3,12 @@ mod common;
 #[test]
 fn integration_test() {
     const SIGNATURE_TYPE: &str = "jpeg";
-    const INPUT_FILE_NAME: &str = "jpeg.bin";
+    const INPUT_FILE_NAME: &str = "jpeg.gradient.jpg";
 
-    let expected_signature_offsets: Vec<usize> = vec![0, 0x15BBE];
-    let expected_extraction_offsets: Vec<usize> = vec![0, 0x15BBE];
+    // A standalone JPEG occupying the whole file: detected at offset 0, and
+    // extraction is declined (there is nothing to carve out).
+    let expected_signature_offsets: Vec<usize> = vec![0];
+    let expected_extraction_offsets: Vec<usize> = vec![];
 
     let results = common::run_binwalk(SIGNATURE_TYPE, INPUT_FILE_NAME);
     common::assert_results_ok(
@@ -14,4 +16,13 @@ fn integration_test() {
         expected_signature_offsets,
         expected_extraction_offsets,
     );
+}
+
+/// Two identical images concatenated: one signature and one successful carve
+/// per copy. (Unlike the standalone case, neither image spans the whole file,
+// so extraction is not declined.)
+#[test]
+fn integration_test_duo() {
+    let results = common::run_binwalk("jpeg", "jpeg.duo.jpg");
+    common::assert_results_ok(results, vec![0, 313], vec![0, 313]);
 }

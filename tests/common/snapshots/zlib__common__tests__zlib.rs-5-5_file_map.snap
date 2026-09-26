@@ -1,0 +1,12 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 88089
+  name: zlib
+  confidence: 250
+  description: "Zlib compressed file, total size: 88089 bytes"
+  always_display: false
+  extraction_declined: false

@@ -1,0 +1,13 @@
+---
+source: tests/common/mod.rs
+assertion_line: 68
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 1806336
+  name: ubifs
+  confidence: 250
+  description: "UBIFS image, total size: 1806336 bytes"
+  always_display: false
+  extraction_declined: false

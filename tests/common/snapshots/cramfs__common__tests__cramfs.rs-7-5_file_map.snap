@@ -4,9 +4,9 @@ expression: results.file_map
 ---
 - offset: 0
   id: "[uuid]"
-  size: 4096
+  size: 221184
   name: cramfs
   confidence: 250
-  description: "CramFS filesystem, Little Endian, 2 files, total size: 4096 bytes"
+  description: "CramFS filesystem, Little Endian, 5 files, total size: 221184 bytes"
   always_display: false
   extraction_declined: false

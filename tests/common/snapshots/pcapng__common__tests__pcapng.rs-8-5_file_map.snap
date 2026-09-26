@@ -1,0 +1,12 @@
+---
+source: tests/common/mod.rs
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 272
+  name: pcapng
+  confidence: 250
+  description: "Pcap-NG capture file, total size: 272 bytes"
+  always_display: false
+  extraction_declined: true

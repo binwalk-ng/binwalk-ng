@@ -1,0 +1,10 @@
+---
+source: tests/common/mod.rs
+assertion_line: 77
+expression: ordered_extractions
+---
+- size: 270
+  success: true
+  extractor: dtb_built_in
+  do_not_recurse: false
+  output_directory: "[output_directory]"

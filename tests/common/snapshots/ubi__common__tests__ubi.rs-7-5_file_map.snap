@@ -1,0 +1,13 @@
+---
+source: tests/common/mod.rs
+assertion_line: 68
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 2228224
+  name: ubi
+  confidence: 250
+  description: "UBI image, version: 1, image size: 2228224 bytes"
+  always_display: false
+  extraction_declined: false

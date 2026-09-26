@@ -1,0 +1,13 @@
+---
+source: tests/common/mod.rs
+assertion_line: 68
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 339368
+  name: cab
+  confidence: 128
+  description: "Microsoft Cabinet archive, file count: 1, folder count: 1, header size: 40, total size: 339368 bytes"
+  always_display: false
+  extraction_declined: false

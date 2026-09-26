@@ -1,0 +1,21 @@
+---
+source: tests/common/mod.rs
+assertion_line: 68
+expression: results.file_map
+---
+- offset: 0
+  id: "[uuid]"
+  size: 313
+  name: jpeg
+  confidence: 128
+  description: "JPEG image, total size: 313 bytes"
+  always_display: false
+  extraction_declined: false
+- offset: 313
+  id: "[uuid]"
+  size: 313
+  name: jpeg
+  confidence: 128
+  description: "JPEG image, total size: 313 bytes"
+  always_display: false
+  extraction_declined: false
