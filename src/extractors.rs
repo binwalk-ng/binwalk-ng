@@ -1736,7 +1736,6 @@ fn was_something_extracted(output_directory: impl AsRef<Path>) -> bool {
     false
 }
 
-pub mod dumpifs;
 pub mod inflate;
 pub mod swapped;
 pub mod tsk;

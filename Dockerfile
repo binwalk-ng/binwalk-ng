@@ -10,7 +10,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 
-# Pull build needs, build dumpifs, lzfse, dmg2img, vfdecrypt, and binwalk
+# Pull build needs, build lzfse, dmg2img, vfdecrypt, and binwalk
 # Cleaning up our mess here doesn't matter, as anything generated in
 # this stage won't make it into the final image unless it's explicitly copied
 RUN apt-get update -y \
@@ -33,11 +33,8 @@ RUN apt-get update -y \
     libssl-dev \
     pkg-config \
     && curl -L -o "${BUILD_DIR}/${SASQUATCH_FILENAME}" "${SASQUATCH_BASE_FILE_URL}/sasquatch_1.0_$(dpkg --print-architecture).deb" \
-    && git clone https://github.com/askac/dumpifs.git ${BUILD_DIR}/dumpifs \
     && git clone https://github.com/lzfse/lzfse.git ${BUILD_DIR}/lzfse \
     && git clone https://github.com/Lekensteyn/dmg2img.git ${BUILD_DIR}/dmg2img \
-    && rm ${BUILD_DIR}/dumpifs/dumpifs \
-    && make -C ${BUILD_DIR}/dumpifs dumpifs \
     && make -C ${BUILD_DIR}/lzfse install \
     && make -C ${BUILD_DIR}/dmg2img dmg2img vfdecrypt HAVE_LZFSE=1 \
     && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -121,7 +118,6 @@ FROM runtime_build AS dev
 # Copy the build artifacts from the scratch build stage
 COPY --link --from=base_build \
     /usr/local/bin/lzfse \
-    ${BUILD_DIR}/dumpifs/dumpifs \
     ${BUILD_DIR}/dmg2img/dmg2img \
     ${BUILD_DIR}/dmg2img/vfdecrypt \
     /usr/local/bin/
@@ -146,7 +142,6 @@ FROM runtime_build
 # Copy the build artifacts from the scratch build stage
 COPY --link --from=build \
     /usr/local/bin/lzfse \
-    ${BUILD_DIR}/dumpifs/dumpifs \
     ${BUILD_DIR}/dmg2img/dmg2img \
     ${BUILD_DIR}/dmg2img/vfdecrypt \
     ${BINWALK_BUILD_DIR}/binwalk \

@@ -150,6 +150,7 @@ dependencies = [
  "memmap2",
  "miniz_oxide 0.9.1",
  "plotters",
+ "qnx-ifs",
  "rars",
  "rayon",
  "serde",
@@ -976,6 +977,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "lzo"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1574f8e322bb9d442095896ff66d126e521f5a85ef7d7343a269bb7d6eeb3f0b"
+
+[[package]]
 name = "md-5"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1270,6 +1277,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "200b9ff220857e53e184257720a14553b2f4aa02577d2ed9842d45d4b9654810"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "qnx-ifs"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63bded83d066719a52f8aac6c8331480e5ae7ca86ed4016fe3bfb0db40b6202c"
+dependencies = [
+ "flate2",
+ "lzo",
+ "zerocopy",
 ]
 
 [[package]]

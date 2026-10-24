@@ -315,7 +315,6 @@ pub fn patterns() -> Vec<signatures::Signature> {
             extractor: Some(formats::sevenzip::sevenzip_extractor()),
         },
         // QNX IFS
-        // TODO: The signature and extractor are untested. Need a sample IFS image.
         signatures::Signature {
             name: "qnx_ifs".to_string(),
             short: false,
@@ -324,7 +323,7 @@ pub fn patterns() -> Vec<signatures::Signature> {
             magic: formats::qnx::qnx_ifs_magic(),
             parser: formats::qnx::qnx_ifs_parser,
             description: formats::qnx::IFS_DESCRIPTION.to_string(),
-            extractor: Some(extractors::dumpifs::dumpifs_extractor()),
+            extractor: Some(formats::qnx::qnx_ifs_extractor()),
         },
         // RomFS
         signatures::Signature {
