@@ -63,7 +63,7 @@ old noise-band verdict is gone: the gate is a plain percentage threshold.
 
 The benchmark environment is the Docker `dev` image (Dockerfile target `dev`),
 which already has cargo, `cargo-binstall`, valgrind, and every external
-extractor tool binwalk shells out to (7zip, sasquatch, dumpifs, dmg2img,
+extractor tool binwalk shells out to (7zip, sasquatch, dmg2img,
 vfdecrypt, lzfse, jefferson, uefi_firmware, ...). `scripts/bench-run.py` does
 the rest: it provisions a matching `gungraun-runner` via binstall (version read
 from Cargo.toml), runs `cargo bench`, and writes the sanitized
