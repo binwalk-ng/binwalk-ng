@@ -1,36 +1,15 @@
 use crate::extractors::{self, Chroot, ExtractionResult};
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
 use log::{debug, error, warn};
-use qnx_ifs::{Compress, Endian, Entry, EntryKind, Image};
+use qnx_ifs::{Compress, Endian, Entry, EntryKind, IMAGE_HEADER_SIZE, Image, ImageHeaderBytes};
 use std::path::{Path, PathBuf};
-use zerocopy::{FromBytes, Immutable, KnownLayout, Unaligned};
+use zerocopy::{
+    FromBytes,
+    byteorder::{BE, LE},
+};
 
 /// Human readable description
 pub const IFS_DESCRIPTION: &str = "QNX IFS image";
-
-/// On-disk QNX image filesystem header (`struct image_header`), up to the
-/// NUL terminated mountpoint string.
-///
-/// `qnx-ifs` does not export the size of its own layout structure, so mirror
-/// it here and derive the constant with `size_of` rather than hard-coding it.
-#[derive(FromBytes, Immutable, KnownLayout, Unaligned)]
-#[repr(C, packed)]
-struct QNXImageHeaderBytes {
-    signature: [u8; 7],
-    flags: u8,
-    image_size: u32,
-    hdr_dir_size: u32,
-    dir_offset: u32,
-    boot_ino: [u32; 4],
-    script_ino: u32,
-    chain_paddr: u32,
-    spare: [u32; 10],
-    mountflags: u32,
-}
-
-/// Fixed size of a QNX image filesystem header (`struct image_header`),
-/// before the NUL terminated mountpoint string.
-const QNX_IMAGE_HEADER_SIZE: usize = size_of::<QNXImageHeaderBytes>();
 
 /// QNX IFS magic bytes
 pub fn qnx_ifs_magic() -> Vec<Vec<u8>> {
@@ -106,15 +85,17 @@ pub fn qnx_ifs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult
 /// Validate the fixed fields of a bare `imagefs` header without scanning the
 /// mountpoint. These are the same structural constraints `qnx-ifs` enforces.
 fn validate_bare_image_header(data: &[u8]) -> Result<(), SignatureError> {
-    let (header, _) = QNXImageHeaderBytes::ref_from_prefix(data).map_err(|_| SignatureError)?;
-    let endian = Endian::from_image_flags(header.flags);
-    let image_size = decode_u32(header.image_size, endian);
-    let hdr_dir_size = decode_u32(header.hdr_dir_size, endian);
-    let dir_offset = decode_u32(header.dir_offset, endian);
+    // The flag byte decides the byte order of the header's multi-byte fields;
+    // it sits at a fixed offset, so read it before laying out the header.
+    let flags = data.get(7).copied().ok_or(SignatureError)?;
+    let (image_size, hdr_dir_size, dir_offset) = match Endian::from_image_flags(flags) {
+        Endian::Little => decode_image_header_fields::<LE>(data)?,
+        Endian::Big => decode_image_header_fields::<BE>(data)?,
+    };
 
     if image_size == 0
         || image_size > data.len()
-        || dir_offset < QNX_IMAGE_HEADER_SIZE
+        || dir_offset < IMAGE_HEADER_SIZE
         || dir_offset > hdr_dir_size
         || image_size < hdr_dir_size.saturating_add(4)
     {
@@ -124,11 +105,17 @@ fn validate_bare_image_header(data: &[u8]) -> Result<(), SignatureError> {
     Ok(())
 }
 
-const fn decode_u32(value: u32, endian: Endian) -> usize {
-    match endian {
-        Endian::Little => u32::from_le(value) as usize,
-        Endian::Big => u32::from_be(value) as usize,
-    }
+/// Decode the byte-order dependent image header size fields as the little or
+/// big endian variant of the on-disk `ImageHeaderBytes` layout.
+fn decode_image_header_fields<O: zerocopy::byteorder::ByteOrder>(
+    data: &[u8],
+) -> Result<(usize, usize, usize), SignatureError> {
+    let (header, _) = ImageHeaderBytes::<O>::ref_from_prefix(data).map_err(|_| SignatureError)?;
+    Ok((
+        header.image_size.get() as usize,
+        header.hdr_dir_size.get() as usize,
+        header.dir_offset.get() as usize,
+    ))
 }
 
 const fn endian_name(endian: Endian) -> &'static str {
