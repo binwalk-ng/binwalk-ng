@@ -1,12 +1,8 @@
 use crate::extractors::{self, Chroot, ExtractionResult};
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
 use log::{debug, error, warn};
-use qnx_ifs::{Compress, Endian, Entry, EntryKind, IMAGE_HEADER_SIZE, Image, ImageHeaderBytes};
+use qnx_ifs::{Compress, Endian, Entry, EntryKind, Image};
 use std::path::{Path, PathBuf};
-use zerocopy::{
-    FromBytes,
-    byteorder::{BE, LE},
-};
 
 /// Human readable description
 pub const IFS_DESCRIPTION: &str = "QNX IFS image";
@@ -33,27 +29,20 @@ pub fn qnx_ifs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult
 
     let available_data = file_data.get(offset..).ok_or(SignatureError)?;
 
-    // Bare image filesystems have no startup header. Validate the header and
-    // its structural size relationships, but leave walking the dirent chain to
-    // extraction: scanning must not do work proportional to every "imagefs"
-    // match in a hostile file.
+    // Bare image filesystems have no startup header. Let qnx-ifs own the
+    // structural validation: duplicating its size checks here would silently
+    // drift when the crate's parser changes. Parsing the filesystem also
+    // validates the dirent chain, which extraction would reject anyway.
     if available_data.starts_with(qnx_ifs::image::IMAGE_SIGNATURE) {
-        // Validate the fixed header first: `qnx_ifs::parse_image_header`
-        // scans the mountpoint string before it validates the offset fields,
-        // so an unchecked `dir_offset`/`hdr_dir_size` would make every
-        // crafted match scan to EOF before being rejected.
-        validate_bare_image_header(available_data)?;
-
-        let (image_header, endian) =
-            qnx_ifs::parse_image_header(available_data, 0).map_err(|_| SignatureError)?;
-        let total_size = image_header.image_size;
+        let image = Image::parse_imagefs(available_data).map_err(|_| SignatureError)?;
+        let total_size = image.total_size();
 
         result.size = total_size;
         result.description = format!(
             "{}, endianness: {}, mountpoint: {}, total size: {} bytes",
             result.description,
-            endian_name(endian),
-            image_header.mountpoint,
+            endian_name(image.endian),
+            image.image_header.mountpoint,
             total_size
         );
 
@@ -80,42 +69,6 @@ pub fn qnx_ifs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult
     );
 
     Ok(result)
-}
-
-/// Validate the fixed fields of a bare `imagefs` header without scanning the
-/// mountpoint. These are the same structural constraints `qnx-ifs` enforces.
-fn validate_bare_image_header(data: &[u8]) -> Result<(), SignatureError> {
-    // The flag byte decides the byte order of the header's multi-byte fields;
-    // it sits at a fixed offset, so read it before laying out the header.
-    let flags = data.get(7).copied().ok_or(SignatureError)?;
-    let (image_size, hdr_dir_size, dir_offset) = match Endian::from_image_flags(flags) {
-        Endian::Little => decode_image_header_fields::<LE>(data)?,
-        Endian::Big => decode_image_header_fields::<BE>(data)?,
-    };
-
-    if image_size == 0
-        || image_size > data.len()
-        || dir_offset < IMAGE_HEADER_SIZE
-        || dir_offset > hdr_dir_size
-        || image_size < hdr_dir_size.saturating_add(4)
-    {
-        return Err(SignatureError);
-    }
-
-    Ok(())
-}
-
-/// Decode the byte-order dependent image header size fields as the little or
-/// big endian variant of the on-disk `ImageHeaderBytes` layout.
-fn decode_image_header_fields<O: zerocopy::byteorder::ByteOrder>(
-    data: &[u8],
-) -> Result<(usize, usize, usize), SignatureError> {
-    let (header, _) = ImageHeaderBytes::<O>::ref_from_prefix(data).map_err(|_| SignatureError)?;
-    Ok((
-        header.image_size.get() as usize,
-        header.hdr_dir_size.get() as usize,
-        header.dir_offset.get() as usize,
-    ))
 }
 
 const fn endian_name(endian: Endian) -> &'static str {
@@ -204,7 +157,7 @@ pub fn extract_qnx_ifs(
             continue;
         }
 
-        let path = PathBuf::from(&entry.path);
+        let path = entry_path(entry);
         if chroot.create_directory(&path) {
             directory_metadata.push((path, entry.uid, entry.gid, entry.permissions()));
         } else {
@@ -218,7 +171,7 @@ pub fn extract_qnx_ifs(
             continue;
         }
 
-        let path = PathBuf::from(&entry.path);
+        let path = entry_path(entry);
         let extracted = match &entry.kind {
             EntryKind::Dir => unreachable!("directories are handled above"),
             EntryKind::File { .. } => {
@@ -227,8 +180,10 @@ pub fn extract_qnx_ifs(
                         .file_bytes(entry)
                         .is_some_and(|file_data| chroot.create_file(&path, file_data))
             }
-            EntryKind::Symlink { target, .. } => {
-                ensure_parent(&chroot, &path) && chroot.create_symlink(&path, target.as_str())
+            EntryKind::Symlink { .. } => {
+                ensure_parent(&chroot, &path)
+                    && symlink_target(entry)
+                        .is_some_and(|target| chroot.create_symlink(&path, target))
             }
             EntryKind::Char { rdev, .. } => {
                 ensure_parent(&chroot, &path)
@@ -285,6 +240,27 @@ pub fn extract_qnx_ifs(
 
     result.success = success;
     result
+}
+
+fn entry_path(entry: &Entry) -> PathBuf {
+    path_from_bytes(&entry.raw_path, &entry.path)
+}
+
+fn symlink_target(entry: &Entry) -> Option<PathBuf> {
+    match &entry.kind {
+        EntryKind::Symlink {
+            target, raw_target, ..
+        } => Some(path_from_bytes(raw_target, target)),
+        _ => None,
+    }
+}
+
+/// Convert stored path bytes to a [`PathBuf`].
+///
+/// Valid UTF-8 is used as-is, which is byte-identical on every platform.
+/// Invalid bytes fall back to the parser's lossy UTF-8 rendering.
+fn path_from_bytes(raw: &[u8], lossy: &str) -> PathBuf {
+    std::str::from_utf8(raw).map_or_else(|_| PathBuf::from(lossy), PathBuf::from)
 }
 
 fn ensure_parent(chroot: &Chroot, path: &Path) -> bool {
