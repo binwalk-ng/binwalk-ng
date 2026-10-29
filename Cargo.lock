@@ -1000,9 +1000,9 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "memchr-n"
-version = "0.1.9"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1805571b8e7b1284ad43f27c88477840c1c0e5807c150021ac83d2228806540e"
+checksum = "f48c6352cc1185740af256ccc396af598d2366bfd90a34f5afe48744bf06a5b5"
 dependencies = [
  "fearless_simd",
  "fearless_simd_macros",
@@ -1281,12 +1281,13 @@ dependencies = [
 
 [[package]]
 name = "qnx-ifs"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3790fd994e60a43aca9a02f215a8c47099b5fd8c964c77633c31b127d8a3c25"
+checksum = "acd1af1dacb9562b3120ca9f5df901e0096fbd889e809eda7d2588ef46fedb0a"
 dependencies = [
  "flate2",
  "lzo",
+ "memchr-n",
  "zerocopy",
 ]
 

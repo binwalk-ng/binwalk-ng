@@ -34,7 +34,7 @@ pub fn qnx_ifs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult
     // drift when the crate's parser changes. Parsing the filesystem also
     // validates the dirent chain, which extraction would reject anyway.
     if available_data.starts_with(qnx_ifs::image::IMAGE_SIGNATURE) {
-        let image = Image::parse_imagefs(available_data).map_err(|_| SignatureError)?;
+        let image = Image::parse_imagefs_at(available_data, 0).map_err(|_| SignatureError)?;
         let total_size = image.total_size();
 
         result.size = total_size;
@@ -119,7 +119,14 @@ pub fn extract_qnx_ifs(
         return result;
     };
 
-    let image = match Image::parse(ifs_data) {
+    // The image begins at the match offset: dispatch on the header kind
+    // to skip the crate's whole-buffer header re-scan.
+    let image = if ifs_data.starts_with(qnx_ifs::image::IMAGE_SIGNATURE) {
+        Image::parse_imagefs_at(ifs_data, 0)
+    } else {
+        Image::parse_at(ifs_data, 0)
+    };
+    let image = match image {
         Ok(image) => image,
         Err(e) => {
             error!("Failed to parse QNX IFS image at offset {offset:#X}: {e}");
@@ -137,6 +144,21 @@ pub fn extract_qnx_ifs(
             "QNX IFS image at offset {offset:#X} contains {} dirent(s) with a zero inode, skipped as the kernel would",
             image.omitted_dirents.len()
         );
+    }
+
+    // mkifs computes both trailers; report checksum mismatches.
+    for (kind, checksums) in [
+        ("filesystem", image.image_checksum()),
+        ("startup", image.startup_checksum()),
+    ] {
+        if let Some(checksums) = checksums
+            && !checksums.valid()
+        {
+            warn!(
+                "QNX IFS image at offset {offset:#X} has a {kind} checksum mismatch (stored: {:#x}, computed: {:#x})",
+                checksums.stored, checksums.computed
+            );
+        }
     }
 
     // A dry run validates the image without touching the filesystem.
