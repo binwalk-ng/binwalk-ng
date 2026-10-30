@@ -179,7 +179,17 @@ pub fn extract_qnx_ifs(
             continue;
         }
 
-        let path = entry_path(entry);
+        let path = match path_from_bytes(&entry.raw_path) {
+            Some(path) => path,
+            None => {
+                warn!(
+                    "QNX IFS directory entry {}: path cannot be represented on this platform",
+                    entry.path
+                );
+                success = false;
+                continue;
+            }
+        };
         if chroot.create_directory(&path) {
             directory_metadata.push((path, entry.uid, entry.gid, entry.permissions()));
         } else {
@@ -193,7 +203,17 @@ pub fn extract_qnx_ifs(
             continue;
         }
 
-        let path = entry_path(entry);
+        let path = match path_from_bytes(&entry.raw_path) {
+            Some(path) => path,
+            None => {
+                warn!(
+                    "QNX IFS entry {}: path cannot be represented on this platform",
+                    entry.path
+                );
+                success = false;
+                continue;
+            }
+        };
         let extracted = match &entry.kind {
             EntryKind::Dir => unreachable!("directories are handled above"),
             EntryKind::File { .. } => {
@@ -264,25 +284,38 @@ pub fn extract_qnx_ifs(
     result
 }
 
-fn entry_path(entry: &Entry) -> PathBuf {
-    path_from_bytes(&entry.raw_path, &entry.path)
-}
-
 fn symlink_target(entry: &Entry) -> Option<PathBuf> {
-    match &entry.kind {
-        EntryKind::Symlink {
-            target, raw_target, ..
-        } => Some(path_from_bytes(raw_target, target)),
-        _ => None,
-    }
+    let EntryKind::Symlink {
+        target, raw_target, ..
+    } = &entry.kind
+    else {
+        return None;
+    };
+    path_from_bytes(raw_target).map_or_else(
+        || {
+            warn!("QNX IFS symlink target {target:?} cannot be represented on this platform");
+            None
+        },
+        Some,
+    )
 }
 
 /// Convert stored path bytes to a [`PathBuf`].
 ///
-/// Valid UTF-8 is used as-is, which is byte-identical on every platform.
-/// Invalid bytes fall back to the parser's lossy UTF-8 rendering.
-fn path_from_bytes(raw: &[u8], lossy: &str) -> PathBuf {
-    std::str::from_utf8(raw).map_or_else(|_| PathBuf::from(lossy), PathBuf::from)
+/// On Unix, paths are byte strings, so the stored bytes are kept
+/// verbatim; valid UTF-8 yields an identical path on every platform.
+/// On non-Unix platforms, non-UTF-8 bytes are not representable; `None`
+/// lets callers skip the entry instead of extracting a renamed one.
+fn path_from_bytes(raw: &[u8]) -> Option<PathBuf> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        Some(PathBuf::from(std::ffi::OsStr::from_bytes(raw)))
+    }
+    #[cfg(not(unix))]
+    {
+        std::str::from_utf8(raw).ok().map(PathBuf::from)
+    }
 }
 
 fn ensure_parent(chroot: &Chroot, path: &Path) -> bool {
