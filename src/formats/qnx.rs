@@ -1,5 +1,6 @@
 use crate::extractors::{self, Chroot, ExtractionResult};
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
+use crate::structures::Endianness;
 use log::{debug, error, warn};
 use qnx_ifs::{Compress, Endian, Entry, EntryKind, Image};
 use std::path::{Path, PathBuf};
@@ -29,20 +30,26 @@ pub fn qnx_ifs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult
 
     let available_data = file_data.get(offset..).ok_or(SignatureError)?;
 
-    // Bare image filesystems have no startup header. Let qnx-ifs own the
-    // structural validation: duplicating its size checks here would silently
-    // drift when the crate's parser changes. Parsing the filesystem also
-    // validates the dirent chain, which extraction would reject anyway.
+    // Bare image filesystems have no startup header. Validate only the fixed
+    // header and its size relationships here, and leave walking the dirent
+    // chain to extraction: a full parse per candidate would let a file with
+    // many crafted "imagefs" matches force repeated filesystem walks.
+    //
+    // qnx-ifs validates the header sizes before it scans the mountpoint, so a
+    // rejected candidate costs bounded work. A candidate that passes is
+    // reported with a non-zero size and advances the scanner past the image,
+    // so accepted candidates cannot overlap either.
     if available_data.starts_with(qnx_ifs::image::IMAGE_SIGNATURE) {
-        let image = Image::parse_imagefs_at(available_data, 0).map_err(|_| SignatureError)?;
-        let total_size = image.total_size();
+        let (image_header, endian) =
+            qnx_ifs::parse_image_header(available_data, 0).map_err(|_| SignatureError)?;
+        let total_size = image_header.image_size;
 
         result.size = total_size;
         result.description = format!(
-            "{}, endianness: {}, mountpoint: {}, total size: {} bytes",
+            "{}, {}, mountpoint: {}, total size: {} bytes",
             result.description,
-            endian_name(image.endian),
-            image.image_header.mountpoint,
+            to_endianness(endian),
+            image_header.mountpoint,
             total_size
         );
 
@@ -61,9 +68,9 @@ pub fn qnx_ifs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult
 
     result.size = total_size;
     result.description = format!(
-        "{}, endianness: {}, compression: {}, total size: {} bytes",
+        "{}, {}, compression: {}, total size: {} bytes",
         result.description,
-        endian_name(startup.endian),
+        to_endianness(startup.endian),
         compression_name(startup.compress),
         total_size
     );
@@ -71,10 +78,10 @@ pub fn qnx_ifs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult
     Ok(result)
 }
 
-const fn endian_name(endian: Endian) -> &'static str {
+const fn to_endianness(endian: Endian) -> Endianness {
     match endian {
-        Endian::Little => "little-endian",
-        Endian::Big => "big-endian",
+        Endian::Little => Endianness::Little,
+        Endian::Big => Endianness::Big,
     }
 }
 
