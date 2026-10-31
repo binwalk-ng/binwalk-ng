@@ -1,5 +1,5 @@
 ## Scratch build stage
-FROM ubuntu:26.04 AS base_build
+FROM ubuntu:26.10 AS base_build
 
 ARG BUILD_DIR="/tmp"
 ARG BINWALK_BUILD_DIR="${BUILD_DIR}/binwalk"
@@ -58,7 +58,7 @@ RUN --mount=type=cache,target=./target,sharing=locked,id=cargo-target-${TARGETAR
 
 
 ## Prod image build stage
-FROM ubuntu:26.04 AS runtime_build
+FROM ubuntu:26.10 AS runtime_build
 
 ARG BUILD_DIR="/tmp"
 ARG BINWALK_BUILD_DIR="${BUILD_DIR}/binwalk"
