@@ -3,6 +3,21 @@
 All notable changes to binwalk-ng are recorded here. Versions up to and including
 3.1.0 were released under the `ReFirmLabs/binwalk` repository.
 
+## Unreleased
+
+### Breaking changes
+
+- **QNX IFS extraction is now internal.** The external `dumpifs` utility is no
+  longer used; images are parsed and extracted in-process with the
+  [`qnx-ifs`](https://crates.io/crates/qnx-ifs) crate. The public
+  `extractors::dumpifs` module and the
+  `formats::qnx::IFSHeader`/`parse_ifs_header` helpers are removed.
+
+### Features
+
+- QNX IFS images are detected and extracted without external tools, including
+  bootable images, compressed images, and bare `imagefs` filesystems.
+
 ## 4.0.0 — 2026-09-29
 
 The first release from the `binwalk-ng` organization, published to crates.io as
