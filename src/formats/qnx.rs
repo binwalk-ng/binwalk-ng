@@ -30,26 +30,21 @@ pub fn qnx_ifs_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult
 
     let available_data = file_data.get(offset..).ok_or(SignatureError)?;
 
-    // Bare image filesystems have no startup header. Validate only the fixed
-    // header and its size relationships here, and leave walking the dirent
-    // chain to extraction: a full parse per candidate would let a file with
-    // many crafted "imagefs" matches force repeated filesystem walks.
-    //
-    // qnx-ifs validates the header sizes before it scans the mountpoint, so a
-    // rejected candidate costs bounded work. A candidate that passes is
-    // reported with a non-zero size and advances the scanner past the image,
-    // so accepted candidates cannot overlap either.
+    // Bare image filesystems: a valid header alone cannot claim the extent,
+    // because a header with broken dirents would fail extraction and mask a
+    // real signature stored inside it. The data area is uncompressed, so
+    // walk the dirent chain here and only report a fully parsed image.
     if available_data.starts_with(qnx_ifs::image::IMAGE_SIGNATURE) {
-        let (image_header, endian) =
-            qnx_ifs::parse_image_header(available_data, 0).map_err(|_| SignatureError)?;
-        let total_size = image_header.image_size;
+        let image =
+            qnx_ifs::Image::parse_imagefs_at(available_data, 0).map_err(|_| SignatureError)?;
+        let total_size = image.total_size();
 
         result.size = total_size;
         result.description = format!(
             "{}, {}, mountpoint: {}, total size: {} bytes",
             result.description,
-            to_endianness(endian),
-            image_header.mountpoint,
+            to_endianness(image.endian),
+            image.image_header.mountpoint,
             total_size
         );
 
