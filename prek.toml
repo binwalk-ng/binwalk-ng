@@ -8,6 +8,7 @@ hooks = [
   { id = "check-json" },
   { id = "check-merge-conflict" },
   { id = "check-added-large-files" },
+  { id = "mixed-line-ending" },
 ]
 
 [[repos]]
@@ -18,7 +19,7 @@ hooks = [
     name = "cargo fmt",
     language = "system",
     entry = "cargo fmt --all",
-    files = "\\.rs$",
+    types = ["rust"],
     pass_filenames = false,
   },
   {
@@ -26,7 +27,7 @@ hooks = [
     name = "cargo clippy",
     language = "system",
     entry = "cargo clippy --locked --workspace --all-targets --all-features -- -D warnings",
-    types_or = ["rust"],
+    types = ["rust"],
     pass_filenames = false,
     require_serial = true,
   },
