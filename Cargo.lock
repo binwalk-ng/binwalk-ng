@@ -1334,12 +1334,13 @@ dependencies = [
 
 [[package]]
 name = "rars"
-version = "0.11.0"
+version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2670e328f4b9a711365825dbbc2b14c968b4249a0ed65a64729e77ede7826e6c"
+checksum = "f8cfe43d4831a02f45c89f11a84fb32b45e818e8914396038cf3494501041f95"
 dependencies = [
  "aes",
  "aho-corasick",
+ "crc32fast",
  "getrandom",
  "hmac",
  "rayon",
