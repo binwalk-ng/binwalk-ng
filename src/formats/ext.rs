@@ -19,14 +19,9 @@ const EXT_READ_CHUNK: u64 = 1024 * 1024;
 /// Human readable description
 pub const DESCRIPTION: &str = "EXT filesystem";
 
-/// EXT magic bytes
+/// EXT filesystem magic signatures.
 pub fn ext_magic() -> Vec<Vec<u8>> {
-    /*
-     * The magic bytes for EXT are only a u16, resulting in many false positives.
-     * These magic signatures include all possible values for the state and errors fields in the superblock,
-     * as well as the minor version number (assumed to be 0).
-     * This means fewer false positive matches, and less time spent validating false positives.
-     */
+    // Only u16 magic; include state/errors/minor-rev variants to reduce false positives.
     vec![
         b"\x53\xEF\x01\x00\x01\x00\x00\x00".to_vec(),
         b"\x53\xEF\x01\x00\x02\x00\x00\x00".to_vec(),
@@ -37,13 +32,9 @@ pub fn ext_magic() -> Vec<Vec<u8>> {
     ]
 }
 
-/// Parse the EXT signature
 pub fn ext_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, SignatureError> {
-    // Offset inside the EXT image where the magic bytes reside
     const MAGIC_OFFSET: usize = 1080;
 
-    // The magic bytes live MAGIC_OFFSET bytes into the image; a match any earlier
-    // cannot be a valid EXT superblock (and would underflow the subtraction below).
     if offset < MAGIC_OFFSET {
         return Err(SignatureError);
     }
@@ -79,13 +70,9 @@ pub fn ext_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
     Err(SignatureError)
 }
 
-/// Expected size of an EXT superblock
 pub const SUPERBLOCK_SIZE: usize = 1024;
-
-/// Expected file offset of an EXT superblock
 pub const SUPERBLOCK_OFFSET: usize = 1024;
 
-/// Struct to store some useful EXT info
 #[derive(Debug, Default, Clone)]
 pub struct EXTHeader {
     pub os: String,
@@ -97,7 +84,6 @@ pub struct EXTHeader {
     pub reserved_blocks_count: usize,
 }
 
-// Partial superblock structure, just enough for validation and size calculation
 #[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
 struct EXTSuprtBlockBytes {
@@ -128,22 +114,17 @@ struct EXTSuprtBlockBytes {
     resgid: zerocopy::U16<LE>,
 }
 
-/// Partially parses an EXT superblock structure
 pub fn parse_ext_header(ext_data: &[u8]) -> Result<EXTHeader, StructureError> {
-    // Max value of the EXT log block size
     const MAX_BLOCK_LOG: u32 = 2;
 
     const ALLOWED_REV_LEVELS: [u32; 2] = [0, 1];
     const ALLOWED_FIRST_DATA_BLOCKS: [u32; 2] = [0, 1];
 
-    // Sanity check the available data
     if ext_data.len() >= (SUPERBLOCK_OFFSET + SUPERBLOCK_SIZE) {
-        // Parse the EXT superblock structure
         let (ext_superblock, _) =
             EXTSuprtBlockBytes::ref_from_prefix(&ext_data[SUPERBLOCK_OFFSET..])
                 .map_err(|_| StructureError)?;
 
-        // Sanity check the reported OS this EXT image was created on
         let creator_os = match ext_superblock.creator_os.get() {
             0 => "Linux",
             1 => "GNU HURD",
@@ -152,24 +133,20 @@ pub fn parse_ext_header(ext_data: &[u8]) -> Result<EXTHeader, StructureError> {
             4 => "Lites",
             _ => return Err(StructureError),
         };
-        // Sanity check the s_rev_level field
-        if ALLOWED_REV_LEVELS.contains(&ext_superblock.s_rev_level.get()) {
-            // Sanity check the first_data_block field, which must be either 0 or 1
-            if ALLOWED_FIRST_DATA_BLOCKS.contains(&ext_superblock.first_data_block.get()) {
-                // Santiy check the log_block_size
-                if ext_superblock.log_block_size.get() <= MAX_BLOCK_LOG {
-                    let block_size = 1024 << ext_superblock.log_block_size.get();
-                    return Ok(EXTHeader {
-                        os: creator_os.to_string(),
-                        block_size,
-                        image_size: block_size * (ext_superblock.blocks_count.get() as usize),
-                        blocks_count: ext_superblock.blocks_count.get() as usize,
-                        inodes_count: ext_superblock.inodes_count.get() as usize,
-                        free_blocks_count: ext_superblock.free_blocks_count.get() as usize,
-                        reserved_blocks_count: ext_superblock.reserved_blocks_count.get() as usize,
-                    });
-                }
-            }
+        if ALLOWED_REV_LEVELS.contains(&ext_superblock.s_rev_level.get())
+            && ALLOWED_FIRST_DATA_BLOCKS.contains(&ext_superblock.first_data_block.get())
+            && ext_superblock.log_block_size.get() <= MAX_BLOCK_LOG
+        {
+            let block_size = 1024 << ext_superblock.log_block_size.get();
+            return Ok(EXTHeader {
+                os: creator_os.to_string(),
+                block_size,
+                image_size: block_size * (ext_superblock.blocks_count.get() as usize),
+                blocks_count: ext_superblock.blocks_count.get() as usize,
+                inodes_count: ext_superblock.inodes_count.get() as usize,
+                free_blocks_count: ext_superblock.free_blocks_count.get() as usize,
+                reserved_blocks_count: ext_superblock.reserved_blocks_count.get() as usize,
+            });
         }
     }
 
@@ -194,11 +171,10 @@ pub fn ext_extractor() -> extractors::Extractor {
     }
 }
 
-/// Internal extractor: unpack an ext2/ext3/ext4 image into a `rootfs/`
-/// subtree of the output directory.
+/// Unpack an ext2/ext3/ext4 image into `rootfs/` under `output_directory`.
 ///
-/// When `output_directory` is `None`, this performs a dry run: the filesystem is
-/// loaded and validated, but nothing is written to disk.
+/// When `output_directory` is `None`, the filesystem is opened but no contents are
+/// extracted or traversed.
 pub fn extract_ext(
     file_data: &[u8],
     offset: usize,
@@ -220,20 +196,15 @@ pub fn extract_ext(
         return result;
     }
 
-    let Some(image_data) = file_data.get(offset..offset.saturating_add(image_size)) else {
+    let Some(image_end) = offset.checked_add(image_size) else {
+        error!("EXT image range overflows at offset {offset:#X}");
+        return result;
+    };
+    let Some(image_data) = file_data.get(offset..image_end) else {
         error!("EXT image at offset {offset:#X} extends past the end of the file");
         return result;
     };
-    if image_data.len() != image_size {
-        error!(
-            "EXT image at offset {offset:#X} is truncated: expected {image_size} bytes, got {}",
-            image_data.len()
-        );
-        return result;
-    }
 
-    // `Ext4Fs` reads from any `Read + Seek` source; the borrowed image slice is
-    // never written to.
     let mut filesystem = match Ext4Fs::open(Cursor::new(image_data)) {
         Ok(filesystem) => filesystem,
         Err(e) => {
@@ -243,7 +214,6 @@ pub fn extract_ext(
     };
     result.size = Some(image_size);
 
-    // A dry run validates the image without touching the filesystem.
     let Some(output_directory) = output_directory else {
         result.success = true;
         return result;
@@ -265,10 +235,13 @@ pub fn extract_ext(
     };
     walker.extract_directory(EXT_ROOT_INODE, Path::new("rootfs"));
 
-    // Apply directory modes/ownership only after all contents have been
-    // written, so a restrictive directory mode cannot block extraction.
+    // Restore directory metadata deepest-first so a restrictive parent mode does
+    // not block chmod/chown on its children.
     let success = walker.success;
     if success {
+        walker
+            .directory_metadata
+            .sort_by_key(|(path, ..)| std::cmp::Reverse(path.components().count()));
         for (path, mode, uid, gid) in walker.directory_metadata {
             chroot.set_ownership(&path, uid, gid);
             chroot.set_mode(&path, mode);
@@ -281,7 +254,6 @@ pub fn extract_ext(
     result
 }
 
-/// State shared across the recursive EXT directory walk.
 struct ExtWalker<'a, R: Read + Seek> {
     filesystem: &'a mut Ext4Fs<R>,
     image_size: usize,
@@ -292,7 +264,6 @@ struct ExtWalker<'a, R: Read + Seek> {
 }
 
 impl<R: Read + Seek> ExtWalker<'_, R> {
-    /// Recursively extract one EXT directory, addressed by inode number.
     fn extract_directory(&mut self, directory_inode: u64, output_path: &Path) {
         let entries = match self.filesystem.read_dir_by_ino(directory_inode) {
             Ok(entries) => entries,
@@ -307,8 +278,6 @@ impl<R: Read + Seek> ExtWalker<'_, R> {
         };
 
         for entry in entries {
-            // The on-disk "." and ".." entries point back into the tree; following
-            // them would recurse forever (and ".." would escape the output).
             if entry.name == b"." || entry.name == b".." {
                 continue;
             }
@@ -338,10 +307,28 @@ impl<R: Read + Seek> ExtWalker<'_, R> {
             };
             let file_type = inode.file_type();
 
+            // Match `tsk_recover -a`: extract only allocated inodes.
+            let allocated = match self.filesystem.is_inode_allocated(inode_number) {
+                Ok(allocated) => allocated,
+                Err(e) => {
+                    error!(
+                        "Failed to check EXT inode allocation for {}: {e}",
+                        path.display()
+                    );
+                    self.success = false;
+                    continue;
+                }
+            };
+            if !allocated {
+                debug!(
+                    "Skipping EXT entry {} with unallocated inode {inode_number}",
+                    path.display()
+                );
+                continue;
+            }
+
             let extracted = match file_type {
                 FileType::Directory => {
-                    // A corrupt image can point a directory entry at an ancestor;
-                    // track visited inodes so the walk always terminates.
                     if !self.visited_directories.insert(inode_number) {
                         warn!(
                             "Skipping EXT directory cycle at {} (inode {inode_number})",
@@ -404,8 +391,6 @@ impl<R: Read + Seek> ExtWalker<'_, R> {
                 | FileType::Fifo
                 | FileType::Socket
                 | FileType::Unknown => {
-                    // The inode mode does not carry device major/minor numbers, so
-                    // these cannot be recreated faithfully.
                     warn!(
                         "Skipping EXT special file {}: device numbers are not exposed",
                         path.display()
@@ -420,9 +405,7 @@ impl<R: Read + Seek> ExtWalker<'_, R> {
                 continue;
             }
 
-            // Directory metadata is deferred until all contents exist. Symlink
-            // ownership is safe to set (lchown), but chmod follows links, so never
-            // apply a mode to a symlink.
+            // Directory metadata is deferred; chmod follows symlinks.
             if file_type != FileType::Directory {
                 self.chroot.set_ownership(&path, inode.uid, inode.gid);
                 if file_type != FileType::Symlink {
