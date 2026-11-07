@@ -49,7 +49,7 @@ aho-corasick = "1.1.5"
 memchr = "2.8.3"
 memchr-n = "0.1.8"
 qnx-ifs = "0.2.0"
-ext4-view = { version = "1.0.0", features = ["std"] }
+ext4fs-core = { version = "0.2.8", default-features = false }
 fat-core = "0.1.4"
 ntfs-core = "0.9.8"
 serde = { version = "1.0.229", features = ["derive"] }

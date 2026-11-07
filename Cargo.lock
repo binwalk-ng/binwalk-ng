@@ -144,7 +144,7 @@ dependencies = [
  "delink-ng",
  "entropy",
  "env_logger",
- "ext4-view",
+ "ext4fs-core",
  "fat-core",
  "flate2",
  "gungraun",
@@ -632,13 +632,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "ext4-view"
-version = "1.0.0"
+name = "ext4fs-core"
+version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ecf6379b7cfeace5e109ccc51955afc05f5f7f2466ae0cf2697bda46afd01e6"
+checksum = "5f1f8207d0af2643640fc1c753939e0b29f46f099b9ee83414162a8292b8845e"
 dependencies = [
  "bitflags 2.13.2",
  "crc",
+ "forensicnomicon",
+ "safe-read",
 ]
 
 [[package]]
