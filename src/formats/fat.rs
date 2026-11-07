@@ -1,5 +1,11 @@
+use crate::extractors::{self, Chroot, ExtractionResult};
 use crate::signatures::{CONFIDENCE_MEDIUM, SignatureError, SignatureResult};
 use crate::structures::StructureError;
+use fat::{FatFs, FileId};
+use log::{debug, error, warn};
+use std::collections::HashSet;
+use std::io::{Cursor, Read, Seek};
+use std::path::Path;
 use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
 /// Human readable description
@@ -133,4 +139,222 @@ pub fn parse_fat_header(fat_data: &[u8]) -> Result<FATHeader, StructureError> {
     }
 
     Err(StructureError)
+}
+
+/// Defines the internal extractor for FAT12/16/32 filesystems.
+///
+/// ```
+/// use binwalk_ng::extractors::ExtractorType;
+/// use binwalk_ng::formats::fat::fat_extractor;
+///
+/// match fat_extractor().utility {
+///     ExtractorType::Internal(_) => {}
+///     _ => panic!("FAT extractor should be internal"),
+/// }
+/// ```
+pub fn fat_extractor() -> extractors::Extractor {
+    extractors::Extractor {
+        utility: extractors::ExtractorType::Internal(extract_fat),
+        ..Default::default()
+    }
+}
+
+/// Internal extractor: unpack a FAT image into a `rootfs/` subtree of the
+/// output directory.
+///
+/// When `output_directory` is `None`, this performs a dry run: the filesystem is
+/// loaded and validated, but nothing is written to disk.
+pub fn extract_fat(
+    file_data: &[u8],
+    offset: usize,
+    output_directory: Option<&Path>,
+) -> ExtractionResult {
+    let mut result = ExtractionResult::default();
+
+    let Some(fat_data) = file_data.get(offset..) else {
+        error!("FAT extractor received invalid offset {offset:#X}");
+        return result;
+    };
+    let Ok(header) = parse_fat_header(fat_data) else {
+        error!("Failed to parse FAT boot sector at offset {offset:#X}");
+        return result;
+    };
+    let image_size = header.total_size;
+    if image_size == 0 {
+        error!("FAT image at offset {offset:#X} reports a zero size");
+        return result;
+    }
+
+    let Some(image_data) = file_data.get(offset..offset.saturating_add(image_size)) else {
+        error!("FAT image at offset {offset:#X} extends past the end of the file");
+        return result;
+    };
+    if image_data.len() != image_size {
+        error!(
+            "FAT image at offset {offset:#X} is truncated: expected {image_size} bytes, got {}",
+            image_data.len()
+        );
+        return result;
+    }
+
+    // `FatFs` takes only `Read + Seek`, so the evidence slice is never writable.
+    let filesystem = match FatFs::open(Cursor::new(image_data)) {
+        Ok(filesystem) => filesystem,
+        Err(e) => {
+            error!("Failed to load FAT filesystem at offset {offset:#X}: {e}");
+            return result;
+        }
+    };
+    result.size = Some(image_size);
+
+    // A dry run validates the image without touching the filesystem.
+    let Some(output_directory) = output_directory else {
+        result.success = true;
+        return result;
+    };
+
+    let chroot = Chroot::new(output_directory);
+    if !chroot.create_directory(Path::new("rootfs")) {
+        error!("Failed to create the FAT output directory");
+        return result;
+    }
+
+    let mut success = true;
+    let mut visited_directories = HashSet::new();
+    extract_fat_directory(
+        &filesystem,
+        filesystem.root(),
+        &chroot,
+        Path::new("rootfs"),
+        &mut visited_directories,
+        &mut success,
+    );
+
+    result.success = success;
+    result
+}
+
+/// Recursively extract one FAT directory, addressed by [`FileId`].
+fn extract_fat_directory<R: Read + Seek>(
+    filesystem: &FatFs<R>,
+    directory: FileId,
+    chroot: &Chroot,
+    output_path: &Path,
+    visited_directories: &mut HashSet<(u32, u16)>,
+    success: &mut bool,
+) {
+    let entries = match filesystem.read_dir(directory) {
+        Ok(entries) => entries,
+        Err(e) => {
+            error!(
+                "Failed to read FAT directory {}: {e}",
+                output_path.display()
+            );
+            *success = false;
+            return;
+        }
+    };
+
+    for entry in entries {
+        // `read_dir` also reports deleted entries and the volume label; neither
+        // belongs in a recovery of the live tree.
+        if entry.is_deleted {
+            debug!(
+                "Skipping deleted FAT entry {} in {}",
+                entry.name,
+                output_path.display()
+            );
+            continue;
+        }
+        if entry.is_volume_label {
+            continue;
+        }
+
+        let name = entry.name.as_str();
+        // "." and ".." are stored as real directory entries and would recurse
+        // forever (and ".." would escape the output tree).
+        if name.is_empty() || name == "." || name == ".." {
+            continue;
+        }
+        let path = output_path.join(name);
+
+        if entry.is_dir {
+            // A corrupt image can point a directory entry at an ancestor; track
+            // visited entry ids so the walk always terminates.
+            let FileId::Entry { dir_cluster, index } = entry.id else {
+                continue;
+            };
+            if !visited_directories.insert((dir_cluster, index)) {
+                warn!(
+                    "Skipping FAT directory cycle at {} ({})",
+                    path.display(),
+                    entry.name
+                );
+                continue;
+            }
+
+            if chroot.create_directory(&path) {
+                extract_fat_directory(
+                    filesystem,
+                    entry.id,
+                    chroot,
+                    &path,
+                    visited_directories,
+                    success,
+                );
+            } else {
+                error!("Failed to create FAT directory {}", path.display());
+                *success = false;
+            }
+        } else {
+            match read_fat_file(filesystem, entry.id, entry.size) {
+                Ok(data) => {
+                    if data.len() as u64 != entry.size {
+                        warn!(
+                            "FAT file {} is truncated: expected {} bytes, read {}",
+                            path.display(),
+                            entry.size,
+                            data.len()
+                        );
+                    }
+                    if !chroot.create_file(&path, &data) {
+                        error!("Failed to extract FAT file {}", path.display());
+                        *success = false;
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to read FAT file {}: {e}", path.display());
+                    *success = false;
+                }
+            }
+        }
+    }
+}
+
+/// Read file data through [`FatFs::read_at`], growing the buffer as data
+/// actually arrives so a corrupt size field cannot force a huge upfront
+/// allocation.
+fn read_fat_file<R: Read + Seek>(
+    filesystem: &FatFs<R>,
+    id: FileId,
+    size: u64,
+) -> fat::Result<Vec<u8>> {
+    const CHUNK_SIZE: usize = 64 * 1024;
+
+    let mut data = Vec::new();
+    let mut buffer = vec![0u8; CHUNK_SIZE];
+    let mut offset = 0u64;
+
+    while offset < size {
+        let remaining = size - offset;
+        let want = usize::try_from(remaining.min(CHUNK_SIZE as u64)).unwrap_or(CHUNK_SIZE);
+        let read = filesystem.read_at(id, offset, &mut buffer[..want])?;
+        if read == 0 {
+            break;
+        }
+        data.extend_from_slice(&buffer[..read]);
+        offset += read as u64;
+    }
+
+    Ok(data)
 }
