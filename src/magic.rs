@@ -345,7 +345,7 @@ pub fn patterns() -> Vec<signatures::Signature> {
             magic: formats::ext::ext_magic(),
             parser: formats::ext::ext_parser,
             description: formats::ext::DESCRIPTION.to_string(),
-            extractor: Some(extractors::tsk::tsk_extractor()),
+            extractor: Some(formats::ext::ext_extractor()),
         },
         // CAB archive
         signatures::Signature {
@@ -853,7 +853,7 @@ pub fn patterns() -> Vec<signatures::Signature> {
             magic: formats::fat::fat_magic(),
             parser: formats::fat::fat_parser,
             description: formats::fat::DESCRIPTION.to_string(),
-            extractor: Some(extractors::tsk::tsk_extractor()),
+            extractor: Some(formats::fat::fat_extractor()),
         },
         // EFI GPT
         signatures::Signature {
@@ -985,7 +985,7 @@ pub fn patterns() -> Vec<signatures::Signature> {
             magic: formats::ntfs::ntfs_magic(),
             parser: formats::ntfs::ntfs_parser,
             description: formats::ntfs::DESCRIPTION.to_string(),
-            extractor: Some(extractors::tsk::tsk_extractor()),
+            extractor: Some(formats::ntfs::ntfs_extractor()),
         },
         // APFS
         signatures::Signature {

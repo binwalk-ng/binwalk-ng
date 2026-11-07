@@ -1738,7 +1738,6 @@ fn was_something_extracted(output_directory: impl AsRef<Path>) -> bool {
 
 pub mod inflate;
 pub mod swapped;
-pub mod tsk;
 
 #[cfg(test)]
 mod chroot_security_tests {

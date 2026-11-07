@@ -87,7 +87,6 @@ RUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv,target=/bin/uv \
     tzdata \
     python3 \
     7zip \
-    sleuthkit \
     cabextract \
     lzop \
     unyaffs \
