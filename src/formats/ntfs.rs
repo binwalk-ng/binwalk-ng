@@ -141,11 +141,10 @@ pub fn ntfs_extractor() -> extractors::Extractor {
     }
 }
 
-/// Internal extractor: unpack an NTFS volume into a `rootfs/` subtree of the
-/// output directory.
+/// Unpack an NTFS volume into `rootfs/` under `output_directory`.
 ///
-/// When `output_directory` is `None`, this performs a dry run: the filesystem is
-/// loaded and validated, but nothing is written to disk.
+/// When `output_directory` is `None`, the filesystem is opened but no contents are
+/// extracted or traversed.
 pub fn extract_ntfs(
     file_data: &[u8],
     offset: usize,
@@ -176,17 +175,14 @@ pub fn extract_ntfs(
         return result;
     }
 
-    let Some(image_data) = file_data.get(offset..offset.saturating_add(image_size)) else {
+    let Some(image_end) = offset.checked_add(image_size) else {
+        error!("NTFS image range overflows at offset {offset:#X}");
+        return result;
+    };
+    let Some(image_data) = file_data.get(offset..image_end) else {
         error!("NTFS image at offset {offset:#X} extends past the end of the file");
         return result;
     };
-    if image_data.len() != image_size {
-        error!(
-            "NTFS image at offset {offset:#X} is truncated: expected {image_size} bytes, got {}",
-            image_data.len()
-        );
-        return result;
-    }
 
     let filesystem = match NtfsFs::open(Cursor::new(image_data)) {
         Ok(filesystem) => filesystem,
@@ -197,7 +193,6 @@ pub fn extract_ntfs(
     };
     result.size = Some(image_size);
 
-    // A dry run validates the image without touching the filesystem.
     let Some(output_directory) = output_directory else {
         result.success = true;
         return result;
@@ -215,6 +210,7 @@ pub fn extract_ntfs(
     extract_ntfs_directory(
         &filesystem,
         NTFS_ROOT_RECORD,
+        image_size,
         &chroot,
         Path::new("rootfs"),
         &mut visited_directories,
@@ -229,6 +225,7 @@ pub fn extract_ntfs(
 fn extract_ntfs_directory<R: Read + Seek>(
     filesystem: &NtfsFs<R>,
     record_number: u64,
+    image_size: usize,
     chroot: &Chroot,
     output_path: &Path,
     visited_directories: &mut HashSet<u64>,
@@ -295,6 +292,7 @@ fn extract_ntfs_directory<R: Read + Seek>(
                 extract_ntfs_directory(
                     filesystem,
                     child_record,
+                    image_size,
                     chroot,
                     &path,
                     visited_directories,
@@ -313,9 +311,8 @@ fn extract_ntfs_directory<R: Read + Seek>(
             );
         } else {
             // `read_data_by_record` follows $ATTRIBUTE_LIST fragments and
-            // LZNT1-decompresses compressed $DATA, so the extracted file holds
-            // its logical contents rather than the raw on-disk runs.
-            match filesystem.read_data_by_record(child_record, None, u64::MAX) {
+            // decompresses compressed $DATA.
+            match filesystem.read_data_by_record(child_record, None, image_size as u64) {
                 Ok(data) => {
                     if !chroot.create_file(&path, &data) {
                         error!("Failed to extract NTFS file {}", path.display());

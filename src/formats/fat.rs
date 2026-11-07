@@ -159,11 +159,10 @@ pub fn fat_extractor() -> extractors::Extractor {
     }
 }
 
-/// Internal extractor: unpack a FAT image into a `rootfs/` subtree of the
-/// output directory.
+/// Unpack a FAT image into `rootfs/` under `output_directory`.
 ///
-/// When `output_directory` is `None`, this performs a dry run: the filesystem is
-/// loaded and validated, but nothing is written to disk.
+/// When `output_directory` is `None`, the filesystem is opened but no contents are
+/// extracted or traversed.
 pub fn extract_fat(
     file_data: &[u8],
     offset: usize,
@@ -185,17 +184,14 @@ pub fn extract_fat(
         return result;
     }
 
-    let Some(image_data) = file_data.get(offset..offset.saturating_add(image_size)) else {
+    let Some(image_end) = offset.checked_add(image_size) else {
+        error!("FAT image range overflows at offset {offset:#X}");
+        return result;
+    };
+    let Some(image_data) = file_data.get(offset..image_end) else {
         error!("FAT image at offset {offset:#X} extends past the end of the file");
         return result;
     };
-    if image_data.len() != image_size {
-        error!(
-            "FAT image at offset {offset:#X} is truncated: expected {image_size} bytes, got {}",
-            image_data.len()
-        );
-        return result;
-    }
 
     // `FatFs` takes only `Read + Seek`, so the evidence slice is never writable.
     let filesystem = match FatFs::open(Cursor::new(image_data)) {
@@ -207,7 +203,6 @@ pub fn extract_fat(
     };
     result.size = Some(image_size);
 
-    // A dry run validates the image without touching the filesystem.
     let Some(output_directory) = output_directory else {
         result.success = true;
         return result;
