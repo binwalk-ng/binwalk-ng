@@ -1,10 +1,20 @@
 use crate::extractors::{self, Chroot, ExtractionResult};
 use crate::signatures::{CONFIDENCE_MEDIUM, SignatureError, SignatureResult};
 use crate::structures::StructureError;
-use ext4_view::{Ext4, FileType};
+use ext4fs::Ext4Fs;
+use ext4fs::ondisk::FileType;
 use log::{debug, error, warn};
+use std::collections::HashSet;
+use std::io::{Cursor, Read, Seek};
 use std::path::{Path, PathBuf};
 use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
+
+/// The ext2/3/4 root directory inode number.
+const EXT_ROOT_INODE: u64 = 2;
+
+/// Read file data in bounded windows: a whole-file read would allocate the
+/// inode's claimed size up front.
+const EXT_READ_CHUNK: u64 = 1024 * 1024;
 
 /// Human readable description
 pub const DESCRIPTION: &str = "EXT filesystem";
@@ -222,10 +232,9 @@ pub fn extract_ext(
         return result;
     }
 
-    // ext4-view reads from any `Ext4Read`; `Vec<u8>` is its in-memory
-    // implementation. The image is copied so the borrow of `file_data` does not
-    // outlive this function.
-    let filesystem = match Ext4::load(Box::new(image_data.to_vec())) {
+    // `Ext4Fs` reads from any `Read + Seek` source; the borrowed image slice is
+    // never written to.
+    let mut filesystem = match Ext4Fs::open(Cursor::new(image_data)) {
         Ok(filesystem) => filesystem,
         Err(e) => {
             error!("Failed to load EXT filesystem at offset {offset:#X}: {e}");
@@ -246,21 +255,21 @@ pub fn extract_ext(
         return result;
     }
 
-    let mut success = true;
-    let mut directory_metadata: Vec<(PathBuf, u32, u32, u32)> = Vec::new();
-
-    extract_ext_directory(
-        &filesystem,
-        Path::new("/"),
-        &chroot,
-        &mut directory_metadata,
-        &mut success,
-    );
+    let mut walker = ExtWalker {
+        filesystem: &mut filesystem,
+        image_size,
+        chroot: &chroot,
+        visited_directories: HashSet::from([EXT_ROOT_INODE]),
+        directory_metadata: Vec::new(),
+        success: true,
+    };
+    walker.extract_directory(EXT_ROOT_INODE, Path::new("rootfs"));
 
     // Apply directory modes/ownership only after all contents have been
     // written, so a restrictive directory mode cannot block extraction.
+    let success = walker.success;
     if success {
-        for (path, mode, uid, gid) in directory_metadata {
+        for (path, mode, uid, gid) in walker.directory_metadata {
             chroot.set_ownership(&path, uid, gid);
             chroot.set_mode(&path, mode);
         }
@@ -272,168 +281,203 @@ pub fn extract_ext(
     result
 }
 
-/// Recursively extract one EXT directory. `directory` is the absolute path
-/// inside the ext4 image; `output_path` is derived from each entry's own path.
-fn extract_ext_directory(
-    filesystem: &Ext4,
-    directory: &Path,
-    chroot: &Chroot,
-    directory_metadata: &mut Vec<(PathBuf, u32, u32, u32)>,
-    success: &mut bool,
-) {
-    let entries = match filesystem.read_dir(directory) {
-        Ok(entries) => entries,
-        Err(e) => {
-            error!("Failed to read EXT directory {}: {e}", directory.display());
-            *success = false;
-            return;
-        }
-    };
+/// State shared across the recursive EXT directory walk.
+struct ExtWalker<'a, R: Read + Seek> {
+    filesystem: &'a mut Ext4Fs<R>,
+    image_size: usize,
+    chroot: &'a Chroot,
+    visited_directories: HashSet<u64>,
+    directory_metadata: Vec<(PathBuf, u32, u32, u32)>,
+    success: bool,
+}
 
-    for entry in entries {
-        let entry = match entry {
-            Ok(entry) => entry,
+impl<R: Read + Seek> ExtWalker<'_, R> {
+    /// Recursively extract one EXT directory, addressed by inode number.
+    fn extract_directory(&mut self, directory_inode: u64, output_path: &Path) {
+        let entries = match self.filesystem.read_dir_by_ino(directory_inode) {
+            Ok(entries) => entries,
             Err(e) => {
                 error!(
-                    "Failed to read an entry in EXT directory {}: {e}",
-                    directory.display()
+                    "Failed to read EXT directory inode {directory_inode} ({}): {e}",
+                    output_path.display()
                 );
-                *success = false;
+                self.success = false;
+                return;
+            }
+        };
+
+        for entry in entries {
+            // The on-disk "." and ".." entries point back into the tree; following
+            // them would recurse forever (and ".." would escape the output).
+            if entry.name == b"." || entry.name == b".." {
                 continue;
             }
-        };
-
-        // The on-disk "." and ".." entries point back into the tree; following
-        // them would recurse forever (and ".." would try to escape the output).
-        let name = entry.file_name();
-        if name == "." || name == ".." {
-            continue;
-        }
-
-        let Some(entry_path) = ext_pathbuf_to_std(entry.path()) else {
-            warn!(
-                "EXT entry in {} has a path that cannot be represented on this platform",
-                directory.display()
-            );
-            continue;
-        };
-        let Ok(relative_path) = entry_path.strip_prefix("/") else {
-            warn!(
-                "EXT entry {} is not an absolute path inside the image",
-                entry_path.display()
-            );
-            *success = false;
-            continue;
-        };
-        let output_path = Path::new("rootfs").join(relative_path);
-
-        let metadata = match entry.metadata() {
-            Ok(metadata) => metadata,
-            Err(e) => {
-                error!(
-                    "Failed to read metadata for EXT entry {}: {e}",
-                    entry_path.display()
-                );
-                *success = false;
-                continue;
-            }
-        };
-        let file_type = match entry.file_type() {
-            Ok(file_type) => file_type,
-            Err(e) => {
-                error!(
-                    "Failed to read file type for EXT entry {}: {e}",
-                    entry_path.display()
-                );
-                *success = false;
-                continue;
-            }
-        };
-
-        let extracted = match file_type {
-            FileType::Directory => {
-                let created = chroot.create_directory(&output_path);
-                if created {
-                    directory_metadata.push((
-                        output_path.clone(),
-                        u32::from(metadata.mode()),
-                        metadata.uid(),
-                        metadata.gid(),
-                    ));
-                    extract_ext_directory(
-                        filesystem,
-                        &entry_path,
-                        chroot,
-                        directory_metadata,
-                        success,
-                    );
-                }
-                created
-            }
-            FileType::Regular => match filesystem.read(entry_path.as_path()) {
-                Ok(data) => chroot.create_file(&output_path, &data),
-                Err(e) => {
-                    error!("Failed to read EXT file {}: {e}", entry_path.display());
-                    false
-                }
-            },
-            FileType::Symlink => match filesystem.read_link(entry_path.as_path()) {
-                Ok(target) => ext_pathbuf_to_std(target).map_or_else(
-                    || {
-                        warn!(
-                            "EXT symlink {} has a target that cannot be represented on this platform",
-                            entry_path.display()
-                        );
-                        false
-                    },
-                    |target| chroot.create_symlink(&output_path, target),
-                ),
-                Err(e) => {
-                    error!("Failed to read EXT symlink {}: {e}", entry_path.display());
-                    false
-                }
-            },
-            FileType::BlockDevice
-            | FileType::CharacterDevice
-            | FileType::Fifo
-            | FileType::Socket => {
-                // ext4-view exposes the inode mode but not the device major/minor
-                // numbers, so these cannot be recreated faithfully.
+            let Some(name) = ext_name_to_path(&entry.name) else {
                 warn!(
-                    "Skipping EXT special file {}: ext4-view does not expose device numbers",
-                    entry_path.display()
+                    "EXT entry in {} has a name that cannot be represented on this platform",
+                    output_path.display()
                 );
                 continue;
+            };
+            let path = output_path.join(name);
+            let inode_number = u64::from(entry.inode);
+            if inode_number == 0 {
+                continue;
             }
-        };
 
-        if !extracted {
-            error!("Failed to extract EXT entry {}", output_path.display());
-            *success = false;
-            continue;
-        }
+            let inode = match self.filesystem.inode(inode_number) {
+                Ok(inode) => inode,
+                Err(e) => {
+                    error!(
+                        "Failed to read EXT inode {inode_number} for {}: {e}",
+                        path.display()
+                    );
+                    self.success = false;
+                    continue;
+                }
+            };
+            let file_type = inode.file_type();
 
-        // Directory metadata is deferred until all contents exist. Symlink
-        // ownership is safe to set (lchown), but chmod follows links, so never
-        // apply a mode to a symlink.
-        if file_type != FileType::Directory {
-            chroot.set_ownership(&output_path, metadata.uid(), metadata.gid());
-            if file_type != FileType::Symlink {
-                chroot.set_mode(&output_path, u32::from(metadata.mode()));
+            let extracted = match file_type {
+                FileType::Directory => {
+                    // A corrupt image can point a directory entry at an ancestor;
+                    // track visited inodes so the walk always terminates.
+                    if !self.visited_directories.insert(inode_number) {
+                        warn!(
+                            "Skipping EXT directory cycle at {} (inode {inode_number})",
+                            path.display()
+                        );
+                        continue;
+                    }
+                    let created = self.chroot.create_directory(&path);
+                    if created {
+                        self.directory_metadata.push((
+                            path.clone(),
+                            u32::from(inode.mode),
+                            inode.uid,
+                            inode.gid,
+                        ));
+                        self.extract_directory(inode_number, &path);
+                    }
+                    created
+                }
+                FileType::RegularFile => {
+                    if inode.size > self.image_size as u64 {
+                        debug!(
+                            "EXT file {} claims {} bytes in a {}-byte image; extracting only the in-image range",
+                            path.display(),
+                            inode.size,
+                            self.image_size
+                        );
+                    }
+                    match read_ext_file(
+                        self.filesystem,
+                        inode_number,
+                        inode.size,
+                        self.image_size,
+                    ) {
+                        Ok(data) => self.chroot.create_file(&path, &data),
+                        Err(e) => {
+                            error!("Failed to read EXT file {}: {e}", path.display());
+                            false
+                        }
+                    }
+                }
+                FileType::Symlink => match self.filesystem.read_link_by_ino(inode_number) {
+                    Ok(target) => ext_name_to_path(&target).map_or_else(
+                        || {
+                            warn!(
+                                "EXT symlink {} has a target that cannot be represented on this platform",
+                                path.display()
+                            );
+                            false
+                        },
+                        |target| self.chroot.create_symlink(&path, target),
+                    ),
+                    Err(e) => {
+                        error!("Failed to read EXT symlink {}: {e}", path.display());
+                        false
+                    }
+                },
+                FileType::BlockDevice
+                | FileType::CharDevice
+                | FileType::Fifo
+                | FileType::Socket
+                | FileType::Unknown => {
+                    // The inode mode does not carry device major/minor numbers, so
+                    // these cannot be recreated faithfully.
+                    warn!(
+                        "Skipping EXT special file {}: device numbers are not exposed",
+                        path.display()
+                    );
+                    continue;
+                }
+            };
+
+            if !extracted {
+                error!("Failed to extract EXT entry {}", path.display());
+                self.success = false;
+                continue;
+            }
+
+            // Directory metadata is deferred until all contents exist. Symlink
+            // ownership is safe to set (lchown), but chmod follows links, so never
+            // apply a mode to a symlink.
+            if file_type != FileType::Directory {
+                self.chroot.set_ownership(&path, inode.uid, inode.gid);
+                if file_type != FileType::Symlink {
+                    self.chroot.set_mode(&path, u32::from(inode.mode));
+                }
             }
         }
     }
 }
 
-/// Convert an ext4-view path into a platform path, preserving non-UTF-8 bytes
-/// on Unix. On other platforms non-UTF-8 paths cannot be represented.
-fn ext_pathbuf_to_std(path: ext4_view::PathBuf) -> Option<PathBuf> {
+/// Read file data in bounded windows.
+///
+/// `Ext4Fs::read_inode_data` concatenates the mapped blocks and therefore loses
+/// sparse holes, so read through `read_inode_data_range` and zero-fill the
+/// unmapped tail of each window instead.
+fn read_ext_file<R: Read + Seek>(
+    filesystem: &mut Ext4Fs<R>,
+    inode_number: u64,
+    claimed_size: u64,
+    image_size: usize,
+) -> ext4fs::error::Result<Vec<u8>> {
+    // Bytes past the end of the image can only be sparse holes; capping also
+    // stops a corrupt size field from driving an unbounded extraction.
+    let size = claimed_size.min(image_size as u64);
+    let mut data = Vec::new();
+    let mut offset = 0u64;
+
+    while offset < size {
+        let want = (size - offset).min(EXT_READ_CHUNK) as usize;
+        let chunk = filesystem.read_inode_data_range(inode_number, offset, want)?;
+        data.extend_from_slice(&chunk);
+        if chunk.len() < want {
+            // `read_inode_data_range` stops at the last mapped byte; the rest of
+            // this window is a hole and reads as zero.
+            data.resize(data.len() + (want - chunk.len()), 0);
+        }
+        offset += want as u64;
+    }
+
+    Ok(data)
+}
+
+/// Convert a raw on-disk name into a platform path, preserving non-UTF-8 bytes
+/// on Unix. On other platforms non-UTF-8 names cannot be represented.
+fn ext_name_to_path(name: &[u8]) -> Option<PathBuf> {
+    if name.is_empty() {
+        return None;
+    }
     #[cfg(unix)]
     {
-        Some(PathBuf::from(path))
+        use std::os::unix::ffi::OsStrExt;
+        Some(PathBuf::from(std::ffi::OsStr::from_bytes(name)))
     }
     #[cfg(not(unix))]
     {
-        path.to_str().ok().map(PathBuf::from)
+        std::str::from_utf8(name).ok().map(PathBuf::from)
     }
 }
