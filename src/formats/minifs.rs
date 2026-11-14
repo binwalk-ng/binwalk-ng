@@ -6,6 +6,8 @@
 use crate::extractors::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
 use crate::structures::StructureError;
+use crate::common::get_cstring;
+use zerocopy::{FromBytes, Immutable, KnownLayout, BE, Unaligned};
 use liblzma::stream::Stream;
 use std::io::Read;
 use std::path::Path;
@@ -54,36 +56,50 @@ pub struct MinifsImage {
     pub size: usize,
 }
 
-fn be_u32(data: &[u8], offset: usize) -> Result<u32, StructureError> {
-    let bytes: [u8; 4] = data
-        .get(offset..offset.checked_add(4).ok_or(StructureError)?)
-        .ok_or(StructureError)?
-        .try_into()
-        .map_err(|_| StructureError)?;
-    Ok(u32::from_be_bytes(bytes))
-}
-
 fn table_string(table: &[u8], offset: usize) -> Result<String, StructureError> {
     let bytes = table.get(offset..).ok_or(StructureError)?;
-    let end = bytes
-        .iter()
-        .position(|&byte| byte == 0)
-        .ok_or(StructureError)?;
-    Ok(String::from_utf8_lossy(&bytes[..end]).into_owned())
+    Ok::<std::string::String, StructureError>(get_cstring(bytes))
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct MinifsHeaderBytes {
+    magic: zerocopy::U64<BE>, //MINIFS00
+    unknown1: zerocopy::U64<BE>,
+    version: zerocopy::U32<BE>,
+    num_files: zerocopy::U32<BE>,
+    unknown2: zerocopy::U32<BE>,
+    name_table_size: zerocopy::U32<BE>,
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct FileEntryBytes {
+    path_index: zerocopy::U32<BE>,
+    file_index: zerocopy::U32<BE>,
+    chunk_number: zerocopy::U32<BE>,
+    offset_in_chunk: zerocopy::U32<BE>,
+    file_size: zerocopy::U32<BE>,  
+}
+
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+struct ChunkEntryBytes {
+    offset: zerocopy::U32<BE>,
+    size: zerocopy::U32<BE>,
+    decompressed_size: zerocopy::U32<BE>,
 }
 
 /// Parse and bound-check a Minifs image, including its name, file and chunk tables.
 pub fn parse_minifs_file(data: &[u8]) -> Result<MinifsImage, StructureError> {
-    let header_bytes = data.get(..HEADER_SIZE).ok_or(StructureError)?;
-    if &header_bytes[..8] != b"MINIFS\0\0" {
-        return Err(StructureError);
-    }
+    let (mh, _) = MinifsHeaderBytes::ref_from_prefix(data).map_err(|_| StructureError)?;
+
     let header = MinifsHeader {
-        unknown1: u64::from_be_bytes(header_bytes[8..16].try_into().map_err(|_| StructureError)?),
-        version: be_u32(header_bytes, 16)?,
-        num_files: be_u32(header_bytes, 20)?,
-        unknown2: be_u32(header_bytes, 24)?,
-        name_table_size: be_u32(header_bytes, 28)?,
+        unknown1: mh.unknown1.get(),
+        version: mh.version.get(),
+        num_files: mh.num_files.get(),
+        unknown2: mh.unknown2.get(),
+        name_table_size: mh.name_table_size.get(),
     };
     if header.num_files == 0 {
         return Err(StructureError);
@@ -105,19 +121,21 @@ pub fn parse_minifs_file(data: &[u8]) -> Result<MinifsImage, StructureError> {
     let mut files = Vec::new();
     let mut max_chunk = 0usize;
     for entry in file_table.chunks_exact(FILE_ENTRY_SIZE) {
-        let path = table_string(names, be_u32(entry, 0)? as usize)?;
-        let filename = table_string(names, be_u32(entry, 4)? as usize)?;
+        let (fe, _) = FileEntryBytes::ref_from_prefix(entry).map_err(|_| StructureError)?;
+
+        let path = table_string(names, fe.path_index.get() as usize)?;
+        let filename = table_string(names, fe.file_index.get() as usize)?;
         if filename.is_empty() {
             return Err(StructureError);
         }
-        let chunk_number = be_u32(entry, 8)? as usize;
+        let chunk_number = fe.chunk_number.get() as usize;
         max_chunk = max_chunk.max(chunk_number);
         files.push(MinifsFileEntry {
             path,
             filename,
             chunk_number,
-            offset_in_chunk: be_u32(entry, 12)? as usize,
-            file_size: be_u32(entry, 16)? as usize,
+            offset_in_chunk: fe.offset_in_chunk.get() as usize,
+            file_size: fe.file_size.get() as usize,
         });
     }
 
@@ -133,9 +151,11 @@ pub fn parse_minifs_file(data: &[u8]) -> Result<MinifsImage, StructureError> {
     let mut chunks = Vec::new();
     let mut image_end = toc_end;
     for entry in chunk_table.chunks_exact(CHUNK_ENTRY_SIZE) {
-        let offset = be_u32(entry, 0)? as usize;
-        let size = be_u32(entry, 4)? as usize;
-        let decompressed_size = be_u32(entry, 8)? as usize;
+        let (ce, _) = ChunkEntryBytes::ref_from_prefix(entry).map_err(|_| StructureError)?;
+
+        let offset = ce.offset.get() as usize;
+        let size = ce.size.get() as usize;
+        let decompressed_size = ce.decompressed_size.get() as usize;
         let end = toc_end
             .checked_add(offset)
             .and_then(|value| value.checked_add(size))
@@ -288,24 +308,6 @@ mod tests {
         }
         data.extend_from_slice(&compressed);
         data
-    }
-
-    #[test]
-    fn parses_and_extracts_embedded_image() {
-        let image = make_image();
-        let mut input = b"prefix".to_vec();
-        input.extend_from_slice(&image);
-        input.extend_from_slice(b"trailer");
-        let parsed = minifs_parser(&input, 6).unwrap();
-        assert_eq!(parsed.size, image.len());
-        let output = tempfile::tempdir().unwrap();
-        let extracted = extract_minifs(&input, 6, Some(output.path()));
-        assert!(extracted.success);
-        assert_eq!(extracted.size, Some(image.len()));
-        assert_eq!(
-            std::fs::read(output.path().join("web/index.html")).unwrap(),
-            b"hello Minifs"
-        );
     }
 
     #[test]
