@@ -3,38 +3,38 @@
 //! Format references: https://arxiv.org/html/2407.05064v1 and
 //! https://github.com/RedaOps/minifs-extractor.
 
+use crate::common::get_cstring;
 use crate::extractors::{Chroot, ExtractionResult, Extractor, ExtractorType};
 use crate::signatures::{CONFIDENCE_HIGH, SignatureError, SignatureResult};
 use crate::structures::StructureError;
-use crate::common::get_cstring;
-use zerocopy::{FromBytes, Immutable, KnownLayout, BE, Unaligned};
 use liblzma::stream::Stream;
 use std::io::Read;
 use std::path::Path;
+use zerocopy::{BE, FromBytes, Immutable, KnownLayout, U32, Unaligned};
 
 pub const DESCRIPTION: &str = "MINIFS image";
-const HEADER_SIZE: usize = 32;
-const FILE_ENTRY_SIZE: usize = 20;
-const CHUNK_ENTRY_SIZE: usize = 12;
+const MAGIC: &[u8; 6] = b"MINIFS";
 const MEM_LIMIT: u64 = 4 * 1024 * 1024 * 1024;
+/// Upper bound on the total decompressed data produced by one extraction.
+const MAX_EXTRACTED_SIZE: usize = 1024 * 1024 * 1024;
 
 pub fn minifs_magic() -> Vec<Vec<u8>> {
-    vec![b"MINIFS\0\0".to_vec()]
+    vec![MAGIC.to_vec()]
 }
 
 #[derive(Debug)]
 pub struct MinifsHeader {
-    pub unknown1: u64,
     pub version: u32,
     pub num_files: u32,
-    pub unknown2: u32,
     pub name_table_size: u32,
 }
 
 #[derive(Debug)]
-pub struct MinifsFileEntry {
-    pub path: String,
-    pub filename: String,
+pub struct MinifsFileEntry<'a> {
+    /// Name table bytes starting at the path; NUL-terminated.
+    pub path: &'a [u8],
+    /// Name table bytes starting at the file name; NUL-terminated.
+    pub filename: &'a [u8],
     pub chunk_number: usize,
     pub offset_in_chunk: usize,
     pub file_size: usize,
@@ -48,84 +48,76 @@ pub struct MinifsChunkEntry {
 }
 
 #[derive(Debug)]
-pub struct MinifsImage {
+pub struct MinifsImage<'a> {
     pub header: MinifsHeader,
-    pub files: Vec<MinifsFileEntry>,
+    pub files: Vec<MinifsFileEntry<'a>>,
     pub chunks: Vec<MinifsChunkEntry>,
     pub raw_chunks_offset: usize,
     pub size: usize,
 }
 
-fn table_string(table: &[u8], offset: usize) -> Result<String, StructureError> {
-    let bytes = table.get(offset..).ok_or(StructureError)?;
-    Ok::<std::string::String, StructureError>(get_cstring(bytes))
-}
-
 #[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
 struct MinifsHeaderBytes {
-    magic: zerocopy::U64<BE>, //MINIFS00
-    unknown1: zerocopy::U64<BE>,
-    version: zerocopy::U32<BE>,
-    num_files: zerocopy::U32<BE>,
-    unknown2: zerocopy::U32<BE>,
-    name_table_size: zerocopy::U32<BE>,
+    magic: [u8; 6],
+    _unknown1: [u8; 10],
+    version: U32<BE>,
+    num_files: U32<BE>,
+    _unknown2: [u8; 4],
+    name_table_size: U32<BE>,
 }
 
 #[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
 struct FileEntryBytes {
-    path_index: zerocopy::U32<BE>,
-    file_index: zerocopy::U32<BE>,
-    chunk_number: zerocopy::U32<BE>,
-    offset_in_chunk: zerocopy::U32<BE>,
-    file_size: zerocopy::U32<BE>,  
+    path_index: U32<BE>,
+    file_index: U32<BE>,
+    chunk_number: U32<BE>,
+    offset_in_chunk: U32<BE>,
+    file_size: U32<BE>,
 }
 
 #[derive(FromBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
 struct ChunkEntryBytes {
-    offset: zerocopy::U32<BE>,
-    size: zerocopy::U32<BE>,
-    decompressed_size: zerocopy::U32<BE>,
+    offset: U32<BE>,
+    size: U32<BE>,
+    decompressed_size: U32<BE>,
 }
 
 /// Parse and bound-check a Minifs image, including its name, file and chunk tables.
-pub fn parse_minifs_file(data: &[u8]) -> Result<MinifsImage, StructureError> {
-    let (mh, _) = MinifsHeaderBytes::ref_from_prefix(data).map_err(|_| StructureError)?;
-
+pub fn parse_minifs_file(data: &[u8]) -> Result<MinifsImage<'_>, StructureError> {
+    let (mh, rest) = MinifsHeaderBytes::ref_from_prefix(data).map_err(|_| StructureError)?;
+    if &mh.magic != MAGIC {
+        return Err(StructureError);
+    }
     let header = MinifsHeader {
-        unknown1: mh.unknown1.get(),
         version: mh.version.get(),
         num_files: mh.num_files.get(),
-        unknown2: mh.unknown2.get(),
         name_table_size: mh.name_table_size.get(),
     };
     if header.num_files == 0 {
         return Err(StructureError);
     }
 
-    let names_end = HEADER_SIZE
-        .checked_add(header.name_table_size as usize)
+    let (names, rest) = rest
+        .split_at_checked(header.name_table_size as usize)
         .ok_or(StructureError)?;
-    let names = data.get(HEADER_SIZE..names_end).ok_or(StructureError)?;
-    let files_end = names_end
-        .checked_add(
-            (header.num_files as usize)
-                .checked_mul(FILE_ENTRY_SIZE)
-                .ok_or(StructureError)?,
-        )
-        .ok_or(StructureError)?;
-    let file_table = data.get(names_end..files_end).ok_or(StructureError)?;
+    let (file_table, rest) =
+        <[FileEntryBytes]>::ref_from_prefix_with_elems(rest, header.num_files as usize)
+            .map_err(|_| StructureError)?;
 
-    let mut files = Vec::new();
+    let mut files = Vec::with_capacity(file_table.len());
     let mut max_chunk = 0usize;
-    for entry in file_table.chunks_exact(FILE_ENTRY_SIZE) {
-        let (fe, _) = FileEntryBytes::ref_from_prefix(entry).map_err(|_| StructureError)?;
-
-        let path = table_string(names, fe.path_index.get() as usize)?;
-        let filename = table_string(names, fe.file_index.get() as usize)?;
-        if filename.is_empty() {
+    for fe in file_table {
+        let path = names
+            .get(fe.path_index.get() as usize..)
+            .ok_or(StructureError)?;
+        let filename = names
+            .get(fe.file_index.get() as usize..)
+            .ok_or(StructureError)?;
+        // An empty file name (offset at the table end or pointing at a NUL) is invalid.
+        if filename.first().is_none_or(|&byte| byte == 0) {
             return Err(StructureError);
         }
         let chunk_number = fe.chunk_number.get() as usize;
@@ -140,34 +132,24 @@ pub fn parse_minifs_file(data: &[u8]) -> Result<MinifsImage, StructureError> {
     }
 
     let chunk_count = max_chunk.checked_add(1).ok_or(StructureError)?;
-    let toc_end = files_end
-        .checked_add(
-            chunk_count
-                .checked_mul(CHUNK_ENTRY_SIZE)
-                .ok_or(StructureError)?,
-        )
-        .ok_or(StructureError)?;
-    let chunk_table = data.get(files_end..toc_end).ok_or(StructureError)?;
-    let mut chunks = Vec::new();
-    let mut image_end = toc_end;
-    for entry in chunk_table.chunks_exact(CHUNK_ENTRY_SIZE) {
-        let (ce, _) = ChunkEntryBytes::ref_from_prefix(entry).map_err(|_| StructureError)?;
+    let (toc_table, rest) = <[ChunkEntryBytes]>::ref_from_prefix_with_elems(rest, chunk_count)
+        .map_err(|_| StructureError)?;
+    let toc_end = data.len() - rest.len();
 
+    let mut chunks = Vec::with_capacity(toc_table.len());
+    let mut last_chunk_end = 0usize;
+    for ce in toc_table {
         let offset = ce.offset.get() as usize;
         let size = ce.size.get() as usize;
-        let decompressed_size = ce.decompressed_size.get() as usize;
-        let end = toc_end
-            .checked_add(offset)
-            .and_then(|value| value.checked_add(size))
-            .ok_or(StructureError)?;
-        if size == 0 || end > data.len() {
+        let end = offset.checked_add(size).ok_or(StructureError)?;
+        if size == 0 || end > rest.len() {
             return Err(StructureError);
         }
-        image_end = image_end.max(end);
+        last_chunk_end = last_chunk_end.max(end);
         chunks.push(MinifsChunkEntry {
             offset,
             size,
-            decompressed_size,
+            decompressed_size: ce.decompressed_size.get() as usize,
         });
     }
     for file in &files {
@@ -186,7 +168,7 @@ pub fn parse_minifs_file(data: &[u8]) -> Result<MinifsImage, StructureError> {
         files,
         chunks,
         raw_chunks_offset: toc_end,
-        size: image_end,
+        size: toc_end + last_chunk_end,
     })
 }
 
@@ -218,6 +200,35 @@ pub fn extract_minifs(
     offset: usize,
     output_directory: Option<&Path>,
 ) -> ExtractionResult {
+    extract_minifs_with_budget(file_data, offset, output_directory, MAX_EXTRACTED_SIZE)
+}
+
+fn decode_chunk(data: &[u8], image: &MinifsImage, chunk: &MinifsChunkEntry) -> Option<Vec<u8>> {
+    let start = image.raw_chunks_offset + chunk.offset;
+    let compressed = data.get(start..start + chunk.size)?;
+    let stream = Stream::new_auto_decoder(MEM_LIMIT, 0).ok()?;
+    let decoder = liblzma::bufread::XzDecoder::new_stream(compressed, stream);
+    let limit = u64::try_from(chunk.decompressed_size)
+        .ok()?
+        .checked_add(1)?;
+    let mut decoded = Vec::new();
+    if decoder.take(limit).read_to_end(&mut decoded).is_err()
+        || decoded.len() != chunk.decompressed_size
+    {
+        return None;
+    }
+    Some(decoded)
+}
+
+/// Extraction with an explicit cap on the total decompressed output. Only chunks
+/// referenced by a file are decoded, one at a time, and each is dropped once its
+/// files are written.
+fn extract_minifs_with_budget(
+    file_data: &[u8],
+    offset: usize,
+    output_directory: Option<&Path>,
+    budget: usize,
+) -> ExtractionResult {
     let mut result = ExtractionResult::default();
     let Some(data) = file_data.get(offset..) else {
         return result;
@@ -226,46 +237,48 @@ pub fn extract_minifs(
         return result;
     };
 
-    let chroot = output_directory.map(Chroot::new);
-    let mut decompressed_chunks = Vec::with_capacity(image.chunks.len());
-    for chunk in &image.chunks {
-        let Some(compressed) = data.get(
-            image.raw_chunks_offset + chunk.offset
-                ..image.raw_chunks_offset + chunk.offset + chunk.size,
-        ) else {
-            return result;
-        };
-        let Ok(stream) = Stream::new_auto_decoder(MEM_LIMIT, 0) else {
-            return result;
-        };
-        let decoder = liblzma::bufread::XzDecoder::new_stream(compressed, stream);
-        let Some(limit) = u64::try_from(chunk.decompressed_size)
-            .ok()
-            .and_then(|size| size.checked_add(1))
-        else {
-            return result;
-        };
-        let mut decoded = Vec::new();
-        if decoder.take(limit).read_to_end(&mut decoded).is_err()
-            || decoded.len() != chunk.decompressed_size
-        {
-            return result;
+    // Group files by chunk (stable, so per-chunk file order is preserved).
+    let mut order: Vec<&MinifsFileEntry> = image.files.iter().collect();
+    order.sort_by_key(|file| file.chunk_number);
+
+    let mut total = 0usize;
+    let mut prev_chunk = None;
+    for file in &order {
+        if prev_chunk != Some(file.chunk_number) {
+            prev_chunk = Some(file.chunk_number);
+            let chunk = &image.chunks[file.chunk_number];
+            match total.checked_add(chunk.decompressed_size) {
+                Some(value) if value <= budget => total = value,
+                _ => return result,
+            }
         }
-        decompressed_chunks.push(decoded);
     }
 
-    for file in &image.files {
-         let Some(bytes) = decompressed_chunks[file.chunk_number]
-            .get(file.offset_in_chunk..file.offset_in_chunk + file.file_size)
+    let chroot = output_directory.map(Chroot::new);
+    let mut current: Option<(usize, Vec<u8>)> = None;
+    for file in order {
+        let decoded = match &current {
+            Some((number, decoded)) if *number == file.chunk_number => decoded,
+            _ => {
+                // Drop the previous chunk before decoding the next one.
+                current = None;
+                let Some(decoded) = decode_chunk(data, &image, &image.chunks[file.chunk_number])
+                else {
+                    return result;
+                };
+                &current.insert((file.chunk_number, decoded)).1
+            }
+        };
+        let Some(bytes) = decoded.get(file.offset_in_chunk..file.offset_in_chunk + file.file_size)
         else {
             return result;
         };
         if let Some(chroot) = &chroot {
-            let p = chroot.safe_path_join(&file.path, "");
+            let p = chroot.safe_path_join(get_cstring(file.path), "");
             if !chroot.create_directory(&p) {
                 return result;
             }
-            let path = chroot.safe_path_join(&p, &file.filename);
+            let path = chroot.safe_path_join(&p, get_cstring(file.filename));
             if !chroot.create_file(path, bytes) {
                 return result;
             }
@@ -283,27 +296,29 @@ mod tests {
     use liblzma::stream::LzmaOptions;
     use std::io::Write;
 
+    const HEADER_SIZE: usize = size_of::<MinifsHeaderBytes>();
+    const NAMES: &[u8] = b"web\0index.html\0";
+    const PAYLOAD: &[u8] = b"hello Minifs";
+
     fn make_image() -> Vec<u8> {
-        let payload = b"hello Minifs";
         let options = LzmaOptions::new_preset(6).unwrap();
         let stream = Stream::new_lzma_encoder(&options).unwrap();
         let mut encoder = liblzma::write::XzEncoder::new_stream(Vec::new(), stream);
-        encoder.write_all(payload).unwrap();
+        encoder.write_all(PAYLOAD).unwrap();
         let compressed = encoder.finish().unwrap();
 
-        let names = b"web\0index.html\0";
         let mut data = Vec::new();
         data.extend_from_slice(b"MINIFS\0\0");
         data.extend_from_slice(&0u64.to_be_bytes());
         data.extend_from_slice(&1u32.to_be_bytes());
         data.extend_from_slice(&1u32.to_be_bytes());
         data.extend_from_slice(&0u32.to_be_bytes());
-        data.extend_from_slice(&(names.len() as u32).to_be_bytes());
-        data.extend_from_slice(names);
-        for value in [0, 4, 0, 0, payload.len() as u32] {
+        data.extend_from_slice(&(NAMES.len() as u32).to_be_bytes());
+        data.extend_from_slice(NAMES);
+        for value in [0, 4, 0, 0, PAYLOAD.len() as u32] {
             data.extend_from_slice(&value.to_be_bytes());
         }
-        for value in [0, compressed.len() as u32, payload.len() as u32] {
+        for value in [0, compressed.len() as u32, PAYLOAD.len() as u32] {
             data.extend_from_slice(&value.to_be_bytes());
         }
         data.extend_from_slice(&compressed);
@@ -320,13 +335,44 @@ mod tests {
             );
         }
         let mut bad_reference = image.clone();
-        let chunk_number_offset = HEADER_SIZE + b"web\0index.html\0".len() + 8;
+        let chunk_number_offset = HEADER_SIZE + NAMES.len() + 8;
         bad_reference[chunk_number_offset..chunk_number_offset + 4]
             .copy_from_slice(&u32::MAX.to_be_bytes());
         assert!(parse_minifs_file(&bad_reference).is_err());
         let mut bad_name = image;
-        let name_offset = HEADER_SIZE + b"web\0index.html\0".len();
+        let name_offset = HEADER_SIZE + NAMES.len();
         bad_name[name_offset..name_offset + 4].copy_from_slice(&u32::MAX.to_be_bytes());
         assert!(parse_minifs_file(&bad_name).is_err());
+    }
+
+    #[test]
+    fn names_borrow_from_input() {
+        let data = make_image();
+        let image = parse_minifs_file(&data).unwrap();
+        assert_eq!(image.size, data.len());
+        let file = &image.files[0];
+        let names = &data[HEADER_SIZE..HEADER_SIZE + NAMES.len()];
+        assert!(names.as_ptr_range().contains(&file.path.as_ptr()));
+        assert!(names.as_ptr_range().contains(&file.filename.as_ptr()));
+        assert_eq!(get_cstring(file.path), "web");
+        assert_eq!(get_cstring(file.filename), "index.html");
+    }
+
+    #[test]
+    fn extracts_files() {
+        let data = make_image();
+        let tmp = tempfile::tempdir().unwrap();
+        let result = extract_minifs(&data, 0, Some(tmp.path()));
+        assert!(result.success);
+        assert_eq!(result.size, Some(data.len()));
+        let written = std::fs::read(tmp.path().join("web").join("index.html")).unwrap();
+        assert_eq!(written, PAYLOAD);
+    }
+
+    #[test]
+    fn enforces_extraction_budget() {
+        let data = make_image();
+        assert!(extract_minifs_with_budget(&data, 0, None, PAYLOAD.len()).success);
+        assert!(!extract_minifs_with_budget(&data, 0, None, PAYLOAD.len() - 1).success);
     }
 }
