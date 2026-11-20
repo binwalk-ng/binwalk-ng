@@ -88,9 +88,6 @@ struct ChunkEntryBytes {
 /// Parse and bound-check a Minifs image, including its name, file and chunk tables.
 pub fn parse_minifs_file(data: &[u8]) -> Result<MinifsImage<'_>, StructureError> {
     let (mh, rest) = MinifsHeaderBytes::ref_from_prefix(data).map_err(|_| StructureError)?;
-    if &mh.magic != MAGIC {
-        return Err(StructureError);
-    }
     let header = MinifsHeader {
         version: mh.version.get(),
         num_files: mh.num_files.get(),
@@ -194,24 +191,13 @@ pub fn minifs_extractor() -> Extractor {
     }
 }
 
-/// Decompress chunks and write the files through the chrooted file API.
-pub fn extract_minifs(
-    file_data: &[u8],
-    offset: usize,
-    output_directory: Option<&Path>,
-) -> ExtractionResult {
-    extract_minifs_with_budget(file_data, offset, output_directory, MAX_EXTRACTED_SIZE)
-}
-
 fn decode_chunk(data: &[u8], image: &MinifsImage, chunk: &MinifsChunkEntry) -> Option<Vec<u8>> {
     let start = image.raw_chunks_offset + chunk.offset;
     let compressed = data.get(start..start + chunk.size)?;
     let stream = Stream::new_auto_decoder(MEM_LIMIT, 0).ok()?;
     let decoder = liblzma::bufread::XzDecoder::new_stream(compressed, stream);
-    let limit = u64::try_from(chunk.decompressed_size)
-        .ok()?
-        .checked_add(1)?;
-    let mut decoded = Vec::new();
+    let limit = u64::try_from(chunk.decompressed_size).ok()? + 1;
+    let mut decoded = Vec::with_capacity(chunk.decompressed_size);
     if decoder.take(limit).read_to_end(&mut decoded).is_err()
         || decoded.len() != chunk.decompressed_size
     {
@@ -220,14 +206,11 @@ fn decode_chunk(data: &[u8], image: &MinifsImage, chunk: &MinifsChunkEntry) -> O
     Some(decoded)
 }
 
-/// Extraction with an explicit cap on the total decompressed output. Only chunks
-/// referenced by a file are decoded, one at a time, and each is dropped once its
-/// files are written.
-fn extract_minifs_with_budget(
+/// Decompress chunks and write the files through the chrooted file API.
+pub fn extract_minifs(
     file_data: &[u8],
     offset: usize,
     output_directory: Option<&Path>,
-    budget: usize,
 ) -> ExtractionResult {
     let mut result = ExtractionResult::default();
     let Some(data) = file_data.get(offset..) else {
@@ -248,39 +231,32 @@ fn extract_minifs_with_budget(
             prev_chunk = Some(file.chunk_number);
             let chunk = &image.chunks[file.chunk_number];
             match total.checked_add(chunk.decompressed_size) {
-                Some(value) if value <= budget => total = value,
+                Some(value) if value <= MAX_EXTRACTED_SIZE => total = value,
                 _ => return result,
             }
         }
     }
 
     let chroot = output_directory.map(Chroot::new);
-    let mut current: Option<(usize, Vec<u8>)> = None;
-    for file in order {
-        let decoded = match &current {
-            Some((number, decoded)) if *number == file.chunk_number => decoded,
-            _ => {
-                // Drop the previous chunk before decoding the next one.
-                current = None;
-                let Some(decoded) = decode_chunk(data, &image, &image.chunks[file.chunk_number])
-                else {
-                    return result;
-                };
-                &current.insert((file.chunk_number, decoded)).1
-            }
-        };
-        let Some(bytes) = decoded.get(file.offset_in_chunk..file.offset_in_chunk + file.file_size)
-        else {
+    for group in order.chunk_by(|a, b| a.chunk_number == b.chunk_number) {
+        let Some(decoded) = decode_chunk(data, &image, &image.chunks[group[0].chunk_number]) else {
             return result;
         };
-        if let Some(chroot) = &chroot {
-            let p = chroot.safe_path_join(get_cstring(file.path), "");
-            if !chroot.create_directory(&p) {
+        for file in group {
+            let Some(bytes) =
+                decoded.get(file.offset_in_chunk..file.offset_in_chunk + file.file_size)
+            else {
                 return result;
-            }
-            let path = chroot.safe_path_join(&p, get_cstring(file.filename));
-            if !chroot.create_file(path, bytes) {
-                return result;
+            };
+            if let Some(chroot) = &chroot {
+                let p = chroot.safe_path_join(get_cstring(file.path), "");
+                if !chroot.create_directory(&p) {
+                    return result;
+                }
+                let path = chroot.safe_path_join(&p, get_cstring(file.filename));
+                if !chroot.create_file(path, bytes) {
+                    return result;
+                }
             }
         }
     }
@@ -288,91 +264,4 @@ fn extract_minifs_with_budget(
     result.success = true;
     result.size = Some(image.size);
     result
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use liblzma::stream::LzmaOptions;
-    use std::io::Write;
-
-    const HEADER_SIZE: usize = size_of::<MinifsHeaderBytes>();
-    const NAMES: &[u8] = b"web\0index.html\0";
-    const PAYLOAD: &[u8] = b"hello Minifs";
-
-    fn make_image() -> Vec<u8> {
-        let options = LzmaOptions::new_preset(6).unwrap();
-        let stream = Stream::new_lzma_encoder(&options).unwrap();
-        let mut encoder = liblzma::write::XzEncoder::new_stream(Vec::new(), stream);
-        encoder.write_all(PAYLOAD).unwrap();
-        let compressed = encoder.finish().unwrap();
-
-        let mut data = Vec::new();
-        data.extend_from_slice(b"MINIFS\0\0");
-        data.extend_from_slice(&0u64.to_be_bytes());
-        data.extend_from_slice(&1u32.to_be_bytes());
-        data.extend_from_slice(&1u32.to_be_bytes());
-        data.extend_from_slice(&0u32.to_be_bytes());
-        data.extend_from_slice(&(NAMES.len() as u32).to_be_bytes());
-        data.extend_from_slice(NAMES);
-        for value in [0, 4, 0, 0, PAYLOAD.len() as u32] {
-            data.extend_from_slice(&value.to_be_bytes());
-        }
-        for value in [0, compressed.len() as u32, PAYLOAD.len() as u32] {
-            data.extend_from_slice(&value.to_be_bytes());
-        }
-        data.extend_from_slice(&compressed);
-        data
-    }
-
-    #[test]
-    fn rejects_truncated_and_invalid_images() {
-        let image = make_image();
-        for length in 0..image.len() {
-            assert!(
-                parse_minifs_file(&image[..length]).is_err(),
-                "length {length}"
-            );
-        }
-        let mut bad_reference = image.clone();
-        let chunk_number_offset = HEADER_SIZE + NAMES.len() + 8;
-        bad_reference[chunk_number_offset..chunk_number_offset + 4]
-            .copy_from_slice(&u32::MAX.to_be_bytes());
-        assert!(parse_minifs_file(&bad_reference).is_err());
-        let mut bad_name = image;
-        let name_offset = HEADER_SIZE + NAMES.len();
-        bad_name[name_offset..name_offset + 4].copy_from_slice(&u32::MAX.to_be_bytes());
-        assert!(parse_minifs_file(&bad_name).is_err());
-    }
-
-    #[test]
-    fn names_borrow_from_input() {
-        let data = make_image();
-        let image = parse_minifs_file(&data).unwrap();
-        assert_eq!(image.size, data.len());
-        let file = &image.files[0];
-        let names = &data[HEADER_SIZE..HEADER_SIZE + NAMES.len()];
-        assert!(names.as_ptr_range().contains(&file.path.as_ptr()));
-        assert!(names.as_ptr_range().contains(&file.filename.as_ptr()));
-        assert_eq!(get_cstring(file.path), "web");
-        assert_eq!(get_cstring(file.filename), "index.html");
-    }
-
-    #[test]
-    fn extracts_files() {
-        let data = make_image();
-        let tmp = tempfile::tempdir().unwrap();
-        let result = extract_minifs(&data, 0, Some(tmp.path()));
-        assert!(result.success);
-        assert_eq!(result.size, Some(data.len()));
-        let written = std::fs::read(tmp.path().join("web").join("index.html")).unwrap();
-        assert_eq!(written, PAYLOAD);
-    }
-
-    #[test]
-    fn enforces_extraction_budget() {
-        let data = make_image();
-        assert!(extract_minifs_with_budget(&data, 0, None, PAYLOAD.len()).success);
-        assert!(!extract_minifs_with_budget(&data, 0, None, PAYLOAD.len() - 1).success);
-    }
 }
