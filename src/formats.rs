@@ -55,6 +55,7 @@ pub mod lzop;
 pub mod matter_ota;
 pub mod mbr;
 pub mod mh01;
+pub mod minifs;
 pub mod ntfs;
 pub mod openssl;
 pub mod packimg;

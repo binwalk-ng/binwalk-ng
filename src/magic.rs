@@ -138,6 +138,17 @@ pub fn patterns() -> Vec<signatures::Signature> {
             description: formats::uimage::DESCRIPTION.to_string(),
             extractor: Some(formats::uimage::uimage_extractor()),
         },
+        // Minifs filesystem
+        signatures::Signature {
+            name: "minifs".to_string(),
+            short: false,
+            magic_offset: 0,
+            always_display: false,
+            magic: formats::minifs::minifs_magic(),
+            parser: formats::minifs::minifs_parser,
+            description: formats::minifs::DESCRIPTION.to_string(),
+            extractor: Some(formats::minifs::minifs_extractor()),
+        },
         // packimg header
         signatures::Signature {
             name: "packimg".to_string(),
