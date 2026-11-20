@@ -56,17 +56,7 @@ memchr = "2.8.3"
 memchr-n = "0.1.8"
 memmap2 = "0.9.9"
 miniz_oxide = "0.9.1"
-plotters = {
-  version = "0.3.7",
-  default-features = false,
-  features = [
-    "ab_glyph",
-    "bitmap_backend",
-    "bitmap_encoder",
-    "line_series",
-  ],
-  optional = true
-}
+plotters = { version = "0.3.7", default-features = false, features = ["ab_glyph", "bitmap_backend", "bitmap_encoder", "line_series"], optional = true }
 qnx-ifs = "0.2.0"
 rars = "0.13.0"
 rayon = "1.12"
