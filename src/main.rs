@@ -43,7 +43,7 @@ fn main() -> ExitCode {
     env_logger::Builder::from_env(env_logger::Env::default())
         .format(|buf, record| {
             use std::io::Write;
-            let timestamp = jiff::Zoned::now().strftime("%Y-%m-%dT%H:%M:%S%:z");
+            let timestamp = jiff::ZonedDateTime::now().strftime("%Y-%m-%dT%H:%M:%S%:z");
             writeln!(
                 buf,
                 "[{} {} {}] {}",

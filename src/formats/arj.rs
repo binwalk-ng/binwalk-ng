@@ -108,7 +108,7 @@ fn dos_datetime_to_epoch(dos: u32) -> Option<i64> {
     let time = jiff::civil::Time::new(hour, minute, second, 0).ok()?;
     Some(
         jiff::civil::DateTime::from_parts(date, time)
-            .to_zoned(jiff::tz::TimeZone::UTC)
+            .to_zoned_datetime(jiff::tz::TimeZone::UTC)
             .ok()?
             .timestamp()
             .as_second(),

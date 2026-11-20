@@ -7,75 +7,90 @@ license = "MIT"
 readme = "CARGO_README.md"
 repository = "https://github.com/binwalk-ng/binwalk-ng"
 description = "Analyzes data for embedded file types"
-keywords = ["binwalk", "firmware", "analysis"]
+keywords = ["analysis", "binwalk", "firmware"]
 categories = [
-    "security",
-    "command-line-utilities",
-    "parser-implementations",
-    "filesystem",
+  "command-line-utilities",
+  "filesystem",
+  "parser-implementations",
+  "security",
 ]
-
-[lints.clippy]
-redundant_type_annotations = "warn"
-redundant_clone = "warn"
-redundant_as_str = "warn"
-panic = "warn"
-nursery = "warn"
 
 [features]
 default = ["entropy-plot"]
-entropy-plot = ["dep:entropy", "dep:plotters", "dep:dejavu"]
+entropy-plot = ["dep:dejavu", "dep:entropy", "dep:plotters"]
+
+[lib]
+bench = false
+
+[[bin]]
+bench = false
+name = "binwalk"
+path = "src/main.rs"
+
+[[bench]]
+harness = false
+name = "gungraun"
 
 [dependencies]
-log = "0.4.34"
+adler2 = "2.0.1"
+aho-corasick = "1.1.5"
 base64 = "0.23.1"
-walkdir = "2.5.0"
-entropy = { version = "0.4.3", optional = true }
-colored = "3.1.1"
-terminal_size = "0.4.4"
-crc32fast = "1.5.2"
-crc32c = "0.6.8"
-liblzma = "0.4.8"
 bzip2 = "0.6.1"
-lzfse = "0.2.0"
-rayon = "1.12"
-serde_json = "1.0.151"
+clap = { version = "4.6.7", features = ["derive"] }
+colored = "3.1.1"
+crc32c = "0.6.8"
+crc32fast = "1.5.2"
+dejavu = { version = "2.37.0", optional = true }
+delink-ng = { version = "0.2.1", default-features = false }
+entropy = { version = "0.4.3", optional = true }
 env_logger = "0.11.11"
 flate2 = "1.1.10"
-adler2 = "2.0.1"
+hex = "0.4.3"
+jiff = "1.0.1"
+liblzma = "0.4.8"
+log = "0.4.34"
+lz4_flex = "0.14.0"
+lzfse = "0.2.0"
 md-5 = "0.11.0"
-miniz_oxide = "0.9.1"
-aho-corasick = "1.1.5"
 memchr = "2.8.3"
 memchr-n = "0.1.8"
-qnx-ifs = "0.2.0"
-serde = { version = "1.0.229", features = ["derive"] }
-clap = { version = "4.6.7", features = ["derive"] }
-xxhash-rust = { version = "0.8.19", features = ["xxh32"] }
-hex = "0.4.3"
-delink-ng = { version = "0.2.1", default-features = false }
-plotters = { version = "0.3.7", default-features = false, features = [
-    "bitmap_backend",
-    "bitmap_encoder",
-    "line_series",
-    "ab_glyph",
-], optional = true }
-dejavu = { version = "2.37.0", optional = true }
-jiff = "0.2.20"
-zerocopy = { version = "0.8.28", features = ["derive"] }
-u24 = "0.6.0"
-rars = "0.12.3"
-tar = "0.4"
-zstd = "0.14.0"
-lz4_flex = "0.14.0"
 memmap2 = "0.9.9"
+miniz_oxide = "0.9.1"
+plotters = { version = "0.3.7", default-features = false, features = ["ab_glyph", "bitmap_backend", "bitmap_encoder", "line_series"], optional = true }
+qnx-ifs = "0.2.0"
+rars = "0.13.0"
+rayon = "1.12"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tar = "0.4"
+terminal_size = "0.4.4"
+u24 = "0.6.0"
+walkdir = "2.5.0"
+xxhash-rust = { version = "0.8.19", features = ["xxh32"] }
+zerocopy = { version = "0.8.28", features = ["derive"] }
+zstd = "0.14.0"
 
 [dependencies.uuid]
 version = "1.23.4"
 features = [
-    "v4",       # Lets you generate random UUIDs
-    "fast-rng", # Use a faster (but still sufficiently random) RNG
+  "fast-rng",  # Use a faster (but still sufficiently random) RNG
+  "v4",  # Lets you generate random UUIDs
 ]
+
+[dev-dependencies]
+gungraun = "0.20.0"
+insta = { version = "1.48", features = ["redactions", "yaml"] }
+tempfile = "3.27.0"
+
+[lints.clippy]
+nursery = "warn"
+panic = "warn"
+redundant_as_str = "warn"
+redundant_clone = "warn"
+redundant_type_annotations = "warn"
+
+[profile.bench]
+debug = true
 
 [profile.dev.package.insta]
 opt-level = 3
@@ -85,23 +100,3 @@ opt-level = 3
 
 [profile.release]
 lto = true
-
-[profile.bench]
-debug = true
-
-[[bin]]
-name = "binwalk"
-path = "src/main.rs"
-bench = false
-
-[lib]
-bench = false
-
-[[bench]]
-name = "gungraun"
-harness = false
-
-[dev-dependencies]
-tempfile = "3.27.0"
-insta = { version = "1.48", features = ["yaml", "redactions"] }
-gungraun = "0.20.0"

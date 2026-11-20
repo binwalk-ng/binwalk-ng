@@ -313,8 +313,7 @@ mod tests {
             rars::ArchiveVersion::Rar29,
             rars::FeatureSet::store_only(),
         );
-        let mut bytes = rars::rar15_40::write_stored_archive(&entries, opts).unwrap();
-        bytes.extend_from_slice(RAR4_EOF);
+        let bytes = rars::rar15_40::write_stored_archive(&entries, opts).unwrap();
         let result = rar_parser(&bytes, 0).unwrap();
         assert_eq!(result.size, bytes.len());
         assert_eq!(result.confidence, CONFIDENCE_MEDIUM);
@@ -360,8 +359,7 @@ mod tests {
             rars::ArchiveVersion::Rar29,
             rars::FeatureSet::store_only(),
         );
-        let mut rar_bytes = rars::rar15_40::write_stored_archive(&entries, opts).unwrap();
-        rar_bytes.extend_from_slice(RAR4_EOF);
+        let rar_bytes = rars::rar15_40::write_stored_archive(&entries, opts).unwrap();
         let mut container = b"LEADING_JUNK".to_vec();
         container.extend_from_slice(&rar_bytes);
         let result = rar_parser(&container, 12).unwrap();
@@ -384,8 +382,7 @@ mod tests {
             rars::ArchiveVersion::Rar29,
             rars::FeatureSet::store_only(),
         );
-        let mut bytes = rars::rar15_40::write_stored_archive(&entries, opts).unwrap();
-        bytes.extend_from_slice(RAR4_EOF);
+        let bytes = rars::rar15_40::write_stored_archive(&entries, opts).unwrap();
         let result = extract_rar(&bytes, 0, None);
         assert!(result.success);
         assert_eq!(result.size, Some(bytes.len()));
@@ -496,8 +493,7 @@ mod tests {
             rars::ArchiveVersion::Rar29,
             rars::FeatureSet::store_only(),
         );
-        let mut bytes = rars::rar15_40::write_stored_archive(&entries, opts).unwrap();
-        bytes.extend_from_slice(RAR4_EOF);
+        let bytes = rars::rar15_40::write_stored_archive(&entries, opts).unwrap();
         let dir = tempfile::tempdir().unwrap();
         let result = extract_rar(&bytes, 0, Some(dir.path()));
         assert!(result.success);
