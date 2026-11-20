@@ -287,7 +287,17 @@ fn extract_ntfs_directory<R: Read + Seek>(
 
         let path = output_path.join(name);
 
-        if file_name.flags & FILE_ATTRIBUTE_DIRECTORY != 0 {
+        if file_name.flags & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            // Reparse-point data (junctions, directory/file symlinks, mount
+            // points, etc.) lives in a separate attribute that ntfs-core does
+            // not expose; recreating the target faithfully is not possible.
+            // Directory reparse points also carry FILE_ATTRIBUTE_DIRECTORY, so
+            // check this before treating the entry as an ordinary directory.
+            warn!(
+                "Skipping NTFS reparse point {}: target data is not exposed",
+                path.display()
+            );
+        } else if file_name.flags & FILE_ATTRIBUTE_DIRECTORY != 0 {
             if chroot.create_directory(&path) {
                 extract_ntfs_directory(
                     filesystem,
@@ -302,13 +312,6 @@ fn extract_ntfs_directory<R: Read + Seek>(
                 error!("Failed to create NTFS directory {}", path.display());
                 *success = false;
             }
-        } else if file_name.flags & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-            // Reparse-point data lives in a separate attribute that ntfs-core
-            // does not expose; recreating the link faithfully is not possible.
-            warn!(
-                "Skipping NTFS reparse point {}: target data is not exposed",
-                path.display()
-            );
         } else {
             // `read_data_by_record` follows $ATTRIBUTE_LIST fragments and
             // decompresses compressed $DATA.
