@@ -360,10 +360,65 @@ pub fn extract_dtb(
                     // Update offsets to parse the next DTB structure entry
                     previous_entry_offset = Some(entry_offset);
                     entry_offset += node.total_size;
+                } else {
+                    // The node token or the property header does not fit in the data.
+                    // Stop here, because the offset does not move, and the loop then parses the same entry again with no end.
+                    break;
                 }
             }
         }
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Returns a version 17 DTB with the given structure block and no strings.
+    /// The memory reservation block, the strings block and the structure block all start right after the header.
+    fn dtb_with_struct(dt_struct: &[u8]) -> Vec<u8> {
+        const HEADER_SIZE: u32 = 40;
+        let struct_size = dt_struct.len() as u32;
+
+        let mut dtb = Vec::new();
+        dtb.extend_from_slice(b"\xD0\x0D\xFE\xED"); // magic
+        dtb.extend_from_slice(&(HEADER_SIZE + struct_size).to_be_bytes()); // total_size
+        dtb.extend_from_slice(&HEADER_SIZE.to_be_bytes()); // dt_struct_offset
+        dtb.extend_from_slice(&HEADER_SIZE.to_be_bytes()); // dt_strings_offset
+        dtb.extend_from_slice(&HEADER_SIZE.to_be_bytes()); // mem_reservation_block_offset
+        dtb.extend_from_slice(&17u32.to_be_bytes()); // version
+        dtb.extend_from_slice(&16u32.to_be_bytes()); // min_compatible_version
+        dtb.extend_from_slice(&0u32.to_be_bytes()); // cpu_id
+        dtb.extend_from_slice(&0u32.to_be_bytes()); // dt_strings_size
+        dtb.extend_from_slice(&struct_size.to_be_bytes()); // dt_struct_size
+        dtb.extend_from_slice(dt_struct);
+        dtb
+    }
+
+    /// The structure block ends 2 bytes into a node token.
+    /// parse_dtb_node fails, and the extractor used to parse the same entry again forever.
+    /// The Cargo test runner has no timeout for each test, so a regression shows as a test that does not end.
+    #[test]
+    fn truncated_node_token_does_not_hang_extraction() {
+        let dtb = dtb_with_struct(&[0x00, 0x00]);
+        assert!(parse_dtb_header(&dtb).is_ok());
+
+        let result = extract_dtb(&dtb, 0, None);
+        assert!(!result.success);
+    }
+
+    /// The structure block ends after an FDT_PROP token and 4 of the 8 bytes of the property header.
+    #[test]
+    fn truncated_property_header_does_not_hang_extraction() {
+        let dtb = dtb_with_struct(&[
+            0x00, 0x00, 0x00, 0x03, // FDT_PROP
+            0x00, 0x00, 0x00, 0x00, // data_len, with no name_offset after it
+        ]);
+        assert!(parse_dtb_header(&dtb).is_ok());
+
+        let result = extract_dtb(&dtb, 0, None);
+        assert!(!result.success);
+    }
 }
