@@ -210,7 +210,6 @@ pub fn extract_ntfs(
     extract_ntfs_directory(
         &filesystem,
         NTFS_ROOT_RECORD,
-        image_size,
         &chroot,
         Path::new("rootfs"),
         &mut visited_directories,
@@ -225,7 +224,6 @@ pub fn extract_ntfs(
 fn extract_ntfs_directory<R: Read + Seek>(
     filesystem: &NtfsFs<R>,
     record_number: u64,
-    image_size: usize,
     chroot: &Chroot,
     output_path: &Path,
     visited_directories: &mut HashSet<u64>,
@@ -302,7 +300,6 @@ fn extract_ntfs_directory<R: Read + Seek>(
                 extract_ntfs_directory(
                     filesystem,
                     child_record,
-                    image_size,
                     chroot,
                     &path,
                     visited_directories,
@@ -315,7 +312,7 @@ fn extract_ntfs_directory<R: Read + Seek>(
         } else {
             // `read_data_by_record` follows $ATTRIBUTE_LIST fragments and
             // decompresses compressed $DATA.
-            match filesystem.read_data_by_record(child_record, None, image_size as u64) {
+            match filesystem.read_data_by_record(child_record, None, u64::MAX) {
                 Ok(data) => {
                     if !chroot.create_file(&path, &data) {
                         error!("Failed to extract NTFS file {}", path.display());

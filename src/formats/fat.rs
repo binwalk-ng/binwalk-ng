@@ -215,13 +215,15 @@ pub fn extract_fat(
     }
 
     let mut success = true;
-    let mut visited_directories = HashSet::new();
+    let mut visited_directory_clusters = HashSet::new();
+    let mut visited_directory_entries = HashSet::new();
     extract_fat_directory(
         &filesystem,
         filesystem.root(),
         &chroot,
         Path::new("rootfs"),
-        &mut visited_directories,
+        &mut visited_directory_clusters,
+        &mut visited_directory_entries,
         &mut success,
     );
 
@@ -235,7 +237,8 @@ fn extract_fat_directory<R: Read + Seek>(
     directory: FileId,
     chroot: &Chroot,
     output_path: &Path,
-    visited_directories: &mut HashSet<(u32, u16)>,
+    visited_directory_clusters: &mut HashSet<u32>,
+    visited_directory_entries: &mut HashSet<(u32, u16)>,
     success: &mut bool,
 ) {
     let entries = match filesystem.read_dir(directory) {
@@ -274,12 +277,20 @@ fn extract_fat_directory<R: Read + Seek>(
         let path = output_path.join(name);
 
         if entry.is_dir {
-            // A corrupt image can point a directory entry at an ancestor; track
-            // visited entry ids so the walk always terminates.
+            // A corrupt image can point a directory entry at an ancestor or
+            // reuse the same directory cluster via multiple entries. Track
+            // visited directory targets so the walk terminates and avoids
+            // redundant traversal. Cluster 0 denotes an empty (unclustered)
+            // directory, so distinct empty directories must not share a key.
             let FileId::Entry { dir_cluster, index } = entry.id else {
                 continue;
             };
-            if !visited_directories.insert((dir_cluster, index)) {
+            let cycle = if entry.first_cluster >= 2 {
+                !visited_directory_clusters.insert(entry.first_cluster)
+            } else {
+                !visited_directory_entries.insert((dir_cluster, index))
+            };
+            if cycle {
                 warn!(
                     "Skipping FAT directory cycle at {} ({})",
                     path.display(),
@@ -294,7 +305,8 @@ fn extract_fat_directory<R: Read + Seek>(
                     entry.id,
                     chroot,
                     &path,
-                    visited_directories,
+                    visited_directory_clusters,
+                    visited_directory_entries,
                     success,
                 );
             } else {
@@ -311,6 +323,7 @@ fn extract_fat_directory<R: Read + Seek>(
                             entry.size,
                             data.len()
                         );
+                        *success = false;
                     }
                     if !chroot.create_file(&path, &data) {
                         error!("Failed to extract FAT file {}", path.display());

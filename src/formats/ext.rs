@@ -59,9 +59,9 @@ pub fn ext_parser(file_data: &[u8], offset: usize) -> Result<SignatureResult, Si
             ext_header.os,
             ext_header.inodes_count,
             ext_header.block_size,
+            ext_header.blocks_count,
             ext_header.free_blocks_count,
             ext_header.reserved_blocks_count,
-            ext_header.blocks_count,
             result.size
         );
         return Ok(result);
@@ -219,21 +219,23 @@ pub fn extract_ext(
         return result;
     };
 
-    let chroot = Chroot::new(output_directory);
-    if !chroot.create_directory(Path::new("rootfs")) {
-        error!("Failed to create the EXT output directory");
+    let rootfs = output_directory.join("rootfs");
+    if let Err(e) = std::fs::create_dir_all(&rootfs) {
+        error!("Failed to create the EXT output directory: {e}");
         return result;
     }
+    let chroot = Chroot::new(&rootfs);
 
     let mut walker = ExtWalker {
         filesystem: &mut filesystem,
         image_size,
+        block_size: header.block_size,
         chroot: &chroot,
         visited_directories: HashSet::from([EXT_ROOT_INODE]),
         directory_metadata: Vec::new(),
         success: true,
     };
-    walker.extract_directory(EXT_ROOT_INODE, Path::new("rootfs"));
+    walker.extract_directory_contents(EXT_ROOT_INODE, Path::new(""));
 
     // Restore directory metadata deepest-first so a restrictive parent mode does
     // not block chmod/chown on its children.
@@ -257,6 +259,7 @@ pub fn extract_ext(
 struct ExtWalker<'a, R: Read + Seek> {
     filesystem: &'a mut Ext4Fs<R>,
     image_size: usize,
+    block_size: usize,
     chroot: &'a Chroot,
     visited_directories: HashSet<u64>,
     directory_metadata: Vec<(PathBuf, u32, u32, u32)>,
@@ -264,7 +267,7 @@ struct ExtWalker<'a, R: Read + Seek> {
 }
 
 impl<R: Read + Seek> ExtWalker<'_, R> {
-    fn extract_directory(&mut self, directory_inode: u64, output_path: &Path) {
+    fn extract_directory_contents(&mut self, directory_inode: u64, output_path: &Path) {
         let entries = match self.filesystem.read_dir_by_ino(directory_inode) {
             Ok(entries) => entries,
             Err(e) => {
@@ -307,7 +310,7 @@ impl<R: Read + Seek> ExtWalker<'_, R> {
             };
             let file_type = inode.file_type();
 
-            // Match `tsk_recover -a`: extract only allocated inodes.
+            // Extract only allocated inodes.
             let allocated = match self.filesystem.is_inode_allocated(inode_number) {
                 Ok(allocated) => allocated,
                 Err(e) => {
@@ -344,7 +347,7 @@ impl<R: Read + Seek> ExtWalker<'_, R> {
                             inode.uid,
                             inode.gid,
                         ));
-                        self.extract_directory(inode_number, &path);
+                        self.extract_directory_contents(inode_number, &path);
                     }
                     created
                 }
@@ -362,6 +365,7 @@ impl<R: Read + Seek> ExtWalker<'_, R> {
                         inode_number,
                         inode.size,
                         self.image_size,
+                        self.block_size,
                     ) {
                         Ok(data) => self.chroot.create_file(&path, &data),
                         Err(e) => {
@@ -416,30 +420,30 @@ impl<R: Read + Seek> ExtWalker<'_, R> {
     }
 }
 
-/// Read file data in bounded windows.
+/// Read file data in filesystem-block-sized windows, preserving sparse holes.
 ///
-/// `Ext4Fs::read_inode_data` concatenates the mapped blocks and therefore loses
-/// sparse holes, so read through `read_inode_data_range` and zero-fill the
-/// unmapped tail of each window instead.
+/// Reading one logical block at a time keeps each range either fully mapped or
+/// a hole, so unmapped regions can be zero-filled without dropping later data.
 fn read_ext_file<R: Read + Seek>(
     filesystem: &mut Ext4Fs<R>,
     inode_number: u64,
     claimed_size: u64,
     image_size: usize,
+    block_size: usize,
 ) -> ext4fs::error::Result<Vec<u8>> {
     // Bytes past the end of the image can only be sparse holes; capping also
     // stops a corrupt size field from driving an unbounded extraction.
     let size = claimed_size.min(image_size as u64);
     let mut data = Vec::new();
     let mut offset = 0u64;
+    let window = block_size.clamp(1, EXT_READ_CHUNK as usize);
 
     while offset < size {
-        let want = (size - offset).min(EXT_READ_CHUNK) as usize;
+        let want = ((size - offset) as usize).min(window);
         let chunk = filesystem.read_inode_data_range(inode_number, offset, want)?;
         data.extend_from_slice(&chunk);
         if chunk.len() < want {
-            // `read_inode_data_range` stops at the last mapped byte; the rest of
-            // this window is a hole and reads as zero.
+            // Bytes not returned for this window are a sparse hole.
             data.resize(data.len() + (want - chunk.len()), 0);
         }
         offset += want as u64;
