@@ -1,6 +1,5 @@
 ---
 source: tests/common/mod.rs
-assertion_line: 68
 expression: results.file_map
 ---
 - offset: 0
@@ -8,6 +7,6 @@ expression: results.file_map
   size: 2097152
   name: ext
   confidence: 128
-  description: "EXT filesystem for Linux, inodes: 256, block size: 4096, block count: 379, free blocks: 25, reserved blocks: 512, total size: 2097152 bytes"
+  description: "EXT filesystem for Linux, inodes: 256, block size: 4096, block count: 512, free blocks: 379, reserved blocks: 25, total size: 2097152 bytes"
   always_display: false
   extraction_declined: false

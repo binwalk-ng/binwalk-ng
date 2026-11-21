@@ -44,6 +44,8 @@ dejavu = { version = "2.37.0", optional = true }
 delink-ng = { version = "0.2.1", default-features = false }
 entropy = { version = "0.4.3", optional = true }
 env_logger = "0.11.11"
+ext4fs-core = { version = "0.2.8", default-features = false }
+fat-core = "0.2.0"
 flate2 = "1.1.10"
 hex = "0.4.3"
 jiff = "1.0.1"
@@ -56,6 +58,7 @@ memchr = "2.8.3"
 memchr-n = "0.1.8"
 memmap2 = "0.9.9"
 miniz_oxide = "0.9.1"
+ntfs-core = "0.10.0"
 plotters = { version = "0.3.7", default-features = false, features = ["ab_glyph", "bitmap_backend", "bitmap_encoder", "line_series"], optional = true }
 qnx-ifs = "0.2.0"
 rars = "0.13.0"

@@ -12,11 +12,18 @@ All notable changes to binwalk-ng are recorded here. Versions up to and includin
   [`qnx-ifs`](https://crates.io/crates/qnx-ifs) crate. The public
   `extractors::dumpifs` module and the
   `formats::qnx::IFSHeader`/`parse_ifs_header` helpers are removed.
+- **EXT, FAT, and NTFS extraction is now internal.** The external `tsk_recover`
+  (sleuthkit) utility is no longer used; these filesystems are parsed and
+  extracted in-process with the `ext4fs-core`, `fat-core`, and `ntfs-core`
+  crates. The public `extractors::tsk` module is removed.
 
 ### Features
 
 - QNX IFS images are detected and extracted without external tools, including
   bootable images, compressed images, and bare `imagefs` filesystems.
+- EXT2/3/4, FAT12/16/32, and NTFS filesystems are detected and extracted
+  without external tools. The `sleuthkit` system dependency is no longer
+  required.
 
 ## 4.0.0 — 2026-09-29
 

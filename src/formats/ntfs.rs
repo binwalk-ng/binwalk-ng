@@ -1,6 +1,30 @@
+use crate::extractors::{self, Chroot, ExtractionResult};
 use crate::signatures::{CONFIDENCE_MEDIUM, SignatureError, SignatureResult};
 use crate::structures::StructureError;
+use log::{debug, error, warn};
+use ntfs_core::NtfsFs;
+use std::collections::HashSet;
+use std::io::{Cursor, Read, Seek};
+use std::path::Path;
 use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
+
+/// The MFT record number of the NTFS root directory.
+const NTFS_ROOT_RECORD: u64 = 5;
+
+/// Directory flag in `$FILE_NAME` flags. ntfs-core reports the index-present
+/// bit (0x1000_0000), not the DOS `FILE_ATTRIBUTE_DIRECTORY` value (0x10).
+const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x1000_0000;
+
+/// `FILE_ATTRIBUTE_REPARSE_POINT`
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+
+/// Explicit extraction budget for a single NTFS data stream.
+const MAX_NTFS_FILE_BYTES: u64 = 1 << 40; // 1 TiB
+
+/// MFT records below this number are reserved for NTFS metadata files such as
+/// `$MFT`, `$Bitmap`, and `$Extend`. They describe the volume itself rather
+/// than user data, so extraction leaves them out.
+const FIRST_USER_MFT_RECORD: u64 = 16;
 
 /// Human readable description
 pub const DESCRIPTION: &str = "NTFS partition";
@@ -101,4 +125,248 @@ pub fn parse_ntfs_header(ntfs_data: &[u8]) -> Result<NTFSPartition, StructureErr
     }
 
     Err(StructureError)
+}
+
+/// Defines the internal extractor for NTFS filesystems.
+///
+/// ```
+/// use binwalk_ng::extractors::ExtractorType;
+/// use binwalk_ng::formats::ntfs::ntfs_extractor;
+///
+/// match ntfs_extractor().utility {
+///     ExtractorType::Internal(_) => {}
+///     _ => panic!("NTFS extractor should be internal"),
+/// }
+/// ```
+pub fn ntfs_extractor() -> extractors::Extractor {
+    extractors::Extractor {
+        utility: extractors::ExtractorType::Internal(extract_ntfs),
+        ..Default::default()
+    }
+}
+
+/// Unpack an NTFS volume into `rootfs/` under `output_directory`.
+///
+/// When `output_directory` is `None`, the filesystem is opened but no contents are
+/// extracted or traversed.
+pub fn extract_ntfs(
+    file_data: &[u8],
+    offset: usize,
+    output_directory: Option<&Path>,
+) -> ExtractionResult {
+    let mut result = ExtractionResult::default();
+
+    let Some(ntfs_data) = file_data.get(offset..) else {
+        error!("NTFS extractor received invalid offset {offset:#X}");
+        return result;
+    };
+    let Ok(header) = parse_ntfs_header(ntfs_data) else {
+        error!("Failed to parse NTFS boot sector at offset {offset:#X}");
+        return result;
+    };
+
+    // The boot sector's sector count excludes the boot sector itself.
+    let Some(image_size) = header
+        .sector_count
+        .checked_add(1)
+        .and_then(|sectors| (header.sector_size as usize).checked_mul(sectors as usize))
+    else {
+        error!("NTFS image at offset {offset:#X} reports an overflowing size");
+        return result;
+    };
+    if image_size == 0 {
+        error!("NTFS image at offset {offset:#X} reports a zero size");
+        return result;
+    }
+
+    let Some(image_end) = offset.checked_add(image_size) else {
+        error!("NTFS image range overflows at offset {offset:#X}");
+        return result;
+    };
+    let Some(image_data) = file_data.get(offset..image_end) else {
+        error!("NTFS image at offset {offset:#X} extends past the end of the file");
+        return result;
+    };
+
+    let filesystem = match NtfsFs::open(Cursor::new(image_data)) {
+        Ok(filesystem) => filesystem,
+        Err(e) => {
+            error!("Failed to load NTFS filesystem at offset {offset:#X}: {e}");
+            return result;
+        }
+    };
+    result.size = Some(image_size);
+
+    let Some(output_directory) = output_directory else {
+        result.success = true;
+        return result;
+    };
+
+    let chroot = Chroot::new(output_directory);
+    if !chroot.create_directory(Path::new("rootfs")) {
+        error!("Failed to create the NTFS output directory");
+        return result;
+    }
+
+    let mut success = true;
+    let mut visited_directories = HashSet::new();
+
+    extract_ntfs_directory(
+        &filesystem,
+        NTFS_ROOT_RECORD,
+        &chroot,
+        Path::new("rootfs"),
+        &mut visited_directories,
+        &mut success,
+    );
+
+    result.success = success;
+    result
+}
+
+/// Best-effort current logical size for an unnamed `$DATA` stream.
+///
+/// Prefers the size from the base MFT record's `$DATA` attribute over the
+/// directory-entry `$FILE_NAME` size, which can be stale for hard links.
+fn current_data_size<R: Read + Seek>(filesystem: &NtfsFs<R>, record_number: u64) -> Option<u64> {
+    const DATA_ATTR_TYPE: u32 = 0x80;
+
+    let record = filesystem.read_record(record_number).ok()?;
+    if record.len() < 22 {
+        return None;
+    }
+    let first_attr_offset = u16::from_le_bytes([record[20], record[21]]) as usize;
+    let attrs = ntfs_core::parse_attributes(&record, first_attr_offset).ok()?;
+    for attr in attrs {
+        if attr.type_code != DATA_ATTR_TYPE || attr.name.is_some() {
+            continue;
+        }
+        return Some(match attr.body {
+            ntfs_core::AttributeBody::Resident { content_length, .. } => u64::from(content_length),
+            ntfs_core::AttributeBody::NonResident { real_size, .. } => real_size,
+        });
+    }
+
+    None
+}
+
+/// Recursively extract one NTFS directory, addressed by MFT record number.
+fn extract_ntfs_directory<R: Read + Seek>(
+    filesystem: &NtfsFs<R>,
+    record_number: u64,
+    chroot: &Chroot,
+    output_path: &Path,
+    visited_directories: &mut HashSet<u64>,
+    success: &mut bool,
+) {
+    // A corrupt or hostile index could point a directory at an ancestor. Track
+    // visited directory records so the walk always terminates.
+    if !visited_directories.insert(record_number) {
+        warn!(
+            "Skipping NTFS directory cycle at MFT record {record_number} ({})",
+            output_path.display()
+        );
+        return;
+    }
+
+    let record = match filesystem.read_record(record_number) {
+        Ok(record) => record,
+        Err(e) => {
+            error!(
+                "Failed to read NTFS directory MFT record {record_number} ({}): {e}",
+                output_path.display()
+            );
+            *success = false;
+            return;
+        }
+    };
+    let entries = match filesystem.directory_entries(&record) {
+        Ok(entries) => entries,
+        Err(e) => {
+            error!(
+                "Failed to read NTFS directory entries for {}: {e}",
+                output_path.display()
+            );
+            *success = false;
+            return;
+        }
+    };
+
+    for entry in entries {
+        let Some(file_name) = entry.file_name else {
+            continue;
+        };
+
+        // Each file commonly also has a short DOS 8.3 name; extracting both
+        // would duplicate every entry that has a long name.
+        if file_name.is_dos_namespace() {
+            continue;
+        }
+
+        let name = file_name.name.as_str();
+        if name.is_empty() || name == "." || name == ".." {
+            continue;
+        }
+        let child_record = entry.file_reference.record_number;
+        if child_record < FIRST_USER_MFT_RECORD {
+            debug!("Skipping NTFS metadata file {name} (MFT record {child_record})");
+            continue;
+        }
+
+        let path = output_path.join(name);
+
+        if file_name.flags & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            // Reparse-point data (junctions, directory/file symlinks, mount
+            // points, etc.) lives in a separate attribute that ntfs-core does
+            // not expose; recreating the target faithfully is not possible.
+            // Directory reparse points also carry FILE_ATTRIBUTE_DIRECTORY, so
+            // check this before treating the entry as an ordinary directory.
+            warn!(
+                "Skipping NTFS reparse point {}: target data is not exposed",
+                path.display()
+            );
+        } else if file_name.flags & FILE_ATTRIBUTE_DIRECTORY != 0 {
+            if chroot.create_directory(&path) {
+                extract_ntfs_directory(
+                    filesystem,
+                    child_record,
+                    chroot,
+                    &path,
+                    visited_directories,
+                    success,
+                );
+            } else {
+                error!("Failed to create NTFS directory {}", path.display());
+                *success = false;
+            }
+        } else {
+            let data_size =
+                current_data_size(filesystem, child_record).unwrap_or(file_name.real_size);
+            if data_size > MAX_NTFS_FILE_BYTES {
+                error!(
+                    "NTFS file {} exceeds extraction limit ({} bytes > {} bytes)",
+                    path.display(),
+                    data_size,
+                    MAX_NTFS_FILE_BYTES
+                );
+                *success = false;
+                continue;
+            }
+
+            // `read_data_by_record` follows $ATTRIBUTE_LIST fragments and
+            // decompresses compressed $DATA.
+            match filesystem.read_data_by_record(child_record, None, MAX_NTFS_FILE_BYTES) {
+                Ok(data) => {
+                    if !chroot.create_file(&path, &data) {
+                        error!("Failed to extract NTFS file {}", path.display());
+                        *success = false;
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to read NTFS file {}: {e}", path.display());
+                    *success = false;
+                }
+            }
+        }
+    }
 }
