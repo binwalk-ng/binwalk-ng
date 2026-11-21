@@ -11,11 +11,15 @@ use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 /// The MFT record number of the NTFS root directory.
 const NTFS_ROOT_RECORD: u64 = 5;
 
-/// `FILE_ATTRIBUTE_DIRECTORY`
-const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+/// Directory flag in `$FILE_NAME` flags. ntfs-core reports the index-present
+/// bit (0x1000_0000), not the DOS `FILE_ATTRIBUTE_DIRECTORY` value (0x10).
+const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x1000_0000;
 
 /// `FILE_ATTRIBUTE_REPARSE_POINT`
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+
+/// Explicit extraction budget for a single NTFS data stream.
+const MAX_NTFS_FILE_BYTES: u64 = 1 << 40; // 1 TiB
 
 /// MFT records below this number are reserved for NTFS metadata files such as
 /// `$MFT`, `$Bitmap`, and `$Extend`. They describe the volume itself rather
@@ -310,9 +314,20 @@ fn extract_ntfs_directory<R: Read + Seek>(
                 *success = false;
             }
         } else {
+            if file_name.real_size > MAX_NTFS_FILE_BYTES {
+                error!(
+                    "NTFS file {} exceeds extraction limit ({} bytes > {} bytes)",
+                    path.display(),
+                    file_name.real_size,
+                    MAX_NTFS_FILE_BYTES
+                );
+                *success = false;
+                continue;
+            }
+
             // `read_data_by_record` follows $ATTRIBUTE_LIST fragments and
             // decompresses compressed $DATA.
-            match filesystem.read_data_by_record(child_record, None, u64::MAX) {
+            match filesystem.read_data_by_record(child_record, None, MAX_NTFS_FILE_BYTES) {
                 Ok(data) => {
                     if !chroot.create_file(&path, &data) {
                         error!("Failed to extract NTFS file {}", path.display());

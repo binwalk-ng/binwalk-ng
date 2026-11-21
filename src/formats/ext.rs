@@ -220,15 +220,14 @@ pub fn extract_ext(
     };
 
     let rootfs = output_directory.join("rootfs");
-    if let Err(e) = std::fs::create_dir_all(&rootfs) {
-        error!("Failed to create the EXT output directory: {e}");
+    if !Chroot::new(output_directory).create_directory(Path::new("rootfs")) {
+        error!("Failed to create the EXT output directory");
         return result;
     }
-    let chroot = Chroot::new(&rootfs);
 
+    let chroot = Chroot::new(&rootfs);
     let mut walker = ExtWalker {
         filesystem: &mut filesystem,
-        image_size,
         block_size: header.block_size,
         chroot: &chroot,
         visited_directories: HashSet::from([EXT_ROOT_INODE]),
@@ -258,7 +257,6 @@ pub fn extract_ext(
 
 struct ExtWalker<'a, R: Read + Seek> {
     filesystem: &'a mut Ext4Fs<R>,
-    image_size: usize,
     block_size: usize,
     chroot: &'a Chroot,
     visited_directories: HashSet<u64>,
@@ -352,21 +350,7 @@ impl<R: Read + Seek> ExtWalker<'_, R> {
                     created
                 }
                 FileType::RegularFile => {
-                    if inode.size > self.image_size as u64 {
-                        debug!(
-                            "EXT file {} claims {} bytes in a {}-byte image; extracting only the in-image range",
-                            path.display(),
-                            inode.size,
-                            self.image_size
-                        );
-                    }
-                    match read_ext_file(
-                        self.filesystem,
-                        inode_number,
-                        inode.size,
-                        self.image_size,
-                        self.block_size,
-                    ) {
+                    match read_ext_file(self.filesystem, inode_number, &inode, self.block_size) {
                         Ok(data) => self.chroot.create_file(&path, &data),
                         Err(e) => {
                             error!("Failed to read EXT file {}: {e}", path.display());
@@ -420,21 +404,49 @@ impl<R: Read + Seek> ExtWalker<'_, R> {
     }
 }
 
+/// Explicit extraction budget for a single EXT file. A corrupt or malicious
+/// size field can claim an absurd logical size; failing explicitly is better
+/// than silently truncating or attempting an unbounded allocation.
+const MAX_EXT_FILE_BYTES: u64 = 1 << 40; // 1 TiB
+
 /// Read file data in filesystem-block-sized windows, preserving sparse holes.
 ///
 /// Reading one logical block at a time keeps each range either fully mapped or
 /// a hole, so unmapped regions can be zero-filled without dropping later data.
+///
+/// Inline-data inodes are read whole: `read_inode_data_range` does not expose
+/// the `system.data` xattr overflow used for inline content > 60 bytes.
 fn read_ext_file<R: Read + Seek>(
     filesystem: &mut Ext4Fs<R>,
     inode_number: u64,
-    claimed_size: u64,
-    image_size: usize,
+    inode: &ext4fs::ondisk::Inode,
     block_size: usize,
 ) -> ext4fs::error::Result<Vec<u8>> {
-    // Bytes past the end of the image can only be sparse holes; capping also
-    // stops a corrupt size field from driving an unbounded extraction.
-    let size = claimed_size.min(image_size as u64);
+    let size = inode.size;
+    if size > MAX_EXT_FILE_BYTES {
+        return Err(ext4fs::error::Ext4Error::CorruptMetadata {
+            structure: "inode",
+            detail: format!("file size {size} exceeds extraction limit {MAX_EXT_FILE_BYTES} bytes"),
+        });
+    }
+    let size_usize =
+        usize::try_from(size).map_err(|_| ext4fs::error::Ext4Error::CorruptMetadata {
+            structure: "inode",
+            detail: format!("file size {size} does not fit addressable memory"),
+        })?;
+
+    if inode.has_inline_data() {
+        let mut data = filesystem.read_inode_data(inode_number)?;
+        data.truncate(size_usize);
+        return Ok(data);
+    }
+
     let mut data = Vec::new();
+    data.try_reserve_exact(size_usize)
+        .map_err(|_| ext4fs::error::Ext4Error::CorruptMetadata {
+            structure: "inode",
+            detail: format!("cannot allocate {size} bytes for extracted file"),
+        })?;
     let mut offset = 0u64;
     let window = block_size.clamp(1, EXT_READ_CHUNK as usize);
 
