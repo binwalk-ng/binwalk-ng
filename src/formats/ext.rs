@@ -5,7 +5,7 @@ use ext4fs::Ext4Fs;
 use ext4fs::ondisk::FileType;
 use log::{debug, error, warn};
 use std::collections::HashSet;
-use std::io::{Cursor, Read, Seek};
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 
@@ -350,10 +350,17 @@ impl<R: Read + Seek> ExtWalker<'_, R> {
                     created
                 }
                 FileType::RegularFile => {
-                    match read_ext_file(self.filesystem, inode_number, &inode, self.block_size) {
-                        Ok(data) => self.chroot.create_file(&path, &data),
+                    match write_ext_file(
+                        self.filesystem,
+                        inode_number,
+                        &inode,
+                        self.block_size,
+                        self.chroot,
+                        &path,
+                    ) {
+                        Ok(()) => true,
                         Err(e) => {
-                            error!("Failed to read EXT file {}: {e}", path.display());
+                            error!("Failed to extract EXT file {}: {e}", path.display());
                             false
                         }
                     }
@@ -409,19 +416,23 @@ impl<R: Read + Seek> ExtWalker<'_, R> {
 /// than silently truncating or attempting an unbounded allocation.
 const MAX_EXT_FILE_BYTES: u64 = 1 << 40; // 1 TiB
 
-/// Read file data in filesystem-block-sized windows, preserving sparse holes.
+/// Write file data in filesystem-block-sized windows, preserving sparse holes.
 ///
 /// Reading one logical block at a time keeps each range either fully mapped or
-/// a hole, so unmapped regions can be zero-filled without dropping later data.
+/// a hole, so unmapped regions become sparse holes in the output. Data is
+/// streamed through a chroot-controlled writer to avoid buffering the full
+/// logical file in memory.
 ///
 /// Inline-data inodes are read whole: `read_inode_data_range` does not expose
 /// the `system.data` xattr overflow used for inline content > 60 bytes.
-fn read_ext_file<R: Read + Seek>(
+fn write_ext_file<R: Read + Seek>(
     filesystem: &mut Ext4Fs<R>,
     inode_number: u64,
     inode: &ext4fs::ondisk::Inode,
     block_size: usize,
-) -> ext4fs::error::Result<Vec<u8>> {
+    chroot: &Chroot,
+    path: &Path,
+) -> ext4fs::error::Result<()> {
     let size = inode.size;
     if size > MAX_EXT_FILE_BYTES {
         return Err(ext4fs::error::Ext4Error::CorruptMetadata {
@@ -435,33 +446,51 @@ fn read_ext_file<R: Read + Seek>(
             detail: format!("file size {size} does not fit addressable memory"),
         })?;
 
+    let mut file = chroot.create_file_writer(path).ok_or_else(|| {
+        ext4fs::error::Ext4Error::Io(std::io::Error::other(format!(
+            "failed to create extracted file {}",
+            path.display()
+        )))
+    })?;
+
     if inode.has_inline_data() {
         let mut data = filesystem.read_inode_data(inode_number)?;
+        if data.len() < size_usize {
+            return Err(ext4fs::error::Ext4Error::CorruptMetadata {
+                structure: "inode",
+                detail: format!(
+                    "inline data is incomplete: expected {size_usize} bytes, got {}",
+                    data.len()
+                ),
+            });
+        }
         data.truncate(size_usize);
-        return Ok(data);
+        file.write_all(&data)?;
+        file.set_len(size)?;
+        return Ok(());
     }
 
-    let mut data = Vec::new();
-    data.try_reserve_exact(size_usize)
-        .map_err(|_| ext4fs::error::Ext4Error::CorruptMetadata {
-            structure: "inode",
-            detail: format!("cannot allocate {size} bytes for extracted file"),
-        })?;
     let mut offset = 0u64;
     let window = block_size.clamp(1, EXT_READ_CHUNK as usize);
 
     while offset < size {
         let want = ((size - offset) as usize).min(window);
         let chunk = filesystem.read_inode_data_range(inode_number, offset, want)?;
-        data.extend_from_slice(&chunk);
-        if chunk.len() < want {
-            // Bytes not returned for this window are a sparse hole.
-            data.resize(data.len() + (want - chunk.len()), 0);
+        if chunk.is_empty() {
+            // Sparse hole: advance without writing zeros.
+            file.seek(SeekFrom::Start(offset + want as u64))?;
+        } else {
+            file.write_all(&chunk)?;
+            if chunk.len() < want {
+                // Remaining bytes in this window are a sparse hole.
+                file.seek(SeekFrom::Start(offset + want as u64))?;
+            }
         }
         offset += want as u64;
     }
 
-    Ok(data)
+    file.set_len(size)?;
+    Ok(())
 }
 
 /// Convert a raw on-disk name into a platform path, preserving non-UTF-8 bytes

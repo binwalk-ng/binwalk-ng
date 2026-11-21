@@ -224,6 +224,32 @@ pub fn extract_ntfs(
     result
 }
 
+/// Best-effort current logical size for an unnamed `$DATA` stream.
+///
+/// Prefers the size from the base MFT record's `$DATA` attribute over the
+/// directory-entry `$FILE_NAME` size, which can be stale for hard links.
+fn current_data_size<R: Read + Seek>(filesystem: &NtfsFs<R>, record_number: u64) -> Option<u64> {
+    const DATA_ATTR_TYPE: u32 = 0x80;
+
+    let record = filesystem.read_record(record_number).ok()?;
+    if record.len() < 22 {
+        return None;
+    }
+    let first_attr_offset = u16::from_le_bytes([record[20], record[21]]) as usize;
+    let attrs = ntfs_core::parse_attributes(&record, first_attr_offset).ok()?;
+    for attr in attrs {
+        if attr.type_code != DATA_ATTR_TYPE || attr.name.is_some() {
+            continue;
+        }
+        return Some(match attr.body {
+            ntfs_core::AttributeBody::Resident { content_length, .. } => u64::from(content_length),
+            ntfs_core::AttributeBody::NonResident { real_size, .. } => real_size,
+        });
+    }
+
+    None
+}
+
 /// Recursively extract one NTFS directory, addressed by MFT record number.
 fn extract_ntfs_directory<R: Read + Seek>(
     filesystem: &NtfsFs<R>,
@@ -314,11 +340,13 @@ fn extract_ntfs_directory<R: Read + Seek>(
                 *success = false;
             }
         } else {
-            if file_name.real_size > MAX_NTFS_FILE_BYTES {
+            let data_size =
+                current_data_size(filesystem, child_record).unwrap_or(file_name.real_size);
+            if data_size > MAX_NTFS_FILE_BYTES {
                 error!(
                     "NTFS file {} exceeds extraction limit ({} bytes > {} bytes)",
                     path.display(),
-                    file_name.real_size,
+                    data_size,
                     MAX_NTFS_FILE_BYTES
                 );
                 *success = false;
