@@ -12,10 +12,6 @@ use zerocopy::{FromBytes, Immutable, KnownLayout, LE, Unaligned};
 /// The ext2/3/4 root directory inode number.
 const EXT_ROOT_INODE: u64 = 2;
 
-/// Read file data in bounded windows: a whole-file read would allocate the
-/// inode's claimed size up front.
-const EXT_READ_CHUNK: u64 = 1024 * 1024;
-
 /// Human readable description
 pub const DESCRIPTION: &str = "EXT filesystem";
 
@@ -416,6 +412,182 @@ impl<R: Read + Seek> ExtWalker<'_, R> {
 /// than silently truncating or attempting an unbounded allocation.
 const MAX_EXT_FILE_BYTES: u64 = 1 << 40; // 1 TiB
 
+#[derive(Clone, Copy)]
+struct ExtMapEntry {
+    logical_block: u64,
+    physical_block: u64,
+    length: u64,
+    unwritten: bool,
+}
+
+fn walk_ext_map<R: Read + Seek>(
+    filesystem: &mut Ext4Fs<R>,
+    inode: &ext4fs::ondisk::Inode,
+    block_size: usize,
+) -> ext4fs::error::Result<Vec<ExtMapEntry>> {
+    if inode.uses_extents() {
+        let mut out = Vec::new();
+        walk_extent_node(filesystem, inode.i_block.as_slice(), &mut out, 0)?;
+        Ok(out)
+    } else {
+        walk_indirect_blocks(filesystem, &inode.i_block, block_size)
+    }
+}
+
+fn walk_extent_node<R: Read + Seek>(
+    filesystem: &mut Ext4Fs<R>,
+    buf: &[u8],
+    out: &mut Vec<ExtMapEntry>,
+    depth: usize,
+) -> ext4fs::error::Result<()> {
+    if depth > 5 {
+        return Err(ext4fs::error::Ext4Error::CorruptMetadata {
+            structure: "extent tree",
+            detail: "depth exceeds limit".to_string(),
+        });
+    }
+    let header = ext4fs::ondisk::ExtentHeader::parse(buf)?;
+    let entries = header.entries as usize;
+
+    if header.depth == 0 {
+        for i in 0..entries {
+            let off = 12 + i * 12;
+            if off + 12 > buf.len() {
+                break;
+            }
+            let leaf = ext4fs::ondisk::ExtentLeaf::parse(&buf[off..]);
+            if leaf.length == 0 {
+                continue;
+            }
+            out.push(ExtMapEntry {
+                logical_block: u64::from(leaf.logical_block),
+                physical_block: leaf.physical_block,
+                length: u64::from(leaf.length),
+                unwritten: leaf.unwritten,
+            });
+        }
+    } else {
+        for i in 0..entries {
+            let off = 12 + i * 12;
+            if off + 12 > buf.len() {
+                break;
+            }
+            let idx = ext4fs::ondisk::ExtentIndex::parse(&buf[off..]);
+            let child = filesystem.read_block(idx.child_block)?;
+            walk_extent_node(filesystem, &child, out, depth + 1)?;
+        }
+    }
+    Ok(())
+}
+
+fn walk_indirect_blocks<R: Read + Seek>(
+    filesystem: &mut Ext4Fs<R>,
+    i_block: &[u8; 60],
+    block_size: usize,
+) -> ext4fs::error::Result<Vec<ExtMapEntry>> {
+    let ptrs_per_block = block_size / 4;
+    let read_u32 = |buf: &[u8], off: usize| -> u32 {
+        u32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]])
+    };
+
+    let mut out = Vec::new();
+    let mut logical = 0u64;
+
+    for i in 0..12usize {
+        let ptr = u64::from(read_u32(i_block, i * 4));
+        if ptr != 0 {
+            out.push(ExtMapEntry {
+                logical_block: logical,
+                physical_block: ptr,
+                length: 1,
+                unwritten: false,
+            });
+        }
+        logical += 1;
+    }
+
+    let sind = u64::from(read_u32(i_block, 48));
+    if sind != 0 {
+        let blk = filesystem.read_block(sind)?;
+        for i in 0..ptrs_per_block {
+            let ptr = u64::from(read_u32(&blk, i * 4));
+            if ptr != 0 {
+                out.push(ExtMapEntry {
+                    logical_block: logical,
+                    physical_block: ptr,
+                    length: 1,
+                    unwritten: false,
+                });
+            }
+            logical += 1;
+        }
+    } else {
+        logical += ptrs_per_block as u64;
+    }
+
+    let dind = u64::from(read_u32(i_block, 52));
+    if dind != 0 {
+        let l1 = filesystem.read_block(dind)?;
+        for i in 0..ptrs_per_block {
+            let ptr1 = u64::from(read_u32(&l1, i * 4));
+            if ptr1 != 0 {
+                let l2 = filesystem.read_block(ptr1)?;
+                for j in 0..ptrs_per_block {
+                    let ptr2 = u64::from(read_u32(&l2, j * 4));
+                    if ptr2 != 0 {
+                        out.push(ExtMapEntry {
+                            logical_block: logical,
+                            physical_block: ptr2,
+                            length: 1,
+                            unwritten: false,
+                        });
+                    }
+                    logical += 1;
+                }
+            } else {
+                logical += ptrs_per_block as u64;
+            }
+        }
+    } else {
+        logical += (ptrs_per_block * ptrs_per_block) as u64;
+    }
+
+    let tind = u64::from(read_u32(i_block, 56));
+    if tind != 0 {
+        let l1 = filesystem.read_block(tind)?;
+        for i in 0..ptrs_per_block {
+            let ptr1 = u64::from(read_u32(&l1, i * 4));
+            if ptr1 != 0 {
+                let l2 = filesystem.read_block(ptr1)?;
+                for j in 0..ptrs_per_block {
+                    let ptr2 = u64::from(read_u32(&l2, j * 4));
+                    if ptr2 != 0 {
+                        let l3 = filesystem.read_block(ptr2)?;
+                        for k in 0..ptrs_per_block {
+                            let ptr3 = u64::from(read_u32(&l3, k * 4));
+                            if ptr3 != 0 {
+                                out.push(ExtMapEntry {
+                                    logical_block: logical,
+                                    physical_block: ptr3,
+                                    length: 1,
+                                    unwritten: false,
+                                });
+                            }
+                            logical += 1;
+                        }
+                    } else {
+                        logical += ptrs_per_block as u64;
+                    }
+                }
+            } else {
+                logical += (ptrs_per_block * ptrs_per_block) as u64;
+            }
+        }
+    }
+
+    Ok(out)
+}
+
 /// Write file data in filesystem-block-sized windows, preserving sparse holes.
 ///
 /// Reading one logical block at a time keeps each range either fully mapped or
@@ -470,25 +642,47 @@ fn write_ext_file<R: Read + Seek>(
         return Ok(());
     }
 
-    let mut offset = 0u64;
-    let window = block_size.clamp(1, EXT_READ_CHUNK as usize);
+    let map = walk_ext_map(filesystem, inode, block_size)?;
 
-    while offset < size {
-        let want = ((size - offset) as usize).min(window);
-        let chunk = filesystem.read_inode_data_range(inode_number, offset, want)?;
-        if chunk.is_empty() {
-            // Sparse hole: advance without writing zeros.
-            file.seek(SeekFrom::Start(offset + want as u64))?;
-        } else {
-            file.write_all(&chunk)?;
-            if chunk.len() < want {
-                // Remaining bytes in this window are a sparse hole.
-                file.seek(SeekFrom::Start(offset + want as u64))?;
-            }
+    let mut pos = 0u64;
+    for mapping in &map {
+        let logical_start = mapping.logical_block.saturating_mul(block_size as u64);
+        if logical_start >= size {
+            break;
         }
-        offset += want as u64;
+        if logical_start > pos {
+            // Gap in mappings is a sparse hole.
+            file.seek(SeekFrom::Start(logical_start.min(size)))?;
+            pos = logical_start;
+        }
+
+        for blk_offset in 0..mapping.length {
+            let logical = (mapping.logical_block + blk_offset) * block_size as u64;
+            if logical >= size {
+                break;
+            }
+            let write_len = ((size - logical) as usize).min(block_size);
+            if mapping.unwritten {
+                // Unwritten extents must read back as zeros.
+                file.seek(SeekFrom::Start(logical + write_len as u64))?;
+            } else {
+                let phys = mapping.physical_block + blk_offset;
+                let blk_data = filesystem.read_block(phys)?;
+                let end = write_len.min(blk_data.len());
+                file.seek(SeekFrom::Start(logical))?;
+                file.write_all(&blk_data[..end])?;
+                if end < write_len {
+                    file.seek(SeekFrom::Start(logical + write_len as u64))?;
+                }
+            }
+            pos = logical + write_len as u64;
+        }
     }
 
+    if pos < size {
+        // Trailing hole extends to logical EOF.
+        file.seek(SeekFrom::Start(size))?;
+    }
     file.set_len(size)?;
     Ok(())
 }
